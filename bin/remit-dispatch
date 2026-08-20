@@ -1,0 +1,924 @@
+#!/bin/sh
+# remit-dispatch — the deterministic dispatch wrapper: a worker goes in, a draft
+# pull request comes out.
+#
+# Workers author the working tree and never run git (the Dispatch convention).
+# The mechanics that turn an authored tree into a draft pull request are this
+# script's, not a model's judgment — the same reason `bin/remit` exists. Point an
+# agent at it; nobody performs these steps by hand.
+#
+#   sh bin/remit-dispatch --harness <claude|codex|pi|devin|native> --slug <slug> \
+#        --brief <briefing-file> --dir <worker-worktree> \
+#        --session <committing-session-url> --rule <model-precedence-rule> \
+#        [--model <id>] [--provider <name>] [--title <pr-title>] [--base <branch>] \
+#        [--sandbox <mode>] [--allowed-tools <spec>] [--exclude-tools <spec>] \
+#        [--final-message <file>]
+#
+# `--harness native` is the same mechanics without the invocation: the worker was
+# this harness's own sub-agent, the coordinator invoked it, and the wrapper is
+# pointed at the tree it left, with its returned result at --final-message. Steps
+# 2-4 belong to the harness in that case; steps 1, 5 and 6 are still this
+# script's, because tree delivery is universal and no worker anywhere runs git.
+#
+# The six steps, in order, exactly as the accepted design fixes them:
+#
+#   1. Record the dispatch — target triple, precedence rule, briefing, worker
+#      directory — before anything runs.
+#   2. Invoke the worker CLI with the briefing on the channel that CLI was
+#      probed to accept: stdin for `claude -p` and `codex exec -`, `@file` for
+#      `pi -p`, `--prompt-file` for `devin -p`.
+#   3. Wait for process exit. One deliberate foreground invocation; no queue, no
+#      background transport. The run's output is printed after exit.
+#   4. Capture the worker's final message from its own probed channel:
+#      `claude -p --output-format json`, `codex exec -o <file>`, pi stdout,
+#      `devin --export <atif.json>`.
+#   5. Perform the git mechanics IN THE WORKER'S TREE: stage everything, commit
+#      with trailers, push `work/<slug>`, open the pull request with
+#      `gh pr create --draft`.
+#   6. Print the result: draft PR URL, branch, the worker's final message, and
+#      every mechanical outcome verbatim.
+#
+# Because a script stages and commits, the coordinator never reads the worker's
+# diff: the tree travels from worker to draft PR without passing through anyone's
+# conversation.
+#
+# Trailers: `Co-Authored-By:` names the model that AUTHORED the work — authorship
+# is the worker's and is never obscured — and `Claude-Session:` names the session
+# that PERFORMS the commit, which under tree delivery is always the invoker's.
+# Both are given to this script; neither is invented.
+#
+# Honesty rules this script enforces, each of them a probed failure mode:
+#
+#   * Exit signals completion, not success. A worker CLI can exit 0 with every
+#     task command denied. Nothing here reads success from an exit code: success
+#     is established by the coordinator's check against the brief and by
+#     independent evaluation, reading the draft PR.
+#   * A worker that changed nothing leaves an empty stage. That is reported as
+#     itself (exit 4), with the final message travelling with the report — never
+#     dressed up as a delivery and never inferred from the exit code.
+#   * Pi accepts a wrong model id silently and answers anyway. A pi dispatch is
+#     refused unless the exact id is present in `pi --list-models` output.
+#   * The sandbox Codex was asked for is not always the sandbox it ran under; the
+#     run header is the truth of what applied. It is read back after exit from
+#     the header BLOCK alone — the lines between codex's own banner and the
+#     separator closing it, which exist before any worker text does; stderr also
+#     carries the transcript, and that is the worker talking. The comparison is
+#     on the header's leading mode token, because the rest of that line is the
+#     writable roots and the network state. A confirmed
+#     downgrade is a failed dispatch precondition
+#     (exit 6) — reported, never worked around — and a header this script cannot
+#     read is reported as unconfirmed and carried into the PR body as such. The
+#     same header carries the session id and the model that actually served the
+#     run, so neither is guessed and neither is reported as absent when it is not.
+#   * Devin's exit code distinguishes only "the CLI refused to start" from "a run
+#     happened": a run whose every tool call was denied exits 0, prints no final
+#     message, and says nothing on stderr. So a devin run is judged from its ATIF
+#     export, which is the one channel carrying the final message apart from the
+#     narration glued to it on stdout, and with it the run id, the model that
+#     served the run, the cost, and the permission mode that actually applied.
+#     That mode is read back and compared to the one requested exactly as codex's
+#     sandbox is, and a downgrade is a failed precondition (exit 6). The worker's
+#     containment is written into its tree for the run and removed before
+#     anything is staged: an `Exec(git)` deny, an allow list of what a worker
+#     needs, and a PreToolUse hook, because git reached through an allowed
+#     interpreter walks straight past a deny rule. On a devin dispatch
+#     `--allowed-tools` and `--exclude-tools` add entries to that allow and that
+#     deny, in devin's own matcher syntax. Every one of those is a probed
+#     behaviour, evidenced in `.remit/devin-first-class/probe-results.md`; none of
+#     it is inferred from Cognition's documentation, and none of it assumes any
+#     org's policy — the same configuration is passed on every tier.
+#   * A worker's returned message is untrusted text going into a document people
+#     read. The pull request body puts the wrapper's provenance FIRST and the
+#     worker's words LAST, inside a code fence longer than any fence in them, so
+#     neither a `---` nor a copied heading in a worker's message can render as
+#     this script's own record of what ran.
+#   * A worker's run output — its narration, its tool calls, and for codex the
+#     unified diff of everything it authored — is captured but never printed on
+#     the success path. The tree travels from worker to draft PR without passing
+#     through anyone's conversation, and that seam is held here by mechanism.
+#   * An absent capability (CLI missing, `gh` unauthenticated, brief missing) is
+#     reported before anything is invoked. Nothing is ever substituted.
+#   * When a worker delivered a tree and the mechanics then failed, the report
+#     says exactly how far it got — authored, committed, pushed, PR open — and
+#     the authored tree is left where it is, never silently discarded.
+#
+# Exit codes: 0 delivered — committed, pushed, draft PR open
+#             2 usage or precondition error; the worker was NOT invoked
+#             3 worker delivered a tree, the mechanics failed partway
+#             4 worker ran and changed nothing — empty stage
+#             5 run-level worker failure (the CLI itself exited non-zero)
+#             6 the run's own precondition failed (a confirmed downgrade of the
+#               containment asked for: codex's sandbox, devin's permission mode)
+
+set -u
+
+ME=remit-dispatch
+
+die() { printf '%s: %s\n' "$ME" "$1" >&2; exit 2; }
+say() { printf '%s\n' "$1"; }
+rule_off() { printf -- '---------------------------------------------------------------------\n'; }
+
+usage() {
+	cat >&2 <<'EOF'
+usage:
+  remit-dispatch --harness <claude|codex|pi|devin|native> --slug <slug> --dir <worker-worktree>
+                 --brief <briefing-file> --session <committing-session-url>
+                 --rule <model-precedence-rule> [--model <id>] [--provider <name>]
+                 [--title <pr-title>] [--base <branch>] [--sandbox <mode>]
+                 [--allowed-tools <spec>] [--exclude-tools <spec>] [--final-message <file>]
+
+A worker authors a tree and never runs git; this turns that tree into a draft
+pull request: record, invoke, wait for exit, capture the final message, stage,
+commit with trailers, push work/<slug>, open the PR with `gh pr create --draft`.
+
+--harness native skips the invocation only: the sub-agent was this harness's own,
+so --final-message carries what it returned and --brief is optional.
+
+Exit codes: 0 delivered — committed, pushed, draft PR open
+            2 usage or precondition error; the worker was NOT invoked
+            3 worker delivered a tree, the mechanics failed partway
+            4 worker ran and changed nothing — empty stage
+            5 run-level worker failure (the CLI itself exited non-zero)
+            6 the run's own precondition failed (a confirmed downgrade of the
+              containment asked for: codex's sandbox, devin's permission mode)
+EOF
+	exit 2
+}
+
+HARNESS='' SLUG='' BRIEF='' DIR='' SESSION='' RULE='' MODEL='' PROVIDER=''
+TITLE='' BASE=main SANDBOX=workspace-write ALLOWED='' EXCLUDED='' RETURNED=''
+SANDBOX_GIVEN=no
+
+[ $# -gt 0 ] || usage
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--harness) [ $# -ge 2 ] || die "--harness needs a value"; HARNESS=$2; shift 2 ;;
+	--slug) [ $# -ge 2 ] || die "--slug needs a value"; SLUG=$2; shift 2 ;;
+	--brief) [ $# -ge 2 ] || die "--brief needs a value"; BRIEF=$2; shift 2 ;;
+	--dir) [ $# -ge 2 ] || die "--dir needs a value"; DIR=$2; shift 2 ;;
+	--session) [ $# -ge 2 ] || die "--session needs a value"; SESSION=$2; shift 2 ;;
+	--rule) [ $# -ge 2 ] || die "--rule needs a value"; RULE=$2; shift 2 ;;
+	--model) [ $# -ge 2 ] || die "--model needs a value"; MODEL=$2; shift 2 ;;
+	--provider) [ $# -ge 2 ] || die "--provider needs a value"; PROVIDER=$2; shift 2 ;;
+	--title) [ $# -ge 2 ] || die "--title needs a value"; TITLE=$2; shift 2 ;;
+	--base) [ $# -ge 2 ] || die "--base needs a value"; BASE=$2; shift 2 ;;
+	--sandbox) [ $# -ge 2 ] || die "--sandbox needs a value"; SANDBOX=$2; SANDBOX_GIVEN=yes; shift 2 ;;
+	--allowed-tools) [ $# -ge 2 ] || die "--allowed-tools needs a value"; ALLOWED=$2; shift 2 ;;
+	--exclude-tools) [ $# -ge 2 ] || die "--exclude-tools needs a value"; EXCLUDED=$2; shift 2 ;;
+	--final-message) [ $# -ge 2 ] || die "--final-message needs a value"; RETURNED=$2; shift 2 ;;
+	-h | --help) usage ;;
+	*) die "unknown option: $1" ;;
+	esac
+done
+
+case "$HARNESS" in
+claude | codex | pi | devin | native) ;;
+'') die "--harness is required (claude, codex, pi, devin, or native)" ;;
+*) die "unknown harness '$HARNESS' — this script drives claude, codex, pi and devin, plus native for a sub-agent of this harness; an unsupported target is reported, never substituted" ;;
+esac
+case "$SLUG" in
+*[!a-z0-9-]* | -* | '') die "invalid slug '$SLUG' — use lower-case letters, digits and hyphens" ;;
+esac
+[ -n "$DIR" ] || die "--dir is required — the worker's own worktree or clone"
+[ -n "$SESSION" ] || die "--session is required — the Claude-Session trailer names the session performing the commit"
+[ -n "$RULE" ] || die "--rule is required — which model-precedence rule chose this worker"
+
+if [ "$HARNESS" = native ]; then
+	# The invocation was the harness's; what this script needs is the tree and
+	# what the worker returned.
+	[ -n "$RETURNED" ] || die "--final-message is required with --harness native — the worker's returned result is the pull request's body and is never invented"
+	[ -f "$RETURNED" ] || die "no final-message file at $RETURNED"
+	[ -n "$MODEL" ] || die "--model is required with --harness native — the Co-Authored-By trailer names the model that authored the tree"
+else
+	[ -z "$RETURNED" ] || die "--final-message applies only to --harness native; for a CLI worker the final message is captured from the run"
+	[ -n "$BRIEF" ] || die "--brief is required — the briefing file is the worker's whole task"
+fi
+if [ -n "$BRIEF" ]; then
+	[ -f "$BRIEF" ] || die "no briefing file at $BRIEF"
+	[ -s "$BRIEF" ] || die "the briefing file $BRIEF is empty"
+	BRIEF=$(CDPATH= cd -- "$(dirname -- "$BRIEF")" && pwd -P)/$(basename -- "$BRIEF")
+fi
+
+[ -d "$DIR" ] || die "no such worker directory: $DIR"
+DIR=$(CDPATH= cd -- "$DIR" && pwd -P)
+git -C "$DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
+	die "$DIR is not inside a Git work tree — a worker delivers a tree, so it needs one"
+ROOT=$(git -C "$DIR" rev-parse --show-toplevel)
+
+BRANCH="work/$SLUG"
+
+# --- preconditions: capability absent is reported, never substituted ----------
+case "$HARNESS" in
+claude) CLI=claude ;;
+codex) CLI=codex ;;
+pi) CLI=pi ;;
+devin) CLI=devin ;;
+native) CLI='' ;;
+esac
+# devin is resolved separately below: it is not always on PATH, so "not on PATH"
+# is not the same question as "not installed".
+if [ -n "$CLI" ] && [ "$HARNESS" != devin ]; then
+	command -v "$CLI" >/dev/null 2>&1 ||
+		die "the '$CLI' CLI is not on PATH — that target is unavailable here; report it, do not substitute another"
+fi
+command -v gh >/dev/null 2>&1 ||
+	die "the 'gh' CLI is not on PATH — this dispatch cannot open the draft pull request it promises"
+if ! gh_auth=$(gh auth status 2>&1); then
+	printf '%s: gh is not authenticated — the draft pull request cannot be opened:\n%s\n' "$ME" "$gh_auth" >&2
+	exit 2
+fi
+
+if [ "$HARNESS" = pi ]; then
+	[ -n "$MODEL" ] || die "--model is required for pi — pi accepts an unknown model id silently, so the id is verified, never trusted to fail"
+	if ! catalog=$(pi --list-models 2>&1) || [ -z "$catalog" ]; then
+		printf '%s: could not read pi'\''s model catalog, so the model id cannot be verified. Not dispatching:\n%s\n' "$ME" "$catalog" >&2
+		exit 2
+	fi
+	if ! printf '%s\n' "$catalog" | grep -Fq -- "$MODEL"; then
+		printf '%s: '\''%s'\'' is not in `pi --list-models`. Pi would accept it silently and answer with something else; that substitution is exactly what this check exists to prevent. Not dispatching.\n' "$ME" "$MODEL" >&2
+		exit 2
+	fi
+fi
+
+DEVIN='' DEVIN_TIER='' DEVIN_ORG='' DEVIN_TIER_NOTE='' DEVIN_JSON=''
+DEVIN_MODE=accept-edits DEVIN_TIMEOUT=${REMIT_DEVIN_TIMEOUT:-3600}
+DEVIN_VERSION='' DEVIN_ACU='' PERM_APPLIED='' ATIF=''
+
+if [ "$HARNESS" = devin ]; then
+	# Everything this block enforces was demonstrated against the shipped CLI and
+	# is evidenced in .remit/devin-first-class/probe-results.md; nothing here is
+	# taken from Cognition's documentation, which the shake-out found to be ahead
+	# of the build that ships.
+	#
+	# `devin` is not always on PATH. Its Windows package installer adds the
+	# binary's directory to the persisted user PATH, which any shell whose process
+	# tree predates the install never sees — and this script inherits whatever
+	# PATH its caller had. So the package path is tried second, and only both
+	# missing is an absent capability.
+	if command -v devin >/dev/null 2>&1; then
+		DEVIN=devin
+	else
+		localapp=$(printf '%s' "${LOCALAPPDATA:-}" | tr '\\' '/')
+		packaged="$localapp/Microsoft/WinGet/Packages/CognitionAI.DevinCLI_Microsoft.Winget.Source_8wekyb3d8bbwe/bin/devin.exe"
+		[ -n "$localapp" ] && [ -x "$packaged" ] && DEVIN=$packaged
+	fi
+	[ -n "$DEVIN" ] ||
+		die "the 'devin' CLI is neither on PATH nor at its package path — that target is unavailable here; report it, do not substitute another"
+
+	# On PATH but unauthenticated is absent, the same shape as `gh auth status`.
+	if ! devin_auth=$("$DEVIN" auth status 2>&1); then
+		printf '%s: devin is not authenticated, so that target is unavailable here:\n%s\n' "$ME" "$devin_auth" >&2
+		exit 2
+	fi
+	devin_field() { printf '%s\n' "$devin_auth" | sed -n "s/^[[:space:]]*$1:[[:space:]]*//p" | sed -n 1p | sed 's/[[:space:]]*$//'; }
+	DEVIN_TIER=$(devin_field Tier)
+	DEVIN_ORG=$(devin_field 'Primary org')
+	devin_ent=$(devin_field Enterprise)
+	# The tier and the org are what this run is governed and billed by, so both
+	# are recorded and carried into the pull request. One shape is worth saying
+	# out loud rather than accepting quietly: a seat bought for an organisation
+	# that logged in without pinning its host first lands on the public free tier
+	# with no error at all. That is reported here — it is a login to fix, not
+	# something this script corrects, and a genuine free-tier account is a first
+	# class target that gets the identical containment.
+	case "$DEVIN_TIER" in
+	*Free*)
+		if [ "$devin_ent" = yes ] || [ -n "$DEVIN_ORG" ]; then
+			DEVIN_TIER_NOTE="the account reports '$DEVIN_TIER' while also reporting an organisation. An enterprise seat that logged in before its host was pinned lands on the public free tier silently, and that is what this looks like. The tier above is what this dispatch is billed and governed by; it is reported, not corrected."
+		fi
+		;;
+	esac
+
+	# No flag guarantees a -p run is non-interactive: a probe run was dropped into
+	# an interactive picker and hung until it was killed. The wait is therefore
+	# bounded by mechanism, and an unbounded run is not substituted for a bounded
+	# one.
+	case "$DEVIN_TIMEOUT" in
+	'' | *[!0-9]* | 0) die "REMIT_DEVIN_TIMEOUT must be a positive whole number of seconds, not '$DEVIN_TIMEOUT'" ;;
+	esac
+	command -v timeout >/dev/null 2>&1 ||
+		die "no 'timeout' on PATH — a devin run is bounded by mechanism because no flag guarantees non-interactivity, and an unguarded run is not substituted for a guarded one"
+
+	# The ATIF export is the only channel carrying a devin run's final message,
+	# and the only one carrying the permission mode that actually applied. A
+	# dispatch whose result could not be read back is not started at all, rather
+	# than started and reported on guesswork.
+	if command -v jq >/dev/null 2>&1; then
+		DEVIN_JSON=jq
+	elif command -v node >/dev/null 2>&1; then
+		DEVIN_JSON=node
+	else
+		die "neither jq nor node is on PATH — a devin run is judged from its ATIF export, which nothing here could read; not dispatching"
+	fi
+
+	[ "$SANDBOX_GIVEN" = no ] ||
+		die "--sandbox does not apply to a devin dispatch — devin's OS-level sandbox is unsupported on Windows and this script never passes it. A devin worker's containment is its worktree, the permission rules and the hook written for the run, and the pull request says exactly that"
+
+	# The containment goes in the worker tree's .devin/ for the run and is removed
+	# before anything is staged. A .devin/ that is already there is the
+	# repository's own: it is not overwritten, not committed, and not silently
+	# layered under rules this script is relying on.
+	[ ! -e "$DIR/.devin" ] ||
+		die "$DIR/.devin already exists — this script writes the worker's containment there for the run and removes it again, and it will not overwrite a .devin the repository already has"
+fi
+
+if [ -z "$TITLE" ]; then
+	item_brief="$ROOT/.remit/$SLUG/brief.md"
+	[ -f "$item_brief" ] && TITLE=$(sed -n '/^# /{s/^# *//p;q;}' "$item_brief")
+	[ -n "$TITLE" ] || die "no --title given and no '# Title' heading at .remit/$SLUG/brief.md — the PR title is the experience delivered and is not invented here"
+fi
+
+RUNDIR=${TMPDIR:-/tmp}/$ME-$SLUG-$$
+mkdir -p "$RUNDIR" || die "cannot create the run directory $RUNDIR"
+OUTFILE="$RUNDIR/stdout"
+ERRFILE="$RUNDIR/stderr"
+FINALFILE="$RUNDIR/final-message"
+ATIF="$RUNDIR/atif.json"
+
+# --- 1. record the dispatch ---------------------------------------------------
+rule_off
+say "$ME — dispatch record"
+say "  harness      : $HARNESS${CLI:+ ($CLI)}"
+say "  provider     : ${PROVIDER:-<the CLI's own default>}"
+say "  model        : ${MODEL:-<the CLI's own default>}"
+say "  precedence   : rule $RULE"
+say "  briefing     : ${BRIEF:-<given in-harness at the dispatch>}"
+say "  worker dir   : $DIR"
+say "  branch       : $BRANCH -> $BASE"
+say "  run log      : $RUNDIR"
+say "  committing as: $SESSION"
+if [ "$HARNESS" = devin ]; then
+	say "  devin binary : $DEVIN"
+	say "  account      : tier ${DEVIN_TIER:-<not reported>}, primary org ${DEVIN_ORG:-<none reported>}"
+	say "  permissions  : requesting $DEVIN_MODE, with the git deny and the hook written to $DIR/.devin for the run"
+	say "  bounded wait : ${DEVIN_TIMEOUT}s (REMIT_DEVIN_TIMEOUT)"
+fi
+rule_off
+[ -n "$DEVIN_TIER_NOTE" ] && say "note: $DEVIN_TIER_NOTE"
+
+# --- 2/3. invoke, and wait for process exit -----------------------------------
+run_worker() { # $1 stdin file or 'none'; rest: the command
+	sf=$1
+	shift
+	if [ "$sf" = none ]; then
+		(cd "$DIR" && "$@") >"$OUTFILE" 2>"$ERRFILE"
+	else
+		(cd "$DIR" && "$@" <"$sf") >"$OUTFILE" 2>"$ERRFILE"
+	fi
+	WORKER_EXIT=$?
+}
+
+# The devin worker's containment, written into its tree for the run only.
+#
+# Two files, because one of them is not enough. The deny rule is the direct
+# expression of remit's law and it does block a bare `git` and a `&&` chain — but
+# it does not look inside an interpreter's quoted arguments, so `sh -c "git
+# status"` walked straight past a live deny rule when it was tried. A PreToolUse
+# hook sees the whole command string and closes that, and since a worker
+# realistically needs a shell, the hook is not a second line of defence here: it
+# is the line that holds. The allow list is what a worker needs and no more,
+# because an unlisted command is not prompted in a -p run, it is rejected.
+#
+# `accept-edits` is requested explicitly on every dispatch and every tier. It is
+# never inferred from an organisation's policy, and this configuration behaves
+# the same whether or not one exists: the free-tier adopter and the enterprise
+# seat get the identical contained worker, by remit's own configuration.
+#
+# Written here, removed before staging, committed nowhere. The copies kept in the
+# run directory are the record of what actually applied.
+DEVIN_DENY='Exec(git) Exec(gh) Write(.git/**) Write(.devin/**)'
+DEVIN_ALLOW='read grep glob Exec(sh)'
+devin_json_array() { # $1 space- or comma-separated entries -> "a", "b"
+	printf '%s\n' "$1" | tr ' ,' '\n\n' |
+		awk 'NF { printf "%s%s", sep, "\"" $0 "\""; sep = ", " }'
+}
+devin_write_containment() { # $1 the worker's tree
+	devin_dir=$1/.devin
+	mkdir -p "$devin_dir" || return 1
+	cat >"$devin_dir/config.json" <<EOF || return 1
+{
+  "permissions": {
+    "deny": [$(devin_json_array "$DEVIN_DENY${EXCLUDED:+ $EXCLUDED}")],
+    "allow": [$(devin_json_array "$DEVIN_ALLOW${ALLOWED:+ $ALLOWED}")]
+  }
+}
+EOF
+	# Event names sit at the top level of this file. The schema Cognition's own
+	# documentation shows (nested under "hooks") is rejected by the shipped build,
+	# and rejected SILENTLY — the hook simply never fires. Trust the probe.
+	cat >"$devin_dir/hooks.v1.json" <<'EOF' || return 1
+{
+  "PreToolUse": [
+    {
+      "matcher": "exec",
+      "hooks": [ { "type": "command", "command": "sh .devin/remit-no-git.sh" } ]
+    }
+  ]
+}
+EOF
+	cat >"$devin_dir/remit-no-git.sh" <<'EOF' || return 1
+#!/bin/sh
+# Written by remit-dispatch for one dispatch, and removed after it. Workers never
+# run git: the wrapper performs every git mechanic once the worker has stopped.
+#
+# This reads the whole PreToolUse payload rather than a parsed field of it, so no
+# quoting, chaining or interpreter-wrapping can hide the command from the test.
+#
+# The test is on a WORD BOUNDARY, never a substring: `.gitignore`, `digit`,
+# `legitimate` and `github` are ordinary words, and a worker that cannot say them
+# is a worker this hook has broken rather than contained.
+payload=$(cat)
+if [ -z "$payload" ]; then
+	printf 'blocked by remit law: this hook could not read the tool call to check it, and it does not pass what it cannot read.\n' >&2
+	exit 2
+fi
+if printf '%s\n' "$payload" | grep -Eiq '(^|[^A-Za-z0-9_-])(git|gh)([^A-Za-z0-9_-]|$)'; then
+	printf 'blocked by remit law: a worker never runs git or gh. Author the working tree and stop there — remit-dispatch branches, commits, pushes and opens the pull request after you exit, and a tree you leave uncommitted is exactly what it expects.\n' >&2
+	exit 2
+fi
+exit 0
+EOF
+	return 0
+}
+
+SANDBOX_APPLIED=''
+RUN_ID=''
+MODEL_AUTHORED=$MODEL
+# Where a run reports the model that actually served it, that report is the truth
+# of authorship and outranks the alias a dispatch asked for. `model_channel`
+# names where that report was looked for, so a run that carries none is reported
+# as unconfirmed rather than papered over with what was asked.
+run_model=''
+model_channel=''
+
+# Reading one field out of a JSON envelope, with whichever reader exists.
+NODE_JSON='const fs=require("fs");let o;try{o=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}catch(e){process.exit(1)}const k=process.argv[2];const v=k==="model"?Object.keys(o.modelUsage||{})[0]:o[k];process.stdout.write(v==null?"":String(v)+"\n")'
+json_get() { # $1 envelope file  $2 field: result | session_id | is_error | model
+	case "$JSONTOOL" in
+	jq)
+		case "$2" in
+		model) jq -r '(.modelUsage // {}) | keys | .[0] // empty' "$1" ;;
+		*) jq -r ".$2 // empty" "$1" ;;
+		esac
+		;;
+	node) node -e "$NODE_JSON" "$1" "$2" ;;
+	esac
+}
+JSONTOOL=none
+
+# Reading a devin run out of its ATIF export, with whichever reader the
+# precondition found. The fields, and why each is the one to read, are in
+# .remit/devin-first-class/probe-results.md; the one worth restating is `final`,
+# because it is the whole reason this file is read at all: the final message is
+# the LAST step whose source is "agent", and taking it from stdout instead would
+# take the narration glued to the front of it with no delimiter to cut on.
+NODE_ATIF='const fs=require("fs");let o;try{o=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}catch(e){process.exit(1)}const k=process.argv[2];const st=Array.isArray(o.steps)?o.steps:[];const ag=st.filter(function(s){return s&&s.source==="agent"});const last=ag.length?ag[ag.length-1]:null;let v="";if(k==="final"){if(last&&last.message!=null)process.stdout.write(String(last.message));process.exit(0)}else if(k==="session_id")v=o.session_id;else if(k==="model_name")v=o.agent&&o.agent.model_name;else if(k==="agent_version")v=o.agent&&o.agent.version;else if(k==="permission_mode")v=o.agent&&o.agent.extra&&o.agent.extra.permission_mode;else if(k==="cut")v=(last&&(last.tool_calls||[]).length)?"yes":"";else if(k==="acu"){let s=0,n=0;st.forEach(function(x){const c=x&&x.extra&&x.extra.committed_acu_cost;if(typeof c==="number"){s+=c;n++}});v=n?s.toFixed(5):""}else if(k==="refusals"){const out=[];const texts=function(ob){if(ob==null)return[];if(typeof ob==="string")return[ob];if(Array.isArray(ob))return ob.reduce(function(a,x){return a.concat(texts(x))},[]);if(typeof ob==="object")return texts(ob.results!=null?ob.results:(ob.content!=null?ob.content:JSON.stringify(ob)));return[String(ob)]};st.forEach(function(x){texts(x&&x.observation).forEach(function(t){if(/permission denied|was rejected|tool blocked|rejected by the user|canceled because another tool call/i.test(t))out.push(t.split("\n")[0])})});v=out.join(" | ")}process.stdout.write(v==null||v===false?"":String(v)+"\n")'
+atif_get() { # $1 export file  $2 field
+	case "$DEVIN_JSON" in
+	jq)
+		case "$2" in
+		final) jq -r '[.steps[]? | select(.source == "agent")] | last | .message // empty' "$1" ;;
+		session_id) jq -r '.session_id // ""' "$1" ;;
+		model_name) jq -r '.agent.model_name // ""' "$1" ;;
+		agent_version) jq -r '.agent.version // ""' "$1" ;;
+		permission_mode) jq -r '.agent.extra.permission_mode // ""' "$1" ;;
+		cut) jq -r '[.steps[]? | select(.source == "agent")] | last | if . == null then "" elif ((.tool_calls // []) | length) > 0 then "yes" else "" end' "$1" ;;
+		acu) jq -r '[.steps[]?.extra.committed_acu_cost // empty] | if length == 0 then "" else ((add * 100000 | round) / 100000 | tostring) end' "$1" ;;
+		refusals) jq -r '[.steps[]? | .observation | select(. != null) | [.. | strings] | .[] | select(test("permission denied|was rejected|tool blocked|rejected by the user|canceled because another tool call"; "i")) | split("\n")[0]] | join(" | ")' "$1" ;;
+		esac
+		;;
+	node) node -e "$NODE_ATIF" "$1" "$2" ;;
+	esac
+}
+
+case "$HARNESS" in
+claude)
+	set -- claude -p --output-format json
+	[ -n "$MODEL" ] && set -- "$@" --model "$MODEL"
+	# Command-granular tool scoping is how a claude worker's grant omits git.
+	[ -n "$ALLOWED" ] && set -- "$@" --allowedTools "$ALLOWED"
+	say "invoking: $* < $(basename "$BRIEF")"
+	run_worker "$BRIEF" "$@"
+	;;
+codex)
+	# `-` takes the briefing on stdin; -o writes the final message; the sandbox
+	# denies .git by upstream design, which is the ruled behaviour enforced.
+	set -- codex exec -s "$SANDBOX" -C "$DIR" --skip-git-repo-check -o "$FINALFILE"
+	[ -n "$MODEL" ] && set -- "$@" -m "$MODEL"
+	set -- "$@" -
+	say "invoking: $* < $(basename "$BRIEF")"
+	run_worker "$BRIEF" "$@"
+	;;
+pi)
+	set -- pi
+	[ -n "$PROVIDER" ] && set -- "$@" --provider "$PROVIDER"
+	set -- "$@" --model "$MODEL" --no-session
+	# Whole-tool scoping only: excluding git means excluding bash wholesale, so a
+	# pi worker restrained by mechanism has no shell at all. The dispatch chose;
+	# this records which.
+	[ -n "$EXCLUDED" ] && set -- "$@" --exclude-tools "$EXCLUDED"
+	set -- "$@" -p "@$BRIEF"
+	say "invoking: $*"
+	run_worker none "$@"
+	;;
+devin)
+	# `--prompt-file` is the only briefing channel — a briefing on stdin is
+	# refused outright — and the trust flag is needed on EVERY run, not merely the
+	# first, because a -p run never persists trust. `--config` is never passed: it
+	# replaces the user config rather than layering with it, and a replacement
+	# missing the user's own state drops a -p run into interactive onboarding and
+	# hangs it. `--sandbox` is never passed either; it is refused above rather
+	# than forwarded. The bounded wait is part of the command because no flag
+	# guarantees non-interactivity.
+	devin_write_containment "$DIR" || {
+		rm -rf "$DIR/.devin"
+		die "could not write the worker's containment under $DIR/.devin — not dispatching a worker this script cannot contain"
+	}
+	cp "$DIR/.devin/config.json" "$RUNDIR/devin-config.json"
+	cp "$DIR/.devin/hooks.v1.json" "$RUNDIR/devin-hooks.v1.json"
+	cp "$DIR/.devin/remit-no-git.sh" "$RUNDIR/devin-remit-no-git.sh"
+	set -- timeout "$DEVIN_TIMEOUT" "$DEVIN" -p \
+		--prompt-file "$BRIEF" \
+		--respect-workspace-trust false \
+		--permission-mode "$DEVIN_MODE" \
+		--export "$ATIF"
+	# No catalogue check, unlike pi: devin rejects an unknown model id before it
+	# starts and before anything is billed, so a wrong id fails loudly by itself
+	# rather than being answered by something else.
+	[ -n "$MODEL" ] && set -- "$@" --model "$MODEL"
+	say "invoking: $*"
+	run_worker none "$@"
+	# The containment was apparatus for the run; it is not part of the tree the
+	# worker delivers and it is gone before anything is staged. The PR body says
+	# it was removed, so its removal is asserted, not assumed.
+	rm -rf "$DIR/.devin"
+	[ ! -e "$DIR/.devin" ] || die "could not remove the containment at $DIR/.devin — refusing to stage a tree that still carries dispatch apparatus"
+	;;
+native)
+	# Steps 2-4 were the harness's: it invoked the sub-agent, waited for it, and
+	# returned its result. Nothing is invoked here.
+	WORKER_EXIT=0
+	: >"$OUTFILE"
+	: >"$ERRFILE"
+	say "no CLI invoked: the worker was this harness's own sub-agent, and its returned result was given at --final-message."
+	;;
+esac
+
+if [ "$HARNESS" = native ]; then
+	rule_off
+else
+	say "worker process exited with code $WORKER_EXIT — that is completion, not success."
+	rule_off
+fi
+
+# --- 4. capture the worker's final message ------------------------------------
+final_note=''
+case "$HARNESS" in
+claude)
+	# The envelope is the cleanest return contract of the CLIs this script drives,
+	# but only if
+	# something here can read JSON. jq first; node otherwise, which is present
+	# wherever `claude` is, since `claude` is a node program. If neither can read
+	# it, the envelope travels verbatim and says so — nothing is guessed out of
+	# it with a regex.
+	if command -v jq >/dev/null 2>&1 && jq -e . "$OUTFILE" >/dev/null 2>&1; then
+		JSONTOOL=jq
+	elif command -v node >/dev/null 2>&1 && node -e "$NODE_JSON" "$OUTFILE" result >/dev/null 2>&1; then
+		JSONTOOL=node
+	else
+		JSONTOOL=none
+	fi
+	if [ "$JSONTOOL" = none ]; then
+		cp "$OUTFILE" "$FINALFILE"
+		final_note="neither jq nor node could read the claude envelope as JSON — it is carried verbatim and nothing was extracted from it"
+	else
+		json_get "$OUTFILE" result >"$FINALFILE"
+		RUN_ID=$(json_get "$OUTFILE" session_id)
+		# The envelope names the model that actually served the run; a dispatch
+		# names an alias. Authorship is never obscured, so the trailer follows
+		# the envelope where they differ.
+		actual=$(json_get "$OUTFILE" model)
+		[ -n "$actual" ] && MODEL_AUTHORED=$actual
+		[ "$(json_get "$OUTFILE" is_error)" = true ] &&
+			final_note="the claude envelope reports is_error: true"
+	fi
+	;;
+codex)
+	[ -f "$FINALFILE" ] || : >"$FINALFILE"
+	# codex 0.147.0 prints its run header AND its transcript on STDERR; stdout
+	# carries only the worker's own final message (measured: 4,892 bytes of
+	# header and transcript on stderr against 67 bytes of final message on
+	# stdout). Neither stream is trusted wholesale — the transcript on stderr is
+	# the worker talking as much as stdout is — so the header is read from the
+	# HEADER BLOCK alone: the lines between codex's own banner and the separator
+	# that closes the block, before a single word of worker text exists. A
+	# transcript line shaped like `sandbox: …` therefore cannot become the run
+	# header however far down it appears, and a build that stops printing the
+	# banner leaves no header at all. That is the honest outcome: a header that
+	# cannot be found is unconfirmed, and unconfirmed is a state this script
+	# reports; a forged one is not.
+	HEADER="$RUNDIR/header-block"
+	awk '
+		/^OpenAI Codex v/ { banner = 1; next }
+		!banner { next }
+		/^-+[[:space:]]*$/ { seps++; if (seps >= 2) exit; next }
+		seps >= 1 { print }
+	' "$ERRFILE" >"$HEADER"
+	RUN_ID=$(sed -n 's/^ *session id: *//p' "$HEADER" | sed -n 1p)
+	SANDBOX_APPLIED=$(sed -n 's/^ *sandbox: *//p' "$HEADER" | sed -n 1p)
+	# The header block is the truth of what ran, including which model served it
+	# — so the trailer names that, not the alias the dispatch asked for, and not
+	# nothing at all when the dispatch named no model.
+	model_channel='run header'
+	run_model=$(sed -n 's/^ *model: *//p' "$HEADER" | sed -n 1p)
+	[ -n "$run_model" ] && MODEL_AUTHORED=${run_model%% *}
+	;;
+devin)
+	# stdout is the agent's own prose with the pre-tool narration glued to the
+	# final message and no delimiter between them, so it is never parsed for one.
+	# The export keeps them apart, and carries with them the run id, the model
+	# that served the run, its cost, and the permission mode that actually
+	# applied. It is this run's single provenance channel.
+	: >"$FINALFILE"
+	model_channel='run export'
+	if [ ! -s "$ATIF" ]; then
+		final_note="devin wrote no ATIF export, so nothing about this run can be read back — the final message, the run id, the model that served it and the permission mode that applied are all absent here, and none of them is invented"
+	else
+		atif_get "$ATIF" final >"$FINALFILE"
+		RUN_ID=$(atif_get "$ATIF" session_id)
+		DEVIN_VERSION=$(atif_get "$ATIF" agent_version)
+		DEVIN_ACU=$(atif_get "$ATIF" acu)
+		PERM_APPLIED=$(atif_get "$ATIF" permission_mode)
+		run_model=$(atif_get "$ATIF" model_name)
+		[ -n "$run_model" ] && MODEL_AUTHORED=$run_model
+		# Exit 0 says a run happened, not that its tool calls ran. A denied or
+		# rejected call is invisible on stdout, silent on stderr, and exits 0
+		# with the agent simply stopping where it was — so the export is read for
+		# it, and a run that was cut short says so rather than presenting its
+		# narration as a finished answer.
+		refusals=$(atif_get "$ATIF" refusals)
+		if [ ! -s "$FINALFILE" ]; then
+			final_note="${final_note:+$final_note; }the run export carries no agent message at all — this run produced no worker turn"
+		elif [ -n "$(atif_get "$ATIF" cut)" ]; then
+			final_note="${final_note:+$final_note; }the run's last agent step was still calling tools, so the message above is narration and not a completed answer — the run stopped where it was"
+		fi
+		[ -n "$refusals" ] &&
+			final_note="${final_note:+$final_note; }tool calls were refused during this run and devin still exited 0: $refusals"
+	fi
+	;;
+pi)
+	cp "$OUTFILE" "$FINALFILE"
+	;;
+native)
+	cp "$RETURNED" "$FINALFILE"
+	;;
+esac
+
+# `codex exec -o` writes no trailing newline; without one the final message runs
+# into whatever is printed after it, here and in the pull request body.
+if [ -s "$FINALFILE" ] && [ -n "$(tail -c 1 "$FINALFILE")" ]; then
+	printf '\n' >>"$FINALFILE"
+fi
+
+say "worker's final message:"
+rule_off
+cat "$FINALFILE"
+rule_off
+[ -n "$final_note" ] && say "note: $final_note"
+
+# The worker's own run output — its narration, its tool calls, and for codex the
+# unified diff of everything it authored — is captured but NOT printed on the
+# success path. The seam dispatch law protects is that a worker's exploration and
+# diff never reach the coordinator's context, and that seam is held here by
+# mechanism. It is printed only when a run failed and the failure is the report.
+say "the worker's run output stays in $RUNDIR and is not printed here — a worker's exploration and diff do not reach the coordinator."
+
+print_worker_stderr() {
+	if [ -s "$ERRFILE" ]; then
+		say "worker stderr, verbatim:"
+		rule_off
+		cat "$ERRFILE"
+		rule_off
+	else
+		say "the worker wrote nothing to stderr."
+	fi
+}
+
+tree_state() {
+	if [ -n "$(git -C "$DIR" status --porcelain)" ]; then
+		say "the authored tree is UNCOMMITTED and left exactly as it is at $DIR — nothing was discarded."
+	else
+		say "the worker's tree at $DIR has no uncommitted changes."
+	fi
+}
+
+if [ "$HARNESS" = devin ] && [ "$WORKER_EXIT" -eq 124 ]; then
+	say "the run did not stop on its own and was killed at the ${DEVIN_TIMEOUT}s bound. A -p run can still be dropped into a prompt no flag suppresses, and a hang is reported as a hang — never as completion, and never as a delivery."
+fi
+
+if [ "$WORKER_EXIT" -ne 0 ]; then
+	say "RUN-LEVEL FAILURE: $CLI exited $WORKER_EXIT. Reported as it happened; nothing substituted, no mechanics performed."
+	print_worker_stderr
+	tree_state
+	exit 5
+fi
+
+if [ "$HARNESS" = codex ]; then
+	if [ -z "$SANDBOX_APPLIED" ]; then
+		SANDBOX_APPLIED="unconfirmed (no sandbox line found in the run header)"
+		say "note: the run header could not be read back, so the sandbox that actually applied is UNCONFIRMED. Carried into the PR body as such."
+	else
+		# The header decorates the mode with its writable roots and network
+		# state — `workspace-write [workdir, /tmp, …] (network access enabled)`.
+		# Only the leading token is the sandbox that applied; comparing the whole
+		# decorated line would fail every correctly granted dispatch, which is a
+		# precondition check that cries wolf rather than one that holds.
+		APPLIED_MODE=${SANDBOX_APPLIED%% *}
+		if [ "$APPLIED_MODE" != "$SANDBOX" ]; then
+			say "FAILED DISPATCH PRECONDITION: $SANDBOX was requested; the run header reports mode '$APPLIED_MODE' (header line: $SANDBOX_APPLIED). The header is the truth of what applied, and a downgrade is reported, not worked around."
+			print_worker_stderr
+			tree_state
+			exit 6
+		fi
+		say "sandbox: the run header confirms '$APPLIED_MODE', which is what was requested."
+	fi
+fi
+
+if [ "$HARNESS" = devin ]; then
+	# The same read-back as codex's sandbox, on the field that is devin's
+	# equivalent of it. A permission mode can be refused and quietly downgraded
+	# with nothing but a warning on stderr and an exit 0, which would leave a
+	# worker unable to run a single command and a run that looked like a short
+	# answer. The export says which mode actually applied; a downgrade is a failed
+	# precondition, reported and never worked around. The comparison ignores case
+	# and punctuation because the mode is asked for as `accept-edits` and reported
+	# back as `AcceptEdits`.
+	perm_norm() { printf '%s' "$1" | tr 'A-Z' 'a-z' | sed 's/[^a-z]//g'; }
+	if [ -z "$PERM_APPLIED" ]; then
+		PERM_APPLIED="unconfirmed (the run export reports no permission mode)"
+		say "note: the run export does not say which permission mode applied, so the worker's containment is UNCONFIRMED. Carried into the PR body as such."
+	elif [ "$(perm_norm "$PERM_APPLIED")" != "$(perm_norm "$DEVIN_MODE")" ]; then
+		say "FAILED DISPATCH PRECONDITION: $DEVIN_MODE was requested; the run export reports '$PERM_APPLIED'. The export is the truth of what applied, and a downgrade is reported, not worked around."
+		print_worker_stderr
+		tree_state
+		exit 6
+	else
+		say "permissions: the run export confirms '$PERM_APPLIED', which is what was requested."
+	fi
+fi
+
+# --- 5. the git mechanics, in the worker's tree -------------------------------
+# Stage before branching, so a worker that delivered nothing leaves nothing
+# behind — not even an empty branch. Staging is the same on either branch.
+git -C "$DIR" add -A || { say "MECHANICS FAILED at stage."; tree_state; exit 3; }
+
+if git -C "$DIR" diff --cached --quiet; then
+	say "EMPTY STAGE: the worker changed nothing — nothing to commit, so there is no tree to deliver and no pull request."
+	say "The final message above is the whole of what came back. Task failure is read from it and from the repository, never from the exit code."
+	exit 4
+fi
+
+current=$(git -C "$DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
+if [ "$current" != "$BRANCH" ]; then
+	if ! out=$(git -C "$DIR" switch -c "$BRANCH" 2>&1); then
+		say "MECHANICS FAILED at branch: could not create $BRANCH from $current."
+		printf '%s\n' "$out"
+		tree_state
+		exit 3
+	fi
+	say "branch: created $BRANCH from $current."
+else
+	say "branch: already on $BRANCH."
+fi
+
+if [ "$HARNESS" = native ]; then
+	WHERE="a native sub-agent of this harness"
+else
+	WHERE="$HARNESS"
+fi
+
+MSGFILE="$RUNDIR/commit-message"
+{
+	printf '%s\n\n' "$TITLE"
+	printf 'Tree authored by %s in %s; git mechanics performed by %s from the\n' \
+		"${MODEL_AUTHORED:-the harness default model}" "$WHERE" "$ME"
+	printf 'dispatching session. The worker did not run git.\n\n'
+	printf 'Co-Authored-By: %s <noreply@anthropic.com>\n' "${MODEL_AUTHORED:-$HARNESS worker}"
+	printf 'Claude-Session: %s\n' "$SESSION"
+} >"$MSGFILE"
+
+if ! out=$(git -C "$DIR" commit -q -F "$MSGFILE" 2>&1); then
+	say "MECHANICS FAILED at commit — the tree is staged and intact."
+	printf '%s\n' "$out"
+	exit 3
+fi
+SHA=$(git -C "$DIR" rev-parse --short HEAD)
+say "commit: $SHA on $BRANCH, trailers carried (Co-Authored-By: ${MODEL_AUTHORED:-$HARNESS worker}; Claude-Session: $SESSION)."
+
+if ! out=$(git -C "$DIR" push -u origin "HEAD:refs/heads/$BRANCH" 2>&1); then
+	say "MECHANICS FAILED at push — committed locally as $SHA, NOT accepted by the remote; durable on this machine only."
+	printf '%s\n' "$out"
+	exit 3
+fi
+say "push: $BRANCH accepted by origin."
+printf '%s\n' "$out"
+
+# The worker's returned message is untrusted text going into a rendered
+# document. Two things keep it from impersonating this script's own record, and
+# both are needed: the wrapper's provenance is written FIRST, so nothing the
+# worker writes can render above it; and the worker's words go LAST, inside a
+# code fence, so a `---` or a copied `## Provenance …` heading in them renders as
+# the literal characters it is instead of as document structure. The fence is
+# longer than the longest backtick run in the message, so a message containing a
+# fence of its own cannot close ours early and escape.
+ticks=$(grep -o '`\{1,\}' "$FINALFILE" 2>/dev/null | awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }')
+[ -n "$ticks" ] || ticks=0
+fence_len=$((ticks + 1))
+[ "$fence_len" -ge 3 ] || fence_len=3
+FENCE=$(awk -v n="$fence_len" 'BEGIN { s = ""; while (length(s) < n) s = s "`"; print s }')
+
+BODYFILE="$RUNDIR/pr-body"
+{
+	printf '## Provenance — recorded by the wrapper, not by the worker\n\n'
+	printf 'The working tree is the worker'\''s authorship. Branch, commit, push and this\n'
+	printf 'pull request are `%s`'\''s mechanics, performed by the dispatching session:\n' "$ME"
+	printf 'the worker never ran git.\n\n'
+	printf -- '- Harness: %s\n' "$WHERE"
+	printf -- '- Provider: %s\n' "${PROVIDER:-the CLI's own default}"
+	if [ -n "$model_channel" ] && [ -z "$run_model" ]; then
+		# The channel that names the model which served the run carried nothing,
+		# so nothing confirms it. The same honest-unknown the sandbox and the run
+		# id already use: what the dispatch asked for is said, and nothing is
+		# claimed beyond it.
+		if [ -n "$MODEL" ]; then
+			asked="the dispatch asked for \`$MODEL\`"
+		else
+			asked="the dispatch named none, so the CLI's own default applied"
+		fi
+		printf -- '- Model: unconfirmed (no %s found to name the model that served this run) — %s (model-precedence rule %s)\n' \
+			"$model_channel" "$asked" "$RULE"
+	elif [ -n "$MODEL_AUTHORED" ] && [ -z "$MODEL" ]; then
+		printf -- '- Model: %s — the model the run itself reports; the dispatch named none and took the CLI'\''s default (model-precedence rule %s)\n' \
+			"$MODEL_AUTHORED" "$RULE"
+	elif [ -n "$MODEL_AUTHORED" ] && [ "$MODEL_AUTHORED" != "$MODEL" ]; then
+		printf -- '- Model: %s — the model the run itself reports; the dispatch asked for `%s` (model-precedence rule %s)\n' \
+			"$MODEL_AUTHORED" "$MODEL" "$RULE"
+	else
+		printf -- '- Model: %s (model-precedence rule %s)\n' "${MODEL:-the CLI's own default}" "$RULE"
+	fi
+	printf -- '- Worker run id: %s\n' "${RUN_ID:-not printed by this CLI — absent, never invented}"
+	[ -n "$SANDBOX_APPLIED" ] && printf -- '- Sandbox per the run header: %s\n' "$SANDBOX_APPLIED"
+	if [ "$HARNESS" = devin ]; then
+		printf -- '- Permission mode per the run export: %s (the dispatch requested `%s`)\n' \
+			"$PERM_APPLIED" "$DEVIN_MODE"
+		printf -- '- Permissions applied to the worker: deny [%s]; allow [%s]; and a PreToolUse hook that blocks git and gh on a word-boundary match against the whole command, because a deny rule alone does not see inside `sh -c "…"`. Written into the worker'\''s tree for the run and removed before anything was staged; the copies are in the run log.\n' \
+			"$DEVIN_DENY${EXCLUDED:+ $EXCLUDED}" "$DEVIN_ALLOW${ALLOWED:+ $ALLOWED}"
+		printf -- '- Isolation: the linked worktree, those permission rules, and that hook — and nothing at the OS level. Devin'\''s own sandbox is unsupported on Windows, so it was never passed and no sandbox line above should be read as implying one.\n'
+		printf -- '- Account this run was billed and governed by: tier %s, primary org %s\n' \
+			"${DEVIN_TIER:-not reported}" "${DEVIN_ORG:-none reported}"
+		printf -- '- Harness version: devin %s\n' "${DEVIN_VERSION:-unconfirmed (not reported by the run export)}"
+		if [ -n "$DEVIN_ACU" ]; then
+			printf -- '- Run cost: %s ACU — devin'\''s own per-step cost, summed from the run export\n' "$DEVIN_ACU"
+		else
+			printf -- '- Run cost: not reported by the run export — absent, never invented\n'
+		fi
+	else
+		[ -n "$EXCLUDED" ] && printf -- '- Tools excluded from the worker: %s\n' "$EXCLUDED"
+		[ -n "$ALLOWED" ] && printf -- '- Tools granted to the worker: %s\n' "$ALLOWED"
+	fi
+	printf -- '- Commit: %s\n' "$SHA"
+	printf -- '- Committing session: %s\n' "$SESSION"
+	[ "$HARNESS" = native ] ||
+		printf -- '- Worker process exit code: %s (completion, not success)\n' "$WORKER_EXIT"
+	[ -n "$final_note" ] && printf -- '- Note: %s\n' "$final_note"
+	printf '\nThis pull request is a draft: it arrives unverified, and only a recorded\n'
+	printf 'passing verdict takes it out of draft.\n'
+
+	printf '\n## What the worker returned\n\n'
+	printf 'Everything below is the worker'\''s own text, reproduced verbatim and unedited.\n'
+	printf 'It is quoted, not endorsed, and nothing in it is this wrapper'\''s record of what\n'
+	printf 'ran — that record is the section above, which no worker can write. This is the\n'
+	printf 'end of the document.\n\n'
+	printf '%s\n' "$FENCE"
+	cat "$FINALFILE"
+	printf '%s\n' "$FENCE"
+} >"$BODYFILE"
+
+if ! PR=$(cd "$DIR" && gh pr create --draft --base "$BASE" --head "$BRANCH" --title "$TITLE" --body-file "$BODYFILE" 2>&1); then
+	say "MECHANICS FAILED at pull request — committed as $SHA and pushed to origin/$BRANCH, but no pull request was opened."
+	printf '%s\n' "$PR"
+	exit 3
+fi
+
+# --- 6. print the result ------------------------------------------------------
+rule_off
+say "delivered — draft pull request open."
+say "  pull request : $(printf '%s\n' "$PR" | sed -n 's|.*\(https://[^ ]*\).*|\1|p' | sed -n 1p)"
+say "  branch       : $BRANCH -> $BASE"
+say "  commit       : $SHA"
+say "  worker       : $WHERE / ${MODEL_AUTHORED:-the CLI's own default} (rule $RULE), run id ${RUN_ID:-none printed}"
+say "  run log      : $RUNDIR"
+rule_off
+printf '%s\n' "$PR"
+say "It is a DRAFT. Exit code 0 means these mechanics succeeded — not that the work is good."
+exit 0

@@ -1,0 +1,237 @@
+#!/bin/sh
+# remit — deterministic mechanics for Git-backed work items.
+#
+# A work item is a folder `.remit/<slug>/` in the current Git repository,
+# containing at minimum `brief.md`. The brief is authoritative for the item's
+# own state, carried on a single line: `**State:** parked`, `**State:** active`
+# or `**State:** closed`.
+#
+# Closed work leaves normal operation entirely: the whole folder is moved to
+# `.remit/.archive/<slug>/`. The leading dot keeps it out of the `.remit/*/`
+# glob every view is built from, so archived work cannot be listed, warned
+# about, or read back by accident — only by someone who deliberately looks.
+#
+# These operations must behave identically under every model and harness, so no
+# judgment lives here. Understanding what the practitioner meant, and writing a
+# good brief with them, is the AI's job; this only makes the result durable.
+#
+# Durability rule (tech-design §Durability): change -> commit [-> push].
+# Exit 3 means: committed locally, but the remote has NOT accepted it.
+
+set -eu
+
+usage() {
+	cat >&2 <<'EOF'
+usage:
+  remit new <slug>       create .remit/<slug>/brief.md from stdin; the item is born parked
+  remit park <slug>      set the item's state to parked
+  remit activate <slug>  set the item's state to active
+  remit close <slug>     close the item and archive it whole to .remit/.archive/<slug>/;
+                         anything on stdin is kept as its delivery.md (commit/PR links)
+  remit list [--parked]  list active work items; --parked lists the parked ones instead
+
+Only the practitioner decides an item is closed. Closed work is gone from every
+listing and is read again only by deliberately opening .remit/.archive/.
+
+list only reads; it changes nothing. Every other change is committed, and when a
+remote is configured the commit is pushed.
+Exit codes: 0 committed (and pushed, if a remote exists) · 2 usage/input error
+            3 committed locally, PUSH FAILED — not recoverable beyond this machine
+EOF
+	exit 2
+}
+
+die() { printf 'remit: %s\n' "$1" >&2; exit 2; }
+
+[ $# -ge 1 ] || usage
+cmd=$1
+
+case "$cmd" in
+new | park | activate | close)
+	[ $# -eq 2 ] || usage
+	slug=$2
+	case "$slug" in
+		*[!a-z0-9-]* | -* | '') die "invalid slug '$slug' — use lower-case letters, digits and hyphens" ;;
+	esac
+	;;
+list)
+	[ $# -le 2 ] || usage
+	case "${2-}" in
+		'') listing=active ;;
+		--parked) listing=parked ;;
+		*) usage ;;
+	esac
+	;;
+*)
+	usage
+	;;
+esac
+
+root=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a Git repository"
+
+# Guard: the work surface changes from one place only — the repository's
+# primary worktree. A linked worktree is a worker's territory; a state change
+# made there would race the primary view and could land on a work branch.
+# In the primary worktree the git dir and the common git dir are the same
+# directory; in a linked worktree the git dir is .git/worktrees/<name>.
+git_dir=$(CDPATH= cd -- "$(git rev-parse --git-dir)" && pwd -P)
+common_dir=$(CDPATH= cd -- "$(git rev-parse --git-common-dir)" && pwd -P)
+if [ "$git_dir" != "$common_dir" ]; then
+	die "refusing to run from a linked worktree — the work surface changes only from the primary worktree at $(dirname "$common_dir")"
+fi
+
+# Only the slug commands address a single item.
+if [ "$cmd" != list ]; then
+	item="$root/.remit/$slug"
+	brief="$item/brief.md"
+	archive="$root/.remit/.archive/$slug"
+fi
+
+# Rewrite the state line, or insert one after the title if the brief has none.
+set_state() {
+	if grep -q '^\*\*State:\*\*' "$brief"; then
+		awk -v st="$1" 'BEGIN{d=0} d==0 && /^\*\*State:\*\*/ {print "**State:** " st; d=1; next} {print}' "$brief" >"$brief.tmp"
+	else
+		awk -v st="$1" '
+			BEGIN{d=0;sw=0}
+			d==0 && /^# / {print; print ""; print "**State:** " st; print ""; d=1; sw=1; next}
+			sw==1 && $0=="" {sw=0; next}
+			{sw=0; print}
+		' "$brief" >"$brief.tmp"
+	fi
+	mv "$brief.tmp" "$brief"
+}
+
+current_state() {
+	sed -n 's/^\*\*State:\*\* *//p' "$brief" | sed -n 1p
+}
+
+# The view is derived by reading each brief; nothing else records what exists.
+# An item the mechanic cannot read is named on stderr rather than dropped in
+# silence — work must not disappear from the view without saying so.
+list_items() {
+	rows=$(
+		for dir in "$root"/.remit/*/; do
+			[ -d "$dir" ] || continue
+			slug=${dir%/}
+			slug=${slug##*/}
+			b="$dir"brief.md
+			if [ ! -f "$b" ]; then
+				printf 'remit: .remit/%s has no brief.md — not listed.\n' "$slug" >&2
+				continue
+			fi
+			state=$(sed -n 's/^\*\*State:\*\* *//p' "$b" | sed -n 1p)
+			case "$state" in
+				active | parked) ;;
+				# Closed work is not part of normal operation: absent, and silent
+				# about being absent. Archiving already moves it out of this glob;
+				# this keeps a closed item that is still here from being reported
+				# as broken.
+				closed) continue ;;
+				'')
+					printf 'remit: .remit/%s has no **State:** line — not listed.\n' "$slug" >&2
+					continue
+					;;
+				*)
+					printf 'remit: .remit/%s has an unrecognised state '\''%s'\'' — not listed.\n' "$slug" "$state" >&2
+					continue
+					;;
+			esac
+			[ "$state" = "$1" ] || continue
+			printf '%s\t%s\n' "$slug" "$(sed -n '/^# /{s/^# *//p;q;}' "$b")"
+		done
+	)
+	if [ -z "$rows" ]; then
+		printf 'no %s work items.\n' "$1"
+		return 0
+	fi
+	printf '%s\n' "$rows" | LC_ALL=C sort
+}
+
+# Report exactly what Git accepted — never more.
+# Arguments: message, then the paths this one item occupies (closing an item
+# both removes and re-creates a path, so it occupies two). Nothing outside
+# them is ever staged.
+commit_and_push() {
+	message=$1
+	shift
+	git -C "$root" add -A -- "$@"
+	git -C "$root" commit -q -m "$message" -- "$@"
+
+	remote=origin
+	git -C "$root" remote get-url origin >/dev/null 2>&1 || remote=$(git -C "$root" remote | sed -n 1p)
+	if [ -z "$remote" ]; then
+		printf 'committed. No remote configured — durable on this machine only.\n'
+		return 0
+	fi
+
+	branch=$(git -C "$root" rev-parse --abbrev-ref HEAD)
+	if [ "$branch" = HEAD ]; then
+		printf 'committed. Detached HEAD — NOT pushed; durable on this machine only.\n' >&2
+		return 3
+	fi
+	if out=$(git -C "$root" push "$remote" "HEAD:refs/heads/$branch" 2>&1); then
+		printf 'committed and pushed to %s/%s.\n' "$remote" "$branch"
+		return 0
+	fi
+	printf 'committed. PUSH FAILED — %s has NOT accepted this change; durable on this machine only.\n%s\n' \
+		"$remote" "$out" >&2
+	return 3
+}
+
+case "$cmd" in
+new)
+	if [ -e "$item" ]; then die "work item '$slug' already exists at .remit/$slug"; fi
+	mkdir -p "$item"
+	cat >"$brief"
+	[ -s "$brief" ] || { rm -rf "$item"; die "no brief on stdin"; }
+	case "$(sed -n '/./{p;q;}' "$brief")" in
+		'# '*) ;;
+		*) rm -rf "$item"; die "the brief must begin with a '# Title' heading" ;;
+	esac
+	set_state parked
+	printf 'created .remit/%s/brief.md — parked.\n' "$slug"
+	commit_and_push "remit: create $slug" ".remit/$slug"
+	;;
+park | activate)
+	[ -f "$brief" ] || die "no work item '$slug' — expected .remit/$slug/brief.md"
+	if [ "$cmd" = park ]; then want=parked; else want=active; fi
+	if [ "$(current_state)" = "$want" ]; then
+		printf '.remit/%s is already %s — nothing to commit.\n' "$slug" "$want"
+		exit 0
+	fi
+	set_state "$want"
+	printf '.remit/%s is now %s.\n' "$slug" "$want"
+	commit_and_push "remit: $slug -> $want" ".remit/$slug"
+	;;
+close)
+	# Closure is only ever the practitioner's instruction. Nothing here decides
+	# an item is finished; this makes their decision durable and complete.
+	[ -f "$brief" ] || die "no work item '$slug' — expected .remit/$slug/brief.md"
+	if [ -e "$archive" ]; then
+		die "'$slug' is already archived at .remit/.archive/$slug — nothing changed"
+	fi
+	# Read the delivery links before anything moves, so a bad input cannot
+	# leave an item half-closed.
+	delivery=''
+	[ -t 0 ] || delivery=$(cat)
+
+	set_state closed
+	mkdir -p "$root/.remit/.archive"
+	# One rename: the item is never in both places, and never in neither.
+	mv "$item" "$archive"
+	if [ -n "$delivery" ]; then
+		printf '# Delivered\n\n%s\n' "$delivery" >"$archive/delivery.md"
+		printf 'closed .remit/%s — archived whole to .remit/.archive/%s, delivery recorded.\n' "$slug" "$slug"
+	else
+		printf 'closed .remit/%s — archived whole to .remit/.archive/%s.\n' "$slug" "$slug"
+	fi
+	commit_and_push "remit: close $slug" ".remit/$slug" ".remit/.archive/$slug"
+	;;
+list)
+	list_items "$listing"
+	;;
+*)
+	usage
+	;;
+esac
