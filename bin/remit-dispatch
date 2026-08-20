@@ -113,6 +113,7 @@
 set -u
 
 ME=remit-dispatch
+CLI_DEFAULT="the CLI's own default"
 
 die() { printf '%s: %s\n' "$ME" "$1" >&2; exit 2; }
 say() { printf '%s\n' "$1"; }
@@ -339,8 +340,8 @@ ATIF="$RUNDIR/atif.json"
 rule_off
 say "$ME — dispatch record"
 say "  harness      : $HARNESS${CLI:+ ($CLI)}"
-say "  provider     : ${PROVIDER:-<the CLI's own default>}"
-say "  model        : ${MODEL:-<the CLI's own default>}"
+say "  provider     : ${PROVIDER:-<$CLI_DEFAULT>}"
+say "  model        : ${MODEL:-<$CLI_DEFAULT>}"
 say "  precedence   : rule $RULE"
 say "  briefing     : ${BRIEF:-<given in-harness at the dispatch>}"
 say "  worker dir   : $DIR"
@@ -844,7 +845,7 @@ BODYFILE="$RUNDIR/pr-body"
 	printf 'pull request are `%s`'\''s mechanics, performed by the dispatching session:\n' "$ME"
 	printf 'the worker never ran git.\n\n'
 	printf -- '- Harness: %s\n' "$WHERE"
-	printf -- '- Provider: %s\n' "${PROVIDER:-the CLI's own default}"
+	printf -- '- Provider: %s\n' "${PROVIDER:-$CLI_DEFAULT}"
 	if [ -n "$model_channel" ] && [ -z "$run_model" ]; then
 		# The channel that names the model which served the run carried nothing,
 		# so nothing confirms it. The same honest-unknown the sandbox and the run
@@ -864,7 +865,7 @@ BODYFILE="$RUNDIR/pr-body"
 		printf -- '- Model: %s — the model the run itself reports; the dispatch asked for `%s` (model-precedence rule %s)\n' \
 			"$MODEL_AUTHORED" "$MODEL" "$RULE"
 	else
-		printf -- '- Model: %s (model-precedence rule %s)\n' "${MODEL:-the CLI's own default}" "$RULE"
+		printf -- '- Model: %s (model-precedence rule %s)\n' "${MODEL:-$CLI_DEFAULT}" "$RULE"
 	fi
 	printf -- '- Worker run id: %s\n' "${RUN_ID:-not printed by this CLI — absent, never invented}"
 	[ -n "$SANDBOX_APPLIED" ] && printf -- '- Sandbox per the run header: %s\n' "$SANDBOX_APPLIED"
@@ -916,7 +917,7 @@ say "delivered — draft pull request open."
 say "  pull request : $(printf '%s\n' "$PR" | sed -n 's|.*\(https://[^ ]*\).*|\1|p' | sed -n 1p)"
 say "  branch       : $BRANCH -> $BASE"
 say "  commit       : $SHA"
-say "  worker       : $WHERE / ${MODEL_AUTHORED:-the CLI's own default} (rule $RULE), run id ${RUN_ID:-none printed}"
+say "  worker       : $WHERE / ${MODEL_AUTHORED:-$CLI_DEFAULT} (rule $RULE), run id ${RUN_ID:-none printed}"
 say "  run log      : $RUNDIR"
 rule_off
 printf '%s\n' "$PR"
