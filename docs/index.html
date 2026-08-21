@@ -89,13 +89,15 @@
       text-decoration: none;
     }
     .button.secondary { background: transparent; color: var(--accent); }
-    .problem-grid, .anchor-grid { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); }
+    .problem-grid, .anchor-grid, .harness-grid { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); }
     .problem-grid { grid-template-columns: repeat(3, 1fr); }
     .anchor-grid { grid-template-columns: repeat(6, 1fr); }
-    .problem, .anchor { background: var(--paper-raised); }
+    .harness-grid { grid-template-columns: repeat(2, 1fr); }
+    .problem, .anchor, .harness { background: var(--paper-raised); }
     .problem { padding: clamp(1.4rem, 3vw, 2.3rem); }
-    .problem p, .anchor p { margin: 0; color: var(--muted); }
+    .problem p, .anchor p, .harness p { margin: 0; color: var(--muted); }
     .anchor { grid-column: span 2; padding: 1.5rem; }
+    .harness { padding: clamp(1.4rem, 3vw, 2rem); }
     .anchor:nth-child(4), .anchor:nth-child(5) { grid-column: span 3; }
     section { padding: clamp(3.5rem, 8vw, 7rem) 0; }
     .section-intro { max-width: 42rem; margin: 0 0 2.2rem; color: var(--muted); font-size: 1.08rem; }
@@ -146,7 +148,7 @@
     footer { padding: 1.5rem 0 2.5rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem; }
 
     @media (max-width: 48rem) {
-      .problem-grid, .anchor-grid, .install-grid { grid-template-columns: 1fr; }
+      .problem-grid, .anchor-grid, .harness-grid, .install-grid { grid-template-columns: 1fr; }
       .anchor, .anchor:nth-child(4), .anchor:nth-child(5) { grid-column: auto; }
       .site-head { min-height: 3.8rem; }
       .version { display: none; }
@@ -162,7 +164,7 @@
 <body>
   <header class="wrap site-head">
     <a class="wordmark" href="#top" aria-label="remit home">remit</a>
-    <span class="version">VERSION 0.1.2</span>
+    <span class="version">VERSION 0.1.3</span>
   </header>
 
   <main id="top">
@@ -217,7 +219,7 @@
           </article>
           <article class="anchor">
             <h3>Move between AI providers</h3>
-            <p>One model can build and another can review. The item moves between them without copy and paste.</p>
+            <p>You name the model at each dispatch, so one model can build and a rival can review. The item moves between them without copy and paste — <a href="#harnesses">four harnesses run remit's workers</a>.</p>
           </article>
           <article class="anchor">
             <h3>Know who made each change</h3>
@@ -294,6 +296,33 @@
       </div>
     </section>
 
+    <section id="harnesses" aria-labelledby="harnesses-heading">
+      <div class="wrap">
+        <p class="eyebrow">Every harness</p>
+        <h2 id="harnesses-heading">Four harnesses, one work surface.</h2>
+        <p class="section-intro">The installer puts the same five conventions where each of them looks, and <code>bin/remit-dispatch</code> demonstrates CLI invocation for all four. Open whichever one you feel like this morning: the item on the other side is the same item.</p>
+        <div class="harness-grid">
+          <article class="harness">
+            <h3>Claude Code</h3>
+            <p>Hands a bounded task to an isolated sub-agent of its own, or out through the CLI. Either way the dispatch names the model it wants.</p>
+          </article>
+          <article class="harness">
+            <h3>Codex</h3>
+            <p>Nothing bespoke: the same five conventions in the path it reads, the same dispatch script, the same draft pull request at the end.</p>
+          </article>
+          <article class="harness">
+            <h3>Pi</h3>
+            <p>Serves whatever the providers configured on your own machine are ready to run. A dispatch is refused unless that machine's own catalogue lists the id.</p>
+          </article>
+          <article class="harness">
+            <h3>Devin</h3>
+            <p>Needs no path of its own, discovering the installed conventions natively. An unknown model id is turned away before the run starts.</p>
+          </article>
+        </div>
+        <p class="harnesses"><a href="https://github.com/shobman/remit#use-your-harness">The README's model list</a> was read on 21 August 2026. The models available to you depend on your subscription, and vendors change their model offerings often. Not every model is available at every subscription level. remit does not maintain a compatibility matrix, so check the sources beside the list for what your subscription includes today. The pull request records which model actually served each run.</p>
+      </div>
+    </section>
+
     <section aria-labelledby="install-heading">
       <div class="wrap install-grid">
         <div>
@@ -301,7 +330,7 @@
           <h2 id="install-heading">Bring the discipline into your repository.</h2>
           <p class="section-intro">The README explains how to inspect or pin the installer before you run it.</p>
           <a href="https://github.com/shobman/remit#install-remit">Read the install guide on GitHub</a>
-          <p class="harnesses">Built for Claude Code, Codex, Pi, and Devin. <code>bin/remit-dispatch</code> demonstrates CLI invocation for all four harnesses.</p>
+          <p class="harnesses">One installer serves <a href="#harnesses">all four harnesses</a>.</p>
         </div>
         <figure class="install-command" aria-labelledby="install-command-heading">
           <figcaption id="install-command-heading" class="visually-hidden">Install remit command</figcaption>

@@ -14,7 +14,7 @@ their consequences.
 remit has two POSIX scripts and five conventions. It has no service or database. No daemon
 runs. Why it exists, in the practitioner's own words: [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.1.2. Early, and in use.**
+**Version 0.1.3. Early, and in use.**
 
 ## One piece of work, start to finish
 
@@ -73,7 +73,7 @@ work.
 Only the practitioner admits an item, activates or parks it, opens a phase, accepts a result,
 and decides closure. Anthropic documents that Opus 5 can expand a task's scope, add
 unrequested steps, and decide what the task should be
-([Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5)).
+([Opus 5 prompting guidance](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5)).
 Under remit, a worker may observe that more seems needed. An observation is not scope. The
 scope changes only when you change it.
 
@@ -142,11 +142,11 @@ against their interest.
 The tail is older than AI. People learn from the thing they can see: Brooks says clients
 cannot completely specify a product before trying versions
 ([No Silver Bullet](https://www.cin.ufpe.br/~phmb/ip/MaterialDeEnsino/BrooksNoSilverBullet.html)),
-and in current production data, Google found 1.92 times as many review-blocking comments on
-AI-authored changes, yet 0.9 times the human revert rate
-([Tran et al., 2026](https://arxiv.org/html/2608.06640)). Google is a model vendor studying
-its own monorepo. The result says the work was reviewed harder and reverted less; the study
-found no generally worse code.
+and in current production data out of Google's own monorepo — a model vendor studying itself —
+1.92 times as many review-blocking comments landed on AI-authored changes, which were then
+reverted at 0.9 times the human rate
+([Tran et al., 2026](https://arxiv.org/html/2608.06640)). The result says the work was reviewed
+harder and reverted less; the study found no generally worse code.
 
 So remit plans for the pivot. Specify each pass in full, judge it with fresh eyes, and bring
 what the finished thing taught you to the next decision. Human judgment is the input that can
@@ -188,10 +188,10 @@ sh /tmp/get-remit.sh /path/to/your-repository
 Pin the bootstrap to this release when you need a repeatable install:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.1.2 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.1.3 sh -s -- /path/to/your-repository
 ```
 
-Place `REMIT_REF=v0.1.2` immediately before `sh`, the last command in the pipeline, so
+Place `REMIT_REF=v0.1.3` immediately before `sh`, the last command in the pipeline, so
 `get-remit.sh` receives the variable. If you already have a remit clone, run its installer directly:
 
 ```sh
@@ -212,9 +212,7 @@ The installer adds:
 |---|---|
 | `bin/remit` | Lists items and performs state changes. |
 | `bin/remit-dispatch` | Turns a worker's authored tree into a draft pull request. |
-| `.claude/skills/` | Installs the five conventions for Claude Code. |
-| `.agents/skills/` | Installs the same conventions for Codex. |
-| `.pi/skills/` | Installs the same conventions for Pi. |
+| `.claude/skills/`, `.agents/skills/`, `.pi/skills/` | Installs the five conventions in the discovery path each harness reads — see [Use your harness](#use-your-harness). |
 | `AGENTS.md` | Adds one marker-delimited, shared section without replacing existing content. |
 | `<git>/hooks/pre-push` | Installs the guard when none exists; on re-run, remit's own hook is updated or reported unchanged; any other hook or custom hooks path is kept and reported. |
 | `.remit/` | Creates the empty work location. |
@@ -222,16 +220,68 @@ The installer adds:
 
 ## Use your harness
 
-remit is built for Claude Code, Codex, Pi, and Devin. The installer places conventions in the
-discovery paths for Claude Code, Codex, and Pi; Devin reads the installed `AGENTS.md` section
-and discovers the installed `.agents/skills/` natively, so it needs no path of its own.
-remit's state is Git, its mechanics are POSIX shell, and its conventions are Markdown.
-
-`bin/remit-dispatch` demonstrates CLI invocation for all four harnesses.
+remit is built for four harnesses, one to each heading below. The installer places the five
+conventions in the discovery path each one reads, and `bin/remit-dispatch` demonstrates CLI
+invocation for all four. remit's state is Git, its mechanics are POSIX shell, and its
+conventions are Markdown.
 
 Change the harness without changing the item's identity, boundary, decisions, state, or
 history. When a harness lacks an isolation or pull-request capability, the agent reports the absence
 and stops at what the harness can actually do.
+
+Name the model at the dispatch. `bin/remit-dispatch` takes `--model` and hands it to the
+harness's own CLI. Which model that should be is not the script's decision: the precedence
+rules in the installed `dispatch-work` convention decide it, and every dispatch records which
+rule applied. Where a dispatch names none, the CLI's own default serves the run and the record
+says so.
+
+The pull request then names the model that actually served the run, read back from the run's
+own report where the harness prints one. A run that answered on a different model than the
+dispatch asked for says so, and where that report is silent the pull request records the model
+as unconfirmed rather than assuming the dispatch got what it asked for.
+
+Each heading below carries where that harness's conventions land, what it does about a model id
+it does not know, and what its own command or local source said when I read it on 21 August 2026.
+
+### Claude Code
+
+Conventions at `.claude/skills/`. A dispatch goes either to the CLI or to a native sub-agent,
+and a native sub-agent dispatch must name its model. The CLI does not expose an account catalogue.
+Its top-level help and full command list offer no model query. `claude --help` documents only the
+selectors `fable`, `opus`, `sonnet`, and the full-name example `claude-fable-5`; the local account
+cache adds no list of what the account can use. So there is no honest list to print here.
+
+### Codex
+
+Conventions at `.agents/skills/`. The CLI has no `models` subcommand. `codex doctor` reports the
+model in effect and provider counts, not the ids. The installation's fetched
+`~/.codex/models_cache.json` is the source that does enumerate its visible choices. It marks six
+entries `visibility: list`: `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4`,
+and `gpt-5.4-mini`. Two other entries in that source are marked hidden, so I have not presented
+them as choices.
+
+### Pi
+
+Conventions at `.pi/skills/`. A dispatch must name a model, and it is refused unless the exact
+id appears in `pi --list-models`, because an unknown id is otherwise accepted silently and
+answered anyway. That command reads the providers configured on the machine. Here it printed one
+row, provider `llamacpp`, model `qwen3.6-35b`; the same id is carried in
+`~/.pi/agent/models.json`.
+
+### Devin
+
+No path of its own: it reads the installed `AGENTS.md` section and discovers the installed
+`.agents/skills/` natively. An unknown id is rejected before a run starts. `devin models list`
+printed 22 model families, ordered here for reading: `claude-opus-5`, `claude-fable-5`,
+`claude-sonnet-5`, `claude-opus-4.8`, `claude-opus-4.7`, `claude-sonnet-4.6`,
+`claude-haiku-4.5`, `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5`, `gemini-3.6-flash`,
+`gemini-3.1-pro`, `gemini-3-flash`, `kimi-k3`, `kimi-k2.7`, `kimi-k2.6`, `glm-5.2`, `swe-1.7`,
+`swe-1.7-lightning`, `swe-1.6`, `swe-1.6-fast`, and `adaptive`.
+
+This list was read on 21 August 2026. The models available to you depend on your subscription,
+and vendors change their model offerings often. Not every model is available at every subscription
+level. remit does not maintain a compatibility matrix, so check the sources above for what your
+subscription includes today.
 
 ## Know the boundary
 

@@ -28,7 +28,8 @@ Two of my systems attack the same problem from opposite ends.
 [AIDOS](https://github.com/shobman/aidos) makes you think critically before work starts. remit keeps the judgement mine while the work is built. It
 tracks the work in Git. It has fresh eyes verify everything, from a brief to a build. It lets
 work stop naturally and resume weeks later in a new session, in whichever AI I choose that
-morning. It works across AI providers, and it moves work between them. It never decides how big a piece
+morning — Claude Code, Codex, Pi or Devin. It works across AI providers, and it moves work
+between them. It never decides how big a piece
 of work is. And work exists only when I ask for it; it ends only when I say so.
 
 Working with remit is no different than working without it. But:
