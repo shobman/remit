@@ -205,8 +205,10 @@ pull request this dispatch hands back. No exploration, no code-reading, no logs,
 worker returns all that anyway, take what belongs and leave the rest — it does not become durable
 here, and it does not enter your summary.
 
-Report to the practitioner in their terms: what exists, where the PR is, and the decision if there
-is one.
+Report to the practitioner in their terms: what exists, where the PR is, that no fresh context has
+judged it yet, and the decision if there is one. That report is status, not the work put in front of
+them — which is which, and what holds the ordering on each route a delivery can arrive by, is
+`evaluate-work`'s to say.
 
 ## Check the result against what you briefed — and stop there
 

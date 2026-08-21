@@ -37,6 +37,50 @@ The evaluation remains part of the story, not a gate that expired.
 If this harness cannot raise a fresh context, say so plainly and let the practitioner decide how to
 proceed. Never substitute your own judgment for the evaluation and never call it one.
 
+## Every route it arrives by, and what holds each
+
+The section above says *when*. This says *by what route*, because a delivery reaches the
+practitioner by more ways than a pull request, and the ordering is worth no more than the weakest of
+them. **One route is held by mechanism. Every other is held by your restraint, and is named here as
+that** — remit does not dress instruction up as enforcement.
+
+One distinction decides all of them: **telling them a delivery exists is not putting it in front of
+them.** What was built, that no fresh context has judged it yet, and where it will appear once one
+has — that is status, and status is never withheld. The page, the file, the diff, the demo, the
+account that reads as *here it is, what do you think* — that is the ask, and the ask waits for a
+verdict.
+
+- **The pull request** — a worker's authored tree, turned into one by the dispatch wrapper, with the
+  worker's own returned words carried into its body. **Mechanism** — the only one. The wrapper opens
+  it as a draft and the relay step below is the only thing that takes it out. Nothing else in this
+  list has an equivalent, and nothing here changes what that mechanism already is.
+- **A built preview, or a running thing** — a page built out of `dist/`, a command's output, an
+  application on screen. **Instruction, disclosed.** No build step knows what a verdict is, and none
+  is being taught one. Build it for yourself and for the evaluator; show it to the practitioner
+  once the verdict exists.
+- **A file handed over** — a path you name, a document you point at, an attachment. **Instruction,
+  disclosed.** Their own work surface is theirs to read whenever they like: a brief, an item's
+  record, the repository as it stands. It is *the delivery* — the thing AI made for their acceptance
+  — that waits.
+- **A summary in this conversation** — your account of what a worker returned, or of what you built
+  yourself. **Instruction, disclosed.** The hardest route to notice, because nothing is opened and
+  nothing changes hands; it is also the one by which this ordering has actually broken.
+- **Work you carried out yourself, live, in their tree** — no worker, no branch, no pull request.
+  **Instruction, disclosed, and the weakest of them.** There is no seam here at all: the change is
+  already where they can see it. This route is why `dispatch-work` has to say that working directly
+  changes no evaluation rule.
+- **A branch, a merge, a published release** — anything reached through `main`. **Inherited, and
+  only inherited.** Whatever held the route into `main` is the whole of what holds this. The push
+  guards lint authorship, not verdicts, and publishing repeats what was already there; neither adds
+  a gate of its own, and neither may be reported as one.
+
+A route that is not in this list is unheld. If you meet one, say so to the practitioner in the
+moment rather than deciding by yourself that it does not count.
+
+**When they ask first.** They may ask to see something before any verdict exists. That is theirs to
+ask and not yours to refuse: show them, and say plainly, in the same breath, that no fresh context
+has judged it yet. Their asking is not the skip — skipping evaluation is still only on their word.
+
 ## Brief the evaluator, and state its limits in the briefing
 
 The evaluator gets what you write and nothing else. Carry:
