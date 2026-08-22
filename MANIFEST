@@ -1,18 +1,18 @@
 remit dist manifest v1
-version 0.1.4
+version 0.1.5
 100644 6e9d943f4708eaa96ef0b6a96013883cace2d8cf .claude/skills/capture-work/SKILL.md
 100644 90bec8ac6609b1561765298448a8731b2baa70a2 .claude/skills/close-work/SKILL.md
-100644 9fdb06c74ab9f8307f84533e64a95115175beca4 .claude/skills/dispatch-work/SKILL.md
+100644 48aec52e3e73b95a2246cc0823969887376c253c .claude/skills/dispatch-work/SKILL.md
 100644 7dbae41ff1846361ffc49a6cfbbbc7d21cda2db0 .claude/skills/evaluate-work/SKILL.md
 100644 75475c05c23b35dbe60fefd728b0ca1f1217ef56 .claude/skills/resume-work/SKILL.md
 100644 c23c1d1c810eea733d6b21adda0c00ccffc41684 LICENSE
-100644 d9c641a759726b02df50d18c34b337b47474a8bc MANIFESTO.md
-100644 e98fd992a62b2f9e61c49d7406037e72d37223bc README.md
-100644 845639eef26c0e95586203ae78369f67552ccb17 VERSION
+100644 3ba90d85cd795be50bb5d063c04ad62c674c616c MANIFESTO.md
+100644 f32c16719ba70c0a2b9432969d74450301b4cb5a README.md
+100644 9faa1b7a7339db85692f91ad4b922554624a3ef7 VERSION
 100755 c6c81b1b06eb5d4be2d11a6f28f6307017bfc10e bin/remit
-100644 f15dd14ca60ed4517dadf9b1d717e92d2ecf9e9e bin/remit-dispatch
-100644 ad8c316968e80deaccea1cc3b18bb751396ef2e3 docs/index.html
-100755 2b6ba3b180bca9bf377edd916b468b3cc7151bed get-remit.sh
-100644 5e0423f3072ea770f9f266da22c49ddcb091e6a1 install.sh
+100644 ad24b1c0f1772602862ab82eea945ded569b3510 bin/remit-dispatch
+100644 f0bdd5016e4c985c33b65ef922d2fadb5dec4eb5 docs/index.html
+100755 edbfb004d2d716d96c6a782cb677440a4fc165ee get-remit.sh
+100644 6d8cd4419e3cf81c5f18abacc48ebc6a886c7aa0 install.sh
 100644 95de480e4847c04b87f6e1f7a9dfd2aaf5fa7d16 install/AGENTS-remit.md
 100644 9560a0a56bfa7dcd7d678ad32b6b027befd11b24 install/hooks/pre-push

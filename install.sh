@@ -12,17 +12,17 @@
 #                                  becomes a draft pull request, mechanically
 #   .claude/skills/<name>/         the five conventions, where Claude Code
 #                                  discovers project skills
-#   .agents/skills/<name>/         the same five files, where Codex and Devin
-#                                  discover project skills — Devin needs no path
-#                                  of its own, which is why there are three of
-#                                  these for four harnesses
+#   .agents/skills/<name>/         the same five files, where Codex, Devin and
+#                                  Copilot CLI discover project skills — the last
+#                                  two need no path of their own, which is why
+#                                  there are three of these for five harnesses
 #                                  ($REPO_ROOT/.agents/skills)
 #   .pi/skills/<name>/             the same five files, where Pi discovers
 #                                  project skills
-#   AGENTS.md                      a marker-delimited remit section — Codex, Pi
-#                                  and Devin all read the repo-root AGENTS.md;
-#                                  an existing AGENTS.md is appended to, never
-#                                  replaced
+#   AGENTS.md                      a marker-delimited remit section — Codex, Pi,
+#                                  Devin and Copilot CLI all read the repo-root
+#                                  AGENTS.md; an existing AGENTS.md is appended
+#                                  to, never replaced
 #   <git>/hooks/pre-push           the push guards, in the shared hooks dir so
 #                                  every linked worktree inherits them
 #   .remit/                        an empty work location
@@ -135,8 +135,11 @@ install_file() { # $1 src-abs  $2 dst-rel
 }
 
 # --- the mechanics and the five conventions, where each harness looks ---------
-# Three copies, four harnesses: Devin discovers project skills at .agents/skills
-# too, so it needs no copy of its own.
+# Three copies, five harnesses: Devin and Copilot CLI both discover project
+# skills at .agents/skills too, so neither needs a copy of its own. Copilot CLI's
+# own discovery set — probed, not assumed — is .github/skills/, .agents/skills/
+# and .claude/skills/, so the copy written here is the one it reads, and adding a
+# fourth location for it would be a second home for content that already has one.
 install_file "$SRC/bin/remit" "bin/remit"
 install_file "$SRC/bin/remit-dispatch" "bin/remit-dispatch"
 for s in $SKILLS; do

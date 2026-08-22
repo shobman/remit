@@ -80,8 +80,9 @@ in the dispatch which rule applied, so the PR can record it.
 
 For the harness, the same rules decide: their word at this dispatch, then a standing constraint,
 then this harness's own worker. A worker in another harness — `claude -p`, `codex exec`, `pi`,
-`devin -p` — is briefed identically and bounded identically to a native one; changing harness
-changes the means of execution and nothing else.
+`devin -p`, `copilot` — is briefed identically and bounded identically to a native one; changing
+harness changes the means of execution and nothing else. Where a harness takes a reasoning effort
+as well as a model, the same precedence rules decide it and the dispatch names it.
 
 If they ask for a worker that cannot be provided here — a model or provider this machine cannot
 reach, a CLI that is not installed — say so plainly and hand back the smallest decision: what does
@@ -138,7 +139,17 @@ writable; a Claude worker's tool grant simply omits git; pi's tool scoping is wh
 excluding git means excluding its shell wholesale — a pi dispatch either needs no shell and
 excludes bash, or keeps bash and carries the rule in the briefing as restraint by instruction,
 disclosed as such; a Devin worker gets a deny rule and a pre-tool hook that the wrapper writes into
-its tree for the run, because a deny rule alone does not see git reached through a shell it allows.
+its tree for the run, because a deny rule alone does not see git reached through a shell it allows;
+a Copilot worker gets the same shape and one thing more, because on that CLI a hook that fails to
+load blocks nothing and says nothing — the wrapper tests the containment with a throwaway probe run
+before every dispatch and refuses the dispatch outright rather than running a worker it cannot show
+was contained.
+
+None of that is a read boundary, and no dispatch may imply one. Unless the harness gives one at the
+OS level — a sandbox, a container, a machine of its own — a worker runs on the practitioner's own
+host under their credentials and can read whatever that login can read. What bounds reading is where
+a worker is raised, never an inspection of the commands it writes. Say what the harness holds by
+mechanism, and disclose the rest rather than implying a wall that is not there.
 
 ## The mechanics are the wrapper's — never yours, never the worker's
 
@@ -147,7 +158,7 @@ its steps by hand and never brief a worker to:
 
 ```sh
 sh "$(git rev-parse --show-toplevel)/bin/remit-dispatch" \
-   --harness <claude|codex|pi|devin|native> --slug <slug> --brief <briefing-file> \
+   --harness <claude|codex|pi|devin|copilot|native> --slug <slug> --brief <briefing-file> \
    --dir <the worker's worktree> --model <id> --rule <the precedence rule that applied> \
    --session <this session's identifier>
 ```

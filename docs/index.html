@@ -93,6 +93,7 @@
     .problem-grid { grid-template-columns: repeat(3, 1fr); }
     .anchor-grid { grid-template-columns: repeat(6, 1fr); }
     .harness-grid { grid-template-columns: repeat(2, 1fr); }
+    .harness-grid > .harness:last-child:nth-child(odd) { grid-column: 1 / -1; }
     .problem, .anchor, .harness { background: var(--paper-raised); }
     .problem { padding: clamp(1.4rem, 3vw, 2.3rem); }
     .problem p, .anchor p, .harness p { margin: 0; color: var(--muted); }
@@ -164,7 +165,7 @@
 <body>
   <header class="wrap site-head">
     <a class="wordmark" href="#top" aria-label="remit home">remit</a>
-    <span class="version">VERSION 0.1.4</span>
+    <span class="version">VERSION 0.1.5</span>
   </header>
 
   <main id="top">
@@ -219,7 +220,7 @@
           </article>
           <article class="anchor">
             <h3>Move between AI providers</h3>
-            <p>You name the model at each dispatch, so one model can build and a rival can review. The item moves between them without copy and paste — <a href="#harnesses">four harnesses run remit's workers</a>.</p>
+            <p>You name the model at each dispatch, so one model can build and a rival can review. The item moves between them without copy and paste — <a href="#harnesses">five harnesses run remit's workers</a>.</p>
           </article>
           <article class="anchor">
             <h3>Know who made each change</h3>
@@ -299,8 +300,8 @@
     <section id="harnesses" aria-labelledby="harnesses-heading">
       <div class="wrap">
         <p class="eyebrow">Every harness</p>
-        <h2 id="harnesses-heading">Four harnesses, one work surface.</h2>
-        <p class="section-intro">The installer puts the same five conventions where each of them looks, and <code>bin/remit-dispatch</code> demonstrates CLI invocation for all four. Open whichever one you feel like this morning: the item on the other side is the same item.</p>
+        <h2 id="harnesses-heading">Five harnesses, one work surface.</h2>
+        <p class="section-intro">The installer puts the same five conventions where each of them looks, and <code>bin/remit-dispatch</code> demonstrates CLI invocation for all five. Open whichever one you feel like this morning: the item on the other side is the same item.</p>
         <div class="harness-grid">
           <article class="harness">
             <h3>Claude Code</h3>
@@ -318,6 +319,10 @@
             <h3>Devin</h3>
             <p>Needs no path of its own, discovering the installed conventions natively. An unknown model id is turned away before the run starts.</p>
           </article>
+          <article class="harness">
+            <h3>Copilot CLI</h3>
+            <p>The only one here that takes a reasoning effort as well as a model, and checks both before it bills anything. A hook written for the run keeps its worker off git and gh, and the dispatch tests that before it trusts it. There is no read boundary beyond that: the worker runs on your own machine under your own credentials, and every pull request says so.</p>
+          </article>
         </div>
         <p class="harnesses"><a href="https://github.com/shobman/remit#use-your-harness">The README's model list</a> was read on 21 August 2026. The models available to you depend on your subscription, and vendors change their model offerings often. Not every model is available at every subscription level. remit does not maintain a compatibility matrix, so check the sources beside the list for what your subscription includes today. The pull request records which model actually served each run.</p>
       </div>
@@ -330,7 +335,7 @@
           <h2 id="install-heading">Bring the discipline into your repository.</h2>
           <p class="section-intro">The README explains how to inspect or pin the installer before you run it.</p>
           <a href="https://github.com/shobman/remit#install-remit">Read the install guide on GitHub</a>
-          <p class="harnesses">One installer serves <a href="#harnesses">all four harnesses</a>.</p>
+          <p class="harnesses">One installer serves <a href="#harnesses">all five harnesses</a>.</p>
         </div>
         <figure class="install-command" aria-labelledby="install-command-heading">
           <figcaption id="install-command-heading" class="visually-hidden">Install remit command</figcaption>

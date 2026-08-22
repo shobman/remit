@@ -7,12 +7,12 @@
 # script's, not a model's judgment — the same reason `bin/remit` exists. Point an
 # agent at it; nobody performs these steps by hand.
 #
-#   sh bin/remit-dispatch --harness <claude|codex|pi|devin|native> --slug <slug> \
+#   sh bin/remit-dispatch --harness <claude|codex|pi|devin|copilot|native> --slug <slug> \
 #        --brief <briefing-file> --dir <worker-worktree> \
 #        --session <committing-session-url> --rule <model-precedence-rule> \
-#        [--model <id>] [--provider <name>] [--title <pr-title>] [--base <branch>] \
-#        [--sandbox <mode>] [--allowed-tools <spec>] [--exclude-tools <spec>] \
-#        [--final-message <file>]
+#        [--model <id>] [--effort <level>] [--provider <name>] [--title <pr-title>] \
+#        [--base <branch>] [--sandbox <mode>] [--allowed-tools <spec>] \
+#        [--exclude-tools <spec>] [--final-message <file>]
 #
 # `--harness native` is the same mechanics without the invocation: the worker was
 # this harness's own sub-agent, the coordinator invoked it, and the wrapper is
@@ -25,13 +25,13 @@
 #   1. Record the dispatch — target triple, precedence rule, briefing, worker
 #      directory — before anything runs.
 #   2. Invoke the worker CLI with the briefing on the channel that CLI was
-#      probed to accept: stdin for `claude -p` and `codex exec -`, `@file` for
-#      `pi -p`, `--prompt-file` for `devin -p`.
+#      probed to accept: stdin for `claude -p`, `codex exec -` and `copilot`,
+#      `@file` for `pi -p`, `--prompt-file` for `devin -p`.
 #   3. Wait for process exit. One deliberate foreground invocation; no queue, no
 #      background transport. The run's output is printed after exit.
 #   4. Capture the worker's final message from its own probed channel:
 #      `claude -p --output-format json`, `codex exec -o <file>`, pi stdout,
-#      `devin --export <atif.json>`.
+#      `devin --export <atif.json>`, `copilot --output-format json`.
 #   5. Perform the git mechanics IN THE WORKER'S TREE: stage everything, commit
 #      with trailers, push `work/<slug>`, and put this delivery in that branch's
 #      pull request — `gh pr create --draft` when it has none, `gh pr edit` when
@@ -105,6 +105,41 @@
 #     granted nothing at all until a real run's export corrected it. None of it
 #     assumes any org's policy either: the same configuration is passed on every
 #     tier.
+#   * Copilot reports NOTHING about the permissions that actually applied — not
+#     in its envelope, not on stderr, not in its log at maximum verbosity — so
+#     the codex/devin read-back has no analogue here and this script does not
+#     pretend otherwise. What it does instead is TEST the containment before
+#     every dispatch. What that containment IS, exactly: a worker is kept off
+#     `git` and `gh`, and nothing else is enforced. Three things carry it,
+#     because no one of them is enough: deny rules for git and gh, which a
+#     `sh -c "…"` walks straight past; a preToolUse hook, which is the only
+#     thing in this CLI that sees a whole command string and therefore catches
+#     git in every wrapping the CLI's own shallow matchers miss; and the
+#     environment variable that makes repo hooks load in prompt mode at all,
+#     which the equivalent flag does NOT satisfy. A hook that fails to load
+#     fails OPEN, silently, so a cheap throwaway canary run then attempts an
+#     ordinary command, an in-tree file write of real source and a wrapped
+#     `git`, and the dispatch is REFUSED (exit 7) unless the first two ran and
+#     the git was blocked. Containment is tested at every dispatch, alongside
+#     the ordinary work it must not break, and never assumed.
+#   * There is NO enforced read boundary, and every copilot pull request
+#     discloses that in the wrapper's own provenance rather than implying one.
+#     A worktree path arm was built here and WITHDRAWN — ruled 2026-08-22,
+#     after five rounds in which the git/gh arm was never escaped once and the
+#     path arm was escaped five times, every escape a single token from a
+#     spelling that arm already refused. Inspecting command text is the wrong
+#     mechanism for a read boundary; the right one is where the worker RUNS —
+#     an OS-level sandbox, a container, a scratch user — which is a property of
+#     how a context is raised and is not this script's to give. So a copilot
+#     worker runs on the host's own login and reaches what that login reaches,
+#     exactly as a claude or a pi worker does today.
+#   * Two things the canary cannot do are said in the pull request rather than
+#     implied away: it proves the configuration at the START of the run and not
+#     throughout it, because a hook that times out is documented to fail open
+#     mid-run; and no channel anywhere reports the permission configuration that
+#     applied, so a copilot dispatch can say its containment loaded and blocked,
+#     never that a requested mode held. Every behaviour above is evidenced in
+#     .remit/copilot-first-class/probe-results.md.
 #   * A worker's returned message is untrusted text going into a document people
 #     read. The pull request body puts the wrapper's provenance FIRST and the
 #     worker's words LAST, inside a code fence longer than any fence in them, so
@@ -144,6 +179,8 @@
 #             5 run-level worker failure (the CLI itself exited non-zero)
 #             6 the run's own precondition failed (a confirmed downgrade of the
 #               containment asked for: codex's sandbox, devin's permission mode)
+#             7 the containment canary failed — copilot's containment did not
+#               demonstrably hold, so no worker was invoked
 
 set -u
 
@@ -157,9 +194,10 @@ rule_off() { printf -- '--------------------------------------------------------
 usage() {
 	cat >&2 <<'EOF'
 usage:
-  remit-dispatch --harness <claude|codex|pi|devin|native> --slug <slug> --dir <worker-worktree>
-                 --brief <briefing-file> --session <committing-session-url>
-                 --rule <model-precedence-rule> [--model <id>] [--provider <name>]
+  remit-dispatch --harness <claude|codex|pi|devin|copilot|native> --slug <slug>
+                 --dir <worker-worktree> --brief <briefing-file>
+                 --session <committing-session-url> --rule <model-precedence-rule>
+                 [--model <id>] [--effort <level>] [--provider <name>]
                  [--title <pr-title>] [--base <branch>] [--sandbox <mode>]
                  [--allowed-tools <spec>] [--exclude-tools <spec>] [--final-message <file>]
 
@@ -179,13 +217,15 @@ Exit codes: 0 delivered — committed, pushed, draft PR open
             5 run-level worker failure (the CLI itself exited non-zero)
             6 the run's own precondition failed (a confirmed downgrade of the
               containment asked for: codex's sandbox, devin's permission mode)
+            7 the containment canary failed — copilot's containment did not
+              demonstrably hold, so no worker was invoked
 EOF
 	exit 2
 }
 
 HARNESS='' SLUG='' BRIEF='' DIR='' SESSION='' RULE='' MODEL='' PROVIDER=''
 TITLE='' BASE=main SANDBOX=workspace-write ALLOWED='' EXCLUDED='' RETURNED=''
-SANDBOX_GIVEN=no
+SANDBOX_GIVEN=no EFFORT=''
 
 [ $# -gt 0 ] || usage
 while [ $# -gt 0 ]; do
@@ -197,6 +237,7 @@ while [ $# -gt 0 ]; do
 	--session) [ $# -ge 2 ] || die "--session needs a value"; SESSION=$2; shift 2 ;;
 	--rule) [ $# -ge 2 ] || die "--rule needs a value"; RULE=$2; shift 2 ;;
 	--model) [ $# -ge 2 ] || die "--model needs a value"; MODEL=$2; shift 2 ;;
+	--effort) [ $# -ge 2 ] || die "--effort needs a value"; EFFORT=$2; shift 2 ;;
 	--provider) [ $# -ge 2 ] || die "--provider needs a value"; PROVIDER=$2; shift 2 ;;
 	--title) [ $# -ge 2 ] || die "--title needs a value"; TITLE=$2; shift 2 ;;
 	--base) [ $# -ge 2 ] || die "--base needs a value"; BASE=$2; shift 2 ;;
@@ -210,10 +251,17 @@ while [ $# -gt 0 ]; do
 done
 
 case "$HARNESS" in
-claude | codex | pi | devin | native) ;;
-'') die "--harness is required (claude, codex, pi, devin, or native)" ;;
-*) die "unknown harness '$HARNESS' — this script drives claude, codex, pi and devin, plus native for a sub-agent of this harness; an unsupported target is reported, never substituted" ;;
+claude | codex | pi | devin | copilot | native) ;;
+'') die "--harness is required (claude, codex, pi, devin, copilot, or native)" ;;
+*) die "unknown harness '$HARNESS' — this script drives claude, codex, pi, devin and copilot, plus native for a sub-agent of this harness; an unsupported target is reported, never substituted" ;;
 esac
+# Reasoning effort is expressible on the command line for exactly one of these
+# CLIs. Where the harness has no effort control, the model half of a standing
+# constraint still binds and the effort half is unenforceable there — which is
+# said, not silently dropped, and certainly not accepted here and ignored.
+if [ -n "$EFFORT" ] && [ "$HARNESS" != copilot ]; then
+	die "--effort applies only to a copilot dispatch — no other CLI this script drives exposes a reasoning-effort control, and an effort this script cannot pass is never reported as one that applied"
+fi
 case "$SLUG" in
 *[!a-z0-9-]* | -* | '') die "invalid slug '$SLUG' — use lower-case letters, digits and hyphens" ;;
 esac
@@ -251,11 +299,12 @@ claude) CLI=claude ;;
 codex) CLI=codex ;;
 pi) CLI=pi ;;
 devin) CLI=devin ;;
+copilot) CLI=copilot ;;
 native) CLI='' ;;
 esac
-# devin is resolved separately below: it is not always on PATH, so "not on PATH"
-# is not the same question as "not installed".
-if [ -n "$CLI" ] && [ "$HARNESS" != devin ]; then
+# devin and copilot are resolved separately below: neither is always on PATH, so
+# "not on PATH" is not the same question as "not installed".
+if [ -n "$CLI" ] && [ "$HARNESS" != devin ] && [ "$HARNESS" != copilot ]; then
 	command -v "$CLI" >/dev/null 2>&1 ||
 		die "the '$CLI' CLI is not on PATH — that target is unavailable here; report it, do not substitute another"
 fi
@@ -360,6 +409,101 @@ if [ "$HARNESS" = devin ]; then
 		die "$DIR/.devin already exists — this script writes the worker's containment there for the run and removes it again, and it will not overwrite a .devin the repository already has"
 fi
 
+COPILOT='' COPILOT_VERSION='' COPILOT_HOST='' COPILOT_LOGIN='' COPILOT_JSON=''
+COPILOT_TIMEOUT=${REMIT_COPILOT_TIMEOUT:-3600}
+COPILOT_CANARY_TIMEOUT=${REMIT_COPILOT_CANARY_TIMEOUT:-300}
+COPILOT_CANARY_MODEL=${REMIT_COPILOT_CANARY_MODEL:-}
+COPILOT_HOOK_JSON='' COPILOT_HOOK_SH='' COPILOT_HOOKDIR_MADE='' COPILOT_GITHUBDIR_MADE=''
+COPILOT_CANARY_ID='' COPILOT_CANARY_AIU='' COPILOT_HOOK_ATTEST=''
+COPILOT_AIU='' COPILOT_PREMIUM=''
+# Displayed, not expanded: the rules themselves are appended one at a time with
+# globbing off, because `shell(git:*)` is a pathname pattern to an unquoted shell.
+COPILOT_DENY='shell(git) shell(git:*) shell(gh) shell(gh:*)'
+
+if [ "$HARNESS" = copilot ]; then
+	# Everything this block enforces was demonstrated against the shipped CLI and
+	# is evidenced in .remit/copilot-first-class/probe-results.md; nothing here is
+	# taken from GitHub's documentation, which the research found to be far behind
+	# the build that ships.
+	#
+	# The binary sits at the WinGet package ROOT — there is no bin/ subdirectory
+	# and the Links shim directory is empty, so devin's fallback shape does not
+	# transfer verbatim and is not reused.
+	if command -v copilot >/dev/null 2>&1; then
+		COPILOT=copilot
+	else
+		localapp=$(printf '%s' "${LOCALAPPDATA:-}" | tr '\\' '/')
+		packaged="$localapp/Microsoft/WinGet/Packages/GitHub.Copilot_Microsoft.Winget.Source_8wekyb3d8bbwe/copilot.exe"
+		[ -n "$localapp" ] && [ -x "$packaged" ] && COPILOT=$packaged
+	fi
+	[ -n "$COPILOT" ] ||
+		die "the 'copilot' CLI is neither on PATH nor at its package path — that target is unavailable here; report it, do not substitute another"
+
+	# The CLI updates itself by default, so the version that ran is read at
+	# dispatch time. A documented version would be a guess about the future.
+	COPILOT_VERSION=$("$COPILOT" --version 2>&1 | sed -n 1p | sed 's/[[:space:]]*$//')
+
+	# There is NO live authentication check to make. Copilot ships no
+	# `copilot auth status` and no `logout` subcommand, and an invalid
+	# COPILOT_GITHUB_TOKEN in the environment did not fail a run, so the documented
+	# precedence cannot be relied on either. What exists is a state file. This
+	# READS the identity the CLI records for itself and reports it; it does not
+	# check it, and it does not gate on it. remit assumes no account type — an
+	# adopter may hold any — so the account is recorded in the pull request the way
+	# a devin dispatch records tier and org, and never made a condition of running.
+	# Nothing but the host and the login is read, and neither is a credential:
+	# the token lives in the OS credential store, not in this file.
+	copilot_cfg="${HOME:-}/.copilot/config.json"
+	if [ -f "$copilot_cfg" ]; then
+		COPILOT_HOST=$(sed -n 's/.*"host"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$copilot_cfg" | sed -n 1p)
+		COPILOT_LOGIN=$(sed -n 's/.*"login"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$copilot_cfg" | sed -n 1p)
+	fi
+
+	# No flag guarantees a run is non-interactive. No probe ever saw one block —
+	# but a run that has never hung is not a run that cannot, so the wait is
+	# bounded by mechanism here as it is for devin, and `--no-ask-user` is passed
+	# so the agent has no ask_user tool to reach for.
+	case "$COPILOT_TIMEOUT" in
+	'' | *[!0-9]* | 0) die "REMIT_COPILOT_TIMEOUT must be a positive whole number of seconds, not '$COPILOT_TIMEOUT'" ;;
+	esac
+	case "$COPILOT_CANARY_TIMEOUT" in
+	'' | *[!0-9]* | 0) die "REMIT_COPILOT_CANARY_TIMEOUT must be a positive whole number of seconds, not '$COPILOT_CANARY_TIMEOUT'" ;;
+	esac
+	command -v timeout >/dev/null 2>&1 ||
+		die "no 'timeout' on PATH — a copilot run is bounded by mechanism because no flag guarantees non-interactivity, and an unguarded run is not substituted for a guarded one"
+	# The repo-hook opt-in is an ENVIRONMENT VARIABLE the child must be started
+	# with. Passing the equivalent permission flag does not satisfy the gate — that
+	# was demonstrated in the negative — so a shell that cannot set a variable for
+	# one child cannot contain a copilot worker at all.
+	command -v env >/dev/null 2>&1 ||
+		die "no 'env' on PATH — copilot loads repo hooks in prompt mode only when an environment variable is set for the run, and a dispatch that cannot set it cannot contain its worker; not dispatching"
+
+	# The JSONL envelope is the only channel carrying a copilot run's final message
+	# free of narration, and the only one carrying the run id, the served model and
+	# the cost. It is also what the containment canary is judged from. A dispatch
+	# whose result could not be read back is not started at all.
+	if command -v jq >/dev/null 2>&1; then
+		COPILOT_JSON=jq
+	elif command -v node >/dev/null 2>&1; then
+		COPILOT_JSON=node
+	else
+		die "neither jq nor node is on PATH — a copilot run is judged from its JSONL envelope, which nothing here could read; not dispatching"
+	fi
+
+	[ "$SANDBOX_GIVEN" = no ] ||
+		die "--sandbox does not apply to a copilot dispatch — this build ships no --sandbox flag at all, its OS-level sandboxing is experimental and reports every Windows host as supported without checking, and this script never passes it. A copilot worker's containment is the deny rules and the hook written for the run — git and gh, tested by a canary before the run starts — and the pull request says exactly that, including that no read boundary is enforced"
+
+	# .github/ is not devin's .devin/: almost every repository already has one, and
+	# this one does. So the guard is on the two FILES this script writes, never on
+	# the directory, and the removal afterwards takes back only what it created.
+	COPILOT_HOOK_JSON="$DIR/.github/hooks/remit-no-git.json"
+	COPILOT_HOOK_SH="$DIR/.github/hooks/remit-no-git.sh"
+	for f in "$COPILOT_HOOK_JSON" "$COPILOT_HOOK_SH"; do
+		[ ! -e "$f" ] ||
+			die "$f already exists — this script writes the worker's containment there for the run and removes it again, and it will not overwrite a file the repository already has"
+	done
+fi
+
 if [ -z "$TITLE" ]; then
 	item_brief="$ROOT/.remit/$SLUG/brief.md"
 	[ -f "$item_brief" ] && TITLE=$(sed -n '/^# /{s/^# *//p;q;}' "$item_brief")
@@ -395,6 +539,14 @@ if [ "$HARNESS" = devin ]; then
 	[ -n "$EXCLUDED" ] &&
 		say "  exclusions   : $EXCLUDED — under devin these are DENY rules, and a denied call ends the run rather than failing on its own. This dispatch has chosen a kill switch, not a scoping."
 	say "  bounded wait : ${DEVIN_TIMEOUT}s (REMIT_DEVIN_TIMEOUT)"
+fi
+if [ "$HARNESS" = copilot ]; then
+	say "  copilot bin  : $COPILOT"
+	say "  version      : ${COPILOT_VERSION:-<not reported>}"
+	say "  account      : ${COPILOT_LOGIN:-<not recorded>} at ${COPILOT_HOST:-<not recorded>} — recorded, not checked and not gated on"
+	say "  effort       : ${EFFORT:-<none asked for>}"
+	say "  containment  : deny [$COPILOT_DENY], plus a preToolUse hook written to $DIR/.github/hooks for the run — git and gh in any wrapping, and NOTHING else: no read boundary is enforced and the pull request discloses that rather than implying one. Then the repo-hook environment opt-in, then a canary that puts a wrapped git AND one in-tree file write of real source to the CLI before the worker is invoked"
+	say "  bounded wait : ${COPILOT_TIMEOUT}s (REMIT_COPILOT_TIMEOUT), canary ${COPILOT_CANARY_TIMEOUT}s"
 fi
 rule_off
 [ -n "$DEVIN_TIER_NOTE" ] && say "note: $DEVIN_TIER_NOTE"
@@ -498,6 +650,297 @@ exit 0
 EOF
 	return 0
 }
+
+# The copilot worker's containment, written into its tree for the run only.
+#
+# Three things, because no one of them is enough, and because the CLI reports
+# nothing at all about what applied:
+#
+#   1. Deny rules for git and gh. They fire, and a denial names the rule that
+#      fired — but the matcher only ever sees the STEM of a command, so
+#      `sh -c "git status"`, `powershell -Command "…"`, `cmd /c …` and
+#      `node -e "…"` all walk through. Naming the interpreters as well only moves
+#      the hole to the next interpreter on the machine.
+#   2. A preToolUse hook. It receives the WHOLE tool call — tool name and the
+#      full command string — which is why no amount of quoting or wrapping hides
+#      from it, and it is the only thing in this CLI that sees that much. That
+#      is the whole of what it uses that sight for: git and gh, on a word
+#      boundary, in any wrapping. It is NOT a read boundary. A worktree path arm
+#      lived here and was withdrawn — ruled 2026-08-22 — because five rounds of
+#      it were escaped by a one-token respelling apiece while this git test was
+#      never escaped once, and because the mechanism that holds a read boundary
+#      is the one a worker is RAISED in rather than any reading of command text.
+#      The canary below therefore puts a wrapped git to the live CLI alongside
+#      an in-tree write of real source, so neither the containment claim nor the
+#      claim that a worker can still work is ever made on no attempt at all.
+#   3. The environment opt-in. Repo hooks in .github/hooks/ do not load in prompt
+#      mode unless the folder is trusted or an environment variable says so — and
+#      a dispatch worktree is never trusted. The permission FLAG does not satisfy
+#      that gate; only the variable does.
+#
+# The hook file's schema is nested and Claude-Code-shaped, and `matcher` is a
+# regular expression, not a glob: `.*` matches every tool and `*` is rejected as
+# an invalid regex with the hook silently skipped. A hook that fails to load
+# blocks nothing and says nothing on stderr, which is why the canary exists.
+#
+# Written here, removed before staging, committed nowhere. The copies kept in the
+# run directory are the record of what actually applied.
+copilot_write_containment() { # $1 the worker's tree
+	if [ ! -d "$1/.github" ]; then
+		mkdir -p "$1/.github" || return 1
+		COPILOT_GITHUBDIR_MADE=yes
+	fi
+	if [ ! -d "$1/.github/hooks" ]; then
+		mkdir -p "$1/.github/hooks" || return 1
+		COPILOT_HOOKDIR_MADE=yes
+	fi
+	cat >"$1/.github/hooks/remit-no-git.json" <<'EOF' || return 1
+{
+  "hooks": {
+    "preToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [ { "type": "command", "command": "sh .github/hooks/remit-no-git.sh" } ]
+      }
+    ]
+  }
+}
+EOF
+	# git and gh, in any wrapping, and nothing else. Nothing is baked into this
+	# file at write time any longer: the tree path was, and it was baked in for
+	# the path arm that has since been withdrawn.
+	cat >"$1/.github/hooks/remit-no-git.sh" <<'EOF' || return 1
+#!/bin/sh
+# Written by remit-dispatch for one dispatch, and removed after it. Workers
+# never run git: the wrapper performs every git mechanic once the worker has
+# stopped, and a tree left uncommitted is exactly what it expects.
+#
+# This reads the WHOLE preToolUse payload rather than a parsed field of it, so
+# no quoting, chaining or interpreter-wrapping hides the command from the test.
+# That is the one thing this hook has that nothing else in this CLI does: the
+# deny matcher and the built-in path wall both inspect only what a command
+# leaves standing as an argument of its own, and both are walked past by the
+# same wrapped payload.
+#
+# The test is on a WORD BOUNDARY, never a substring: `.gitignore`, `digit`,
+# `legitimate` and `github` are ordinary words, and a worker that cannot say
+# them is a worker this hook has broken rather than contained.
+#
+# THIS HOOK ENFORCES NOTHING ELSE, and that is a decision rather than an
+# oversight. It is not a read boundary. A worktree path arm was built here and
+# withdrawn: five rounds of it were escaped by a one-token respelling apiece,
+# while this git test was never escaped once. A worker under this hook runs on
+# the host's own login and reaches whatever that login reaches. The boundary
+# that would hold is the one the worker is RAISED in — an OS-level sandbox, a
+# container, a scratch user — and no reading of command text substitutes for
+# it. The dispatch discloses exactly that in its pull request rather than
+# implying a boundary that is not here.
+payload=$(cat)
+if [ -z "$payload" ]; then
+	printf 'blocked by remit law: this hook could not read the tool call to check it, and it does not pass what it cannot read.\n' >&2
+	exit 2
+fi
+if printf '%s\n' "$payload" | grep -Eiq '(^|[^A-Za-z0-9_-])(git|gh)([^A-Za-z0-9_-]|$)'; then
+	printf 'blocked by remit law: a worker never runs git or gh. Author the working tree and stop there — remit-dispatch branches, commits, pushes and opens the pull request after you exit, and a tree you leave uncommitted is exactly what it expects.\n' >&2
+	exit 2
+fi
+exit 0
+EOF
+	return 0
+} # end copilot_write_containment
+
+# Removes only what was created — never a .github/ the repository already had.
+copilot_remove_containment() { # $1 the worker's tree
+	rm -f "$1/.github/hooks/remit-no-git.json" "$1/.github/hooks/remit-no-git.sh"
+	[ "$COPILOT_HOOKDIR_MADE" = yes ] && rmdir "$1/.github/hooks" 2>/dev/null
+	[ "$COPILOT_GITHUBDIR_MADE" = yes ] && rmdir "$1/.github" 2>/dev/null
+	return 0
+} # end copilot_remove_containment
+
+# Reading a copilot run out of its JSONL envelope. `final` is the reason this is
+# read at all: text-mode stdout glues the tool renderings to the answer with no
+# delimiter, while the envelope keeps them apart — the final message is the LAST
+# assistant.message whose toolRequests list is empty.
+NODE_COPILOT='const fs=require("fs");const ls=fs.readFileSync(process.argv[1],"utf8").split(/\r?\n/);const ev=[];for(const l of ls){if(!l.trim())continue;try{ev.push(JSON.parse(l))}catch(e){}}const k=process.argv[2];const T=t=>ev.filter(e=>e&&e.type===t);let v="";if(k==="final"){const m=T("assistant.message").filter(e=>((e.data&&e.data.toolRequests)||[]).length===0);if(m.length&&m[m.length-1].data.content!=null)process.stdout.write(String(m[m.length-1].data.content));process.exit(0)}else if(k==="calls"){const c={};for(const e of T("tool.execution_start"))c[e.data.toolCallId]=(e.data.arguments&&(e.data.arguments.command||e.data.arguments.path))||"";const out=[];for(const e of T("tool.execution_complete"))out.push((e.data.success?"ran":"blocked")+"\t"+(c[e.data.toolCallId]||""));process.stdout.write(out.join("\n")+(out.length?"\n":""));process.exit(0)}else if(k==="refusals"){const c={};for(const e of T("tool.execution_start"))c[e.data.toolCallId]=(e.data.arguments&&(e.data.arguments.command||e.data.arguments.path))||"";const out=[];for(const e of T("tool.execution_complete"))if(!e.data.success)out.push((c[e.data.toolCallId]||"?")+" -> "+(((e.data.error||{}).message)||"denied").split("\n")[0]);v=out.join(" | ")}else{const r=T("result");const last=r.length?r[r.length-1]:null;if(k==="session_id")v=last&&last.sessionId;else if(k==="result_present")v=last?"yes":"";else if(k==="premium")v=last&&last.usage&&last.usage.premiumRequests;else if(k==="changed")v=(last&&last.usage&&last.usage.codeChanges&&last.usage.codeChanges.filesModified||[]).join(", ");else if(k==="model"){const m=T("assistant.message");v=m.length&&m[m.length-1].data?m[m.length-1].data.model:""}else if(k==="aiu"){const u=T("session.usage_checkpoint");if(u.length){const n=u[u.length-1].data.totalNanoAiu;if(typeof n==="number")v=(n/1e9).toFixed(3)}}}process.stdout.write(v==null||v===false?"":String(v)+"\n")'
+copilot_get() { # $1 envelope file  $2 field
+	case "$COPILOT_JSON" in
+	jq)
+		case "$2" in
+		final) jq -rs '[.[] | select(.type=="assistant.message") | select(((.data.toolRequests // []) | length) == 0)] | last | .data.content // empty' "$1" ;;
+		calls) jq -rs '(reduce (.[] | select(.type=="tool.execution_start")) as $e ({}; .[$e.data.toolCallId] = ($e.data.arguments.command // $e.data.arguments.path // ""))) as $c | .[] | select(.type=="tool.execution_complete") | [(if .data.success then "ran" else "blocked" end), ($c[.data.toolCallId] // "")] | @tsv' "$1" ;;
+		refusals) jq -rs '(reduce (.[] | select(.type=="tool.execution_start")) as $e ({}; .[$e.data.toolCallId] = ($e.data.arguments.command // $e.data.arguments.path // ""))) as $c | [.[] | select(.type=="tool.execution_complete") | select(.data.success | not) | (($c[.data.toolCallId] // "?") + " -> " + ((.data.error.message // "denied") | split("\n")[0]))] | join(" | ")' "$1" ;;
+		session_id) jq -rs '[.[] | select(.type=="result")] | last | .sessionId // empty' "$1" ;;
+		result_present) jq -rs 'if any(.[]; .type=="result") then "yes" else empty end' "$1" ;;
+		premium) jq -rs '[.[] | select(.type=="result")] | last | .usage.premiumRequests // empty' "$1" ;;
+		changed) jq -rs '[.[] | select(.type=="result")] | last | ((.usage.codeChanges.filesModified // []) | join(", "))' "$1" ;;
+		model) jq -rs '[.[] | select(.type=="assistant.message")] | last | .data.model // empty' "$1" ;;
+		aiu) jq -rs '[.[] | select(.type=="session.usage_checkpoint")] | last | if . == null then empty else ((.data.totalNanoAiu / 1000000000 * 1000 | round) / 1000 | tostring) end' "$1" ;;
+		esac
+		;;
+	node) node -e "$NODE_COPILOT" "$1" "$2" ;;
+	esac
+} # end copilot_get
+
+# The canary. Containment on this CLI is tested at every dispatch and never
+# assumed, because the one mechanism that holds fails OPEN when it fails: a hook
+# with a bad matcher, a bad schema, or a path the CLI cannot reach is skipped and
+# the run proceeds uncontained with nothing on stderr to say so.
+#
+# So a cheap throwaway run, in the worker's own tree, under the exact
+# configuration the worker will get, attempts three things. Two must RUN: an
+# ordinary command, and an ordinary in-tree FILE WRITE through the file tool.
+# One must be BLOCKED: a wrapped `git`, which is the whole of what this
+# containment claims. Anything else — including a run in which the model simply
+# declined to attempt one of them — refuses the dispatch. This is the honest
+# analogue of the codex sandbox read-back: refuse, never downgrade silently.
+#
+# It probes exactly what the containment claims and nothing else. It once put
+# four spellings of leaving the tree to the CLI as well, for a worktree path arm
+# that has since been withdrawn: there is no read boundary to test now, and a
+# canary that went on testing one would be certifying a claim this dispatch no
+# longer makes.
+#
+# The WRITE probe is here for the mirror image of that, and it is not decoration.
+# A containment can be tightened until nothing escapes and nothing works, and a
+# gate that only ever probes escapes reports PASSED over a hook under which no
+# worker can author a line — which is exactly what happened here once, when a
+# network-path test began firing on every Windows path a file tool sends,
+# including the tree's own. Ordinary work is now part of what the gate certifies,
+# so that failure cannot pass this gate again.
+#
+# The probe's CONTENT is load-bearing for the same reason. A write probe whose
+# text is one line of prose no boundary would ever object to certifies nothing
+# about authoring: it passed unchanged over a containment that refused a `//`
+# comment and a closing tag in a worker's own source. So the probe writes a line
+# of real source — a line comment and a closing markup tag — and the file is
+# read back and required to carry both before the gate calls the write a write.
+#
+# The probes are written to a manifest FIRST and the prompt is generated from
+# it, so what the CLI is asked to do and what any test replays are one list and
+# cannot drift apart.
+#
+# Its cost is one small run. It bills the dispatch's own model unless
+# REMIT_COPILOT_CANARY_MODEL names a cheaper one, so nothing is substituted
+# behind the caller's back, and what it cost is recorded in the pull request.
+#
+# It tests the BASE containment — the rules and the hook this script writes — and
+# not any rules a caller added with --allowed-tools or --exclude-tools. That is
+# deliberate and it is not a hole: an added deny only narrows what a worker may
+# do, a denial outranks any allow, and the hook runs before either is consulted,
+# so no caller addition can loosen what the canary proved.
+COPILOT_CANARY_MARK=REMIT_CANARY_CONTROL_OK
+COPILOT_CANARY_FILE=remit-canary-write-probe.ts
+# Ordinary source, not prose: a line comment and a closing markup tag are the
+# two shapes a boundary built out of slashes refuses first, and a probe without
+# them cannot tell a containment from a harness broken shut.
+COPILOT_CANARY_WRITTEN='const canary = 1; // written by the containment canary and removed after it </probe>'
+copilot_canary() { # $1 the worker's tree — returns 0 if contained, 1 if not
+	# The tree is kept here because `set --` below takes $1 for the command line.
+	cop_tree=$1
+	cdir=$RUNDIR/canary
+	mkdir -p "$cdir/log" || return 1
+	# The blocked probe is a `git` inside `sh -c "…"`: the deny rules see only the
+	# stem of that command and let it through, so what refuses it can only be the
+	# hook. That is the whole of what this containment claims, and it is therefore
+	# the whole of what is put to the live CLI here.
+	cop_git='git status --porcelain'
+	# The manifest is written first and the prompt is generated from it, so the
+	# list of probes has one authoritative form: what the CLI is asked to attempt,
+	# and what any offline test replays against the hook, are the same lines.
+	cop_tab=$(printf '\t')
+	{
+		printf 'run%sshell%s%s\n' "$cop_tab" "$cop_tab" "echo $COPILOT_CANARY_MARK"
+		printf 'run%sfile%s%s\n' "$cop_tab" "$cop_tab" "$COPILOT_CANARY_FILE"
+		printf 'block%sshell%s%s\n' "$cop_tab" "$cop_tab" "sh -c \"$cop_git\""
+	} >"$cdir/probes"
+	{
+		printf 'You are a containment self-test for a dispatch wrapper. Nothing here is real\n'
+		printf 'work and nothing here is a task.\n\n'
+		printf 'Do exactly these things, one tool call each, in this order. Some of them are\n'
+		printf 'expected to be refused — that refusal IS the test — so attempt every one of\n'
+		printf 'them and do not stop when one is refused.\n\n'
+		cop_n=0
+		while IFS=$cop_tab read -r cop_ex cop_kind cop_text; do
+			cop_n=$((cop_n + 1))
+			case $cop_kind in
+			shell) printf '%s. Run this with the shell tool: %s\n' "$cop_n" "$cop_text" ;;
+			file) printf '%s. Using your file-creation tool and NOT a shell command, create a file\n   called %s in the current directory, whose whole content is the one line:\n   %s\n' "$cop_n" "$cop_text" "$COPILOT_CANARY_WRITTEN" ;;
+			esac
+		done <"$cdir/probes"
+		printf '\nThe last one is expected to be refused. Attempt it anyway: the refusal is\n'
+		printf 'the test, and a step not attempted is a step this run cannot report on.\n\n'
+		printf 'Then reply with exactly %s lines, one per step, in the form\n' "$cop_n"
+		printf '  <number>|RAN or BLOCKED\n\n'
+		printf 'Create, modify and delete nothing else. Run nothing else.\n'
+	} >"$cdir/prompt"
+
+	set -- env GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS=true \
+		timeout "$COPILOT_CANARY_TIMEOUT" "$COPILOT" \
+		--output-format json --allow-all-tools --no-ask-user --disable-builtin-mcps \
+		--log-dir "$cdir/log"
+	set -- "$@" --deny-tool 'shell(git)' --deny-tool 'shell(git:*)' \
+		--deny-tool 'shell(gh)' --deny-tool 'shell(gh:*)'
+	cop_model=${COPILOT_CANARY_MODEL:-$MODEL}
+	[ -n "$cop_model" ] && set -- "$@" --model "$cop_model"
+	say "containment canary: one throwaway run under the worker's own configuration${cop_model:+, on $cop_model}."
+	(cd "$cop_tree" && "$@" <"$cdir/prompt") >"$cdir/out.jsonl" 2>"$cdir/stderr"
+	cop_exit=$?
+
+	COPILOT_CANARY_ID=$(copilot_get "$cdir/out.jsonl" session_id)
+	COPILOT_CANARY_AIU=$(copilot_get "$cdir/out.jsonl" aiu)
+	# The log line is the one thing the CLI does say about its own hooks, and it
+	# is available at the default level. It cannot prove the hook WORKED — that is
+	# the canary's job — but when the canary fails it is what says why.
+	cop_loaded=no cop_bad=''
+	if grep -lq 'Loading repo hooks in prompt mode' "$cdir"/log/*.log 2>/dev/null; then cop_loaded=yes; fi
+	cop_bad=$(grep -h -E 'Invalid hook configuration|Invalid matcher regex' "$cdir"/log/*.log 2>/dev/null | sed -n 1p)
+	COPILOT_HOOK_ATTEST="repo hooks loaded: $cop_loaded${cop_bad:+; the CLI rejected the hook file: $cop_bad}"
+
+	cop_calls=$(copilot_get "$cdir/out.jsonl" calls)
+	cop_v() { printf '%s\n' "$cop_calls" | grep -F -- "$1" | sed -n 1p | cut -f1; }
+	cop_control=$(cop_v "$COPILOT_CANARY_MARK")
+	cop_wrapped=$(cop_v "$cop_git")
+	# The write probe is judged on DISK and on its CONTENT, not on the envelope:
+	# a file that is there carrying the source it was asked to carry is the only
+	# thing that proves a worker could have authored one, and it is proof no
+	# envelope field has to be trusted for. The content matters as much as the
+	# file — a comment and a closing tag are the shapes a containment breaks
+	# first, and a probe that wrote a line of prose instead once passed over a
+	# containment under which no worker could write either. It is then removed —
+	# the canary runs in the worker's own tree, before the worker does, and
+	# anything it left behind would be staged later as the worker's authorship
+	# with nothing able to tell them apart.
+	cop_wrote=no
+	if [ -f "$cop_tree/$COPILOT_CANARY_FILE" ]; then
+		cop_wrote=empty
+		grep -Fq '//' "$cop_tree/$COPILOT_CANARY_FILE" &&
+			grep -Fq '</' "$cop_tree/$COPILOT_CANARY_FILE" &&
+			cop_wrote=yes
+	fi
+	rm -f "$cop_tree/$COPILOT_CANARY_FILE"
+	# So the tree must be left as it was found APART from that one probe file,
+	# which is expected and is accounted for above. Anything else is the failure
+	# this check exists for.
+	cop_dirt=$(copilot_get "$cdir/out.jsonl" changed |
+		tr ',' '\n' | sed 's|.*[/\\]||; s|^ *||; s| *$||' |
+		grep -v -x -F "$COPILOT_CANARY_FILE" | grep -v '^$' | tr '\n' ' ' | sed 's| *$||')
+
+	if [ "$cop_control" = ran ] && [ "$cop_wrote" = yes ] && [ "$cop_wrapped" = blocked ] && [ -z "$cop_dirt" ]; then
+		say "containment canary PASSED: the ordinary command ran, an ordinary in-tree file write RAN and left on disk a line of real source carrying a \`//\` comment and a closing tag, and the wrapped git — which the deny rules cannot see inside — was blocked. That is what this containment claims and all it claims: no read boundary is enforced, and the pull request says so. Session ${COPILOT_CANARY_ID:-not reported}, ${COPILOT_CANARY_AIU:-unreported} AI credits. Log attestation: $COPILOT_HOOK_ATTEST."
+		return 0
+	fi
+
+	say "FAILED CONTAINMENT CANARY: this dispatch cannot show that its worker would have been contained AND able to work, so no worker was invoked."
+	say "  ordinary command   : ${cop_control:-never attempted} (must be: ran)"
+	say "  in-tree file write : $cop_wrote (must be: yes — the file must be on disk after the run AND carry the \`//\` comment and the closing tag it was asked for; 'empty' means the file is there but its source is not, which is a containment that permits a write and refuses what workers actually write)"
+	say "  wrapped git        : ${cop_wrapped:-never attempted} (must be: blocked)"
+	say "  log attestation    : $COPILOT_HOOK_ATTEST"
+	[ -n "$cop_dirt" ] &&
+		say "  tree left dirty    : $cop_dirt (must be: nothing beyond the write probe, which is removed) — the canary wrote into the worker's tree, and nothing later could tell its files from the worker's"
+	say "  canary exit code   : $cop_exit; session ${COPILOT_CANARY_ID:-not reported}; envelope kept at $cdir"
+	say "A 'never attempted' line is not proof the containment holds: it means the canary model did not issue that call, so the test did not run. A 'ran' on the wrapped git line means the containment did NOT hold and a worker would have been free to do the same. A 'no' or an 'empty' on the file-write line is the opposite failure and refuses the dispatch just as firmly: a containment that also refuses ordinary authoring is not a containment, it is a broken harness, and a gate that never tries to write the shapes workers write cannot tell the two apart. Either way this is reported, not worked around, and never downgraded to a warning."
+	return 1
+} # end copilot_canary
 
 SANDBOX_APPLIED=''
 RUN_ID=''
@@ -612,6 +1055,71 @@ devin)
 	rm -rf "$DIR/.devin"
 	[ ! -e "$DIR/.devin" ] || die "could not remove the containment at $DIR/.devin — refusing to stage a tree that still carries dispatch apparatus"
 	;;
+copilot)
+	# The briefing goes on stdin. `--prompt-file` does not exist here and the
+	# argv channel dies above roughly 32 KB with the shell's own "Argument list
+	# too long" before the CLI even starts — a cliff with no warning on the near
+	# side of it, and a remit briefing is kilobytes and grows.
+	#
+	# `--allow-all-tools` and never `--allow-all` or `--yolo`: the blunt flags
+	# throw away the file-tool refusals and the naive-command refusals for
+	# nothing. That default path wall is kept because it is free, not because it
+	# contains anything — the hook below is what contains.
+	#
+	# `--disable-builtin-mcps` because the built-in GitHub server connects on
+	# every run by default, and a worker reaching GitHub through an MCP tool is
+	# invisible to every shell deny rule and to a hook that inspects shell
+	# commands. Ruled: the CLI is the route and that server is not.
+	#
+	# Never `--no-custom-instructions`, which would strip the AGENTS.md a worker
+	# needs; never `--share`, whose default path writes the transcript into the
+	# directory about to be staged; never `--share-gist`. No catalogue pre-check,
+	# unlike pi: an unknown model id and an unsupported effort are each refused
+	# pre-flight, in seconds, with nothing billed.
+	copilot_write_containment "$DIR" || {
+		copilot_remove_containment "$DIR"
+		die "could not write the worker's containment under $DIR/.github/hooks — not dispatching a worker this script cannot contain"
+	}
+	cp "$COPILOT_HOOK_JSON" "$RUNDIR/copilot-remit-no-git.json"
+	cp "$COPILOT_HOOK_SH" "$RUNDIR/copilot-remit-no-git.sh"
+	if ! copilot_canary "$DIR"; then
+		copilot_remove_containment "$DIR"
+		tree_state_early=$(git -C "$DIR" status --porcelain)
+		[ -n "$tree_state_early" ] &&
+			say "the tree at $DIR is left exactly as it was; nothing was staged and nothing was discarded."
+		exit 7
+	fi
+	set -- env GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS=true \
+		timeout "$COPILOT_TIMEOUT" "$COPILOT" \
+		--output-format json --allow-all-tools --no-ask-user --disable-builtin-mcps \
+		--log-dir "$RUNDIR/copilot-log"
+	set -- "$@" --deny-tool 'shell(git)' --deny-tool 'shell(git:*)' \
+		--deny-tool 'shell(gh)' --deny-tool 'shell(gh:*)'
+	# `shell(git:*)` is a pathname pattern to an unquoted shell, so any caller
+	# additions are split with globbing off.
+	if [ -n "$EXCLUDED" ] || [ -n "$ALLOWED" ]; then
+		cop_ifs=$IFS
+		set -f
+		IFS=' ,'
+		for r in $EXCLUDED; do set -- "$@" --deny-tool "$r"; done
+		for r in $ALLOWED; do set -- "$@" --allow-tool "$r"; done
+		IFS=$cop_ifs
+		set +f
+	fi
+	[ -n "$MODEL" ] && set -- "$@" --model "$MODEL"
+	# Both halves of a standing model constraint are expressible on this CLI, so
+	# both are passed where the dispatch named them, and neither is reported as
+	# applied when it was not.
+	[ -n "$EFFORT" ] && set -- "$@" --effort "$EFFORT"
+	say "invoking: $* < $(basename "$BRIEF")"
+	run_worker "$BRIEF" "$@"
+	# The containment was apparatus for the run; it is not part of the tree the
+	# worker delivers and it is gone before anything is staged. The PR body says
+	# it was removed, so its removal is asserted, not assumed.
+	copilot_remove_containment "$DIR"
+	{ [ ! -e "$COPILOT_HOOK_JSON" ] && [ ! -e "$COPILOT_HOOK_SH" ]; } ||
+		die "could not remove the containment at $DIR/.github/hooks — refusing to stage a tree that still carries dispatch apparatus"
+	;;
 native)
 	# Steps 2-4 were the harness's: it invoked the sub-agent, waited for it, and
 	# returned its result. Nothing is invoked here.
@@ -724,6 +1232,42 @@ devin)
 			final_note="${final_note:+$final_note; }tool calls were refused during this run and devin still exited 0: $refusals"
 	fi
 	;;
+copilot)
+	# Text-mode stdout glues the tool renderings to the answer with no stable
+	# delimiter, and `-s` gives a clean answer at the price of every scrap of
+	# provenance, the session id included. The JSONL envelope is neither: it keeps
+	# narration and answer apart as separate labelled records, and carries the run
+	# id, the model that served the run, its cost, and every denied call with the
+	# reason. stderr is empty on a JSON run, so anything on it is a diagnostic.
+	: >"$FINALFILE"
+	model_channel='run envelope'
+	if [ ! -s "$OUTFILE" ]; then
+		final_note="copilot wrote no JSONL envelope, so nothing about this run can be read back — the final message, the run id, the model that served it and its cost are all absent here, and none of them is invented"
+	else
+		copilot_get "$OUTFILE" final >"$FINALFILE"
+		RUN_ID=$(copilot_get "$OUTFILE" session_id)
+		run_model=$(copilot_get "$OUTFILE" model)
+		[ -n "$run_model" ] && MODEL_AUTHORED=$run_model
+		COPILOT_AIU=$(copilot_get "$OUTFILE" aiu)
+		COPILOT_PREMIUM=$(copilot_get "$OUTFILE" premium)
+		# A run that never started writes no terminal result event at all, which
+		# makes "did a run happen?" a fact rather than an inference — the exit
+		# code cannot tell them apart on its own.
+		[ -z "$(copilot_get "$OUTFILE" result_present)" ] &&
+			final_note="the envelope carries no terminal result event, so this run never completed — what is above, if anything, is a fragment and not an answer"
+		if [ ! -s "$FINALFILE" ]; then
+			final_note="${final_note:+$final_note; }the envelope carries no assistant message free of tool calls — this run produced no final message"
+		fi
+		# Exit 0 covers a clean run, a run whose every call was denied by a rule,
+		# and a run whose every call was blocked by the hook. Denials are silent
+		# on stderr and invisible in the exit code, so the envelope is read for
+		# them. On a copilot dispatch some of these are the containment working
+		# as designed; they are reported either way and never summarised away.
+		cop_refusals=$(copilot_get "$OUTFILE" refusals)
+		[ -n "$cop_refusals" ] &&
+			final_note="${final_note:+$final_note; }tool calls were refused during this run and copilot still exited 0 — the containment firing looks exactly like this, and so does a worker being stopped from doing its task: $cop_refusals"
+	fi
+	;;
 pi)
 	cp "$OUTFILE" "$FINALFILE"
 	;;
@@ -769,6 +1313,10 @@ tree_state() {
 		say "the worker's tree at $DIR has no uncommitted changes."
 	fi
 }
+
+if [ "$HARNESS" = copilot ] && [ "$WORKER_EXIT" -eq 124 ]; then
+	say "the run did not stop on its own and was killed at the ${COPILOT_TIMEOUT}s bound. No probe of this CLI ever saw a run block, but a run that has never hung is not a run that cannot, and a hang is reported as a hang — never as completion, and never as a delivery."
+fi
 
 if [ "$HARNESS" = devin ] && [ "$WORKER_EXIT" -eq 124 ]; then
 	say "the run did not stop on its own and was killed at the ${DEVIN_TIMEOUT}s bound. A -p run can still be dropped into a prompt no flag suppresses, and a hang is reported as a hang — never as completion, and never as a delivery."
@@ -969,6 +1517,28 @@ write_delivery_section() { # $1 create|update -> this delivery's section, on std
 			printf -- '- Run cost: %s ACU — devin'\''s own per-step cost, summed from the run export\n' "$DEVIN_ACU"
 		else
 			printf -- '- Run cost: not reported by the run export — absent, never invented\n'
+		fi
+	elif [ "$HARNESS" = copilot ]; then
+		[ -n "$EFFORT" ] &&
+			printf -- '- Reasoning effort: `%s`, passed on the command line and refused pre-flight by the CLI had this model not supported it. Both halves of the model constraint are expressible here, so neither is recorded as unenforceable.\n' "$EFFORT"
+		printf -- '- Permission configuration that actually applied: **not reported by this CLI, in any channel** — not in the envelope, not on stderr, not in the log at maximum verbosity. codex reads its sandbox back out of its run header and devin reads its permission mode out of its export; copilot has no analogue, so nothing below should be read as a mode compared against one requested. What is below is what the containment was demonstrated to DO.\n'
+		printf -- '- Containment applied to the worker: deny rules [%s], which fire and name themselves but only ever see the stem of a command; a `preToolUse` hook, which sees the whole tool call and therefore catches `git` and `gh` in EVERY wrapping the stem matchers miss — `sh -c "…"`, `powershell -Command`, `cmd /c`, `node -e`, a chained command, a subshell; and the environment opt-in without which repo hooks do not load in prompt mode at all. Written into the worker'\''s tree at `.github/hooks/` for the run and removed before anything was staged; the copies are in the run log.\n' \
+			"$COPILOT_DENY${EXCLUDED:+ $EXCLUDED}"
+		printf -- '- Contained from git and gh by a tested hook. Runs on the practitioner'\''s host under their credentials with no enforced read boundary — treat it as you would any process you run.\n'
+		printf -- '- That disclosure is a ruling, not an omission. A worktree path arm was built into this hook and **withdrawn** — ruled 2026-08-22, after five build-and-evaluate rounds in which the git/gh arm was never escaped once and the path arm was escaped five times, each escape a single token from a spelling that arm already refused. Inspecting command text is the wrong mechanism for a read boundary; the one that holds is where a worker RUNS — an OS-level sandbox, a container, a scratch user — which is a property of how the context was raised and is not this wrapper'\''s to give. A claude or a pi worker reaches exactly as far today, and the same disclosure applies to them.\n'
+		printf -- '- Containment canary: **PASSED** before this worker was invoked. A throwaway run under this exact configuration attempted three things — an ordinary command, an in-tree file write through the file tool, and a wrapped `git`; the first two ran and the git was blocked. The wrapped git is the probe that matters, because the deny rules cannot see inside it and only the hook can refuse it. A containment that also refuses ordinary authoring is a broken harness rather than a containment, which is why the write is attempted beside it — and the file it writes is a line of real source carrying a `//` comment and a closing tag, read back off disk and required to still hold both, because a probe of unobjectionable prose certifies nothing about the shapes workers actually write. Anything else would have refused the dispatch (exit 7) rather than downgrading it to a warning. Canary session %s, cost %s AI credits. Log attestation: %s.\n' \
+			"${COPILOT_CANARY_ID:-not reported}" "${COPILOT_CANARY_AIU:-unreported}" "${COPILOT_HOOK_ATTEST:-not read}"
+		printf -- '- What the canary does **not** establish, said plainly rather than implied away: it proves the configuration at the **start** of this run, not throughout it — a hook that times out is documented to let the tool call continue, which is a fail-open this project has never reproduced and cannot rule out mid-run; and because nothing reports the configuration that applied, this dispatch can say its containment loaded and blocked, never that a requested mode held for the whole run.\n'
+		printf -- '- Isolation: the linked worktree the worker was given, those deny rules, and that hook — and nothing at the OS level. The worktree is where the work was put, not a wall around it; this build ships no sandbox flag, so no line above should be read as implying one.\n'
+		printf -- '- Account this run was billed and governed by: %s at %s. Recorded, not gated: remit assumes no account type and an adopter may hold any. There is also **no live authentication check to make** — this CLI ships no auth-status and no logout subcommand, and an invalid token in the environment did not fail a run — so the line above is read from the CLI'\''s own state file and is not a check that passed.\n' \
+			"${COPILOT_LOGIN:-not recorded}" "${COPILOT_HOST:-not recorded}"
+		printf -- '- Harness version: %s. This CLI updates itself by default, so that is the version read at dispatch time and not a version this project pins.\n' \
+			"${COPILOT_VERSION:-unconfirmed (not reported)}"
+		if [ -n "$COPILOT_AIU" ]; then
+			printf -- '- Run cost: %s AI credits%s — the CLI'\''s own figure, from the run envelope. The canary above is billed separately and is additional to it.\n' \
+				"$COPILOT_AIU" "${COPILOT_PREMIUM:+, $COPILOT_PREMIUM premium requests}"
+		else
+			printf -- '- Run cost: not reported by the run envelope — absent, never invented\n'
 		fi
 	else
 		[ -n "$EXCLUDED" ] && printf -- '- Tools excluded from the worker: %s\n' "$EXCLUDED"

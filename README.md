@@ -14,7 +14,7 @@ their consequences.
 remit has two POSIX scripts and five conventions. It has no service or database. No daemon
 runs. Why it exists, in the practitioner's own words: [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.1.4. Early, and in use.**
+**Version 0.1.5. Early, and in use.**
 
 ## One piece of work, start to finish
 
@@ -188,10 +188,10 @@ sh /tmp/get-remit.sh /path/to/your-repository
 Pin the bootstrap to this release when you need a repeatable install:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.1.4 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.1.5 sh -s -- /path/to/your-repository
 ```
 
-Place `REMIT_REF=v0.1.4` immediately before `sh`, the last command in the pipeline, so
+Place `REMIT_REF=v0.1.5` immediately before `sh`, the last command in the pipeline, so
 `get-remit.sh` receives the variable. If you already have a remit clone, run its installer directly:
 
 ```sh
@@ -220,9 +220,9 @@ The installer adds:
 
 ## Use your harness
 
-remit is built for four harnesses, one to each heading below. The installer places the five
+remit is built for five harnesses, one to each heading below. The installer places the five
 conventions in the discovery path each one reads, and `bin/remit-dispatch` demonstrates CLI
-invocation for all four. remit's state is Git, its mechanics are POSIX shell, and its
+invocation for all five. remit's state is Git, its mechanics are POSIX shell, and its
 conventions are Markdown.
 
 Change the harness without changing the item's identity, boundary, decisions, state, or
@@ -277,6 +277,25 @@ printed 22 model families, ordered here for reading: `claude-opus-5`, `claude-fa
 `claude-haiku-4.5`, `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5`, `gemini-3.6-flash`,
 `gemini-3.1-pro`, `gemini-3-flash`, `kimi-k3`, `kimi-k2.7`, `kimi-k2.6`, `glm-5.2`, `swe-1.7`,
 `swe-1.7-lightning`, `swe-1.6`, `swe-1.6-fast`, and `adaptive`.
+
+### GitHub Copilot CLI
+
+No path of its own either: it reads the installed `AGENTS.md` section and discovers the
+installed `.agents/skills/` natively. An unknown id is refused before the run starts, and so is
+a reasoning effort the named model does not offer — this is the one harness here where a
+dispatch can name both and have both checked before anything is billed. Its containment is a
+hook written into the worker's tree for the run: it keeps the worker off `git` and `gh` in any
+wrapping, and a throwaway probe run tests that before the worker is invoked, so a dispatch that
+cannot show its worker was contained is refused rather than run. That is the whole of what it
+enforces. A Copilot worker runs on your own machine under your own credentials with no enforced
+read boundary — treat it as you would any process you run — and every pull request it delivers
+says so. `copilot help config` lists the 27 ids its configuration accepts: `claude-sonnet-5`,
+`claude-fable-5`, `claude-opus-5`, `claude-opus-4.8`, `claude-opus-4.8-fast`,
+`claude-opus-4.7`, `claude-sonnet-4.6`, `claude-opus-4.6`, `claude-sonnet-4.5`,
+`claude-opus-4.5`, `claude-haiku-4.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`,
+`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex`, `gpt-5-mini`,
+`mai-code-1-flash-picker`, `gemini-3.7-flash`, `gemini-3.6-flash`, `gemini-3.5-flash`,
+`gemini-3.1-pro-preview`, `grok-4.5`, `kimi-k3`, and `kimi-k2.7-code`.
 
 This list was read on 21 August 2026. The models available to you depend on your subscription,
 and vendors change their model offerings often. Not every model is available at every subscription
