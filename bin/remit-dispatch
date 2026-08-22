@@ -33,10 +33,12 @@
 #      `claude -p --output-format json`, `codex exec -o <file>`, pi stdout,
 #      `devin --export <atif.json>`.
 #   5. Perform the git mechanics IN THE WORKER'S TREE: stage everything, commit
-#      with trailers, push `work/<slug>`, open the pull request with
-#      `gh pr create --draft`.
-#   6. Print the result: draft PR URL, branch, the worker's final message, and
-#      every mechanical outcome verbatim.
+#      with trailers, push `work/<slug>`, and put this delivery in that branch's
+#      pull request — `gh pr create --draft` when it has none, `gh pr edit` when
+#      it already has one.
+#   6. Print the result: the pull request URL, whether it was opened or brought
+#      up to this delivery, branch, the worker's final message, and every
+#      mechanical outcome verbatim.
 #
 # Because a script stages and commits, the coordinator never reads the worker's
 # diff: the tree travels from worker to draft PR without passing through anyone's
@@ -81,17 +83,50 @@
 #     containment is written into its tree for the run and removed before
 #     anything is staged: an `Exec(git)` deny, an allow list of what a worker
 #     needs, and a PreToolUse hook, because git reached through an allowed
-#     interpreter walks straight past a deny rule. On a devin dispatch
-#     `--allowed-tools` and `--exclude-tools` add entries to that allow and that
-#     deny, in devin's own matcher syntax. Every one of those is a probed
-#     behaviour, evidenced in `.remit/devin-first-class/probe-results.md`; none of
-#     it is inferred from Cognition's documentation, and none of it assumes any
-#     org's policy — the same configuration is passed on every tier.
+#     interpreter walks straight past a deny rule.
+#   * Under devin that containment is enforced by TERMINATION, not by refusal. A
+#     call that is denied — or simply not granted — does not fail on its own and
+#     leave the worker to try something else: the rejection cancels the whole
+#     batch it was issued in and the run stops there, exit 0, no final message,
+#     nothing on stderr but a warning, and the last agent step still calling
+#     tools. Three runs died that way, one of them at its first action. So a
+#     deny rule here is a kill switch and not a guardrail; an allow list that is
+#     merely incomplete is indistinguishable from one that is wrong, which is
+#     why the list below is everything a worker reaches for rather than the
+#     minimum that sounds prudent. On a devin dispatch `--allowed-tools` and
+#     `--exclude-tools` add entries to that allow and that deny, in devin's own
+#     matcher syntax — so an exclusion here does not scope a worker the way pi's
+#     whole-tool exclusion does; it arms a deny that ends the run the moment the
+#     worker touches it, and the dispatch record says so when one is given.
+#   * All of that is probed behaviour, evidenced in
+#     `.remit/devin-first-class/probe-results.md`. Cognition's
+#     documentation is not the source and has been found ahead of the build that
+#     ships — including on tool names, where the one entry that was taken from it
+#     granted nothing at all until a real run's export corrected it. None of it
+#     assumes any org's policy either: the same configuration is passed on every
+#     tier.
 #   * A worker's returned message is untrusted text going into a document people
 #     read. The pull request body puts the wrapper's provenance FIRST and the
 #     worker's words LAST, inside a code fence longer than any fence in them, so
 #     neither a `---` nor a copied heading in a worker's message can render as
 #     this script's own record of what ran.
+#   * A branch is delivered to more than once — a must-fix going back to a
+#     builder, a later phase of an item — and the body must describe the delivery
+#     that is actually on it. So the body is composed per DELIVERY: each one is a
+#     section of its own, with its own provenance and its own quoted message, and
+#     a delivery onto a branch that already has a pull request is ADDED TO THE TOP
+#     of that body, with the body already there copied through beneath it byte for
+#     byte. The pull request reads newest-first; no earlier delivery's provenance
+#     is conflated with a later one's; and because this script only ever adds
+#     above, no worker's returned message is ever edited or rewritten out of
+#     existence — a property of the mechanism, not a promise about care.
+#   * A body that cannot be updated is said, not papered over. The commit is
+#     pushed by then, so the delivery is not lost — but the pull request is now
+#     describing an earlier one, and that is reported as BODY NOT UPDATED (exit 3)
+#     naming the stale pull request, where the composed body is, and the one
+#     `gh pr edit` command that applies it. A body that could not be READ BACK is
+#     never replaced with this delivery alone: that would delete the record of the
+#     ones before it, so the wrapper refuses and reports instead.
 #   * A worker's run output — its narration, its tool calls, and for codex the
 #     unified diff of everything it authored — is captured but never printed on
 #     the success path. The tree travels from worker to draft PR without passing
@@ -130,7 +165,9 @@ usage:
 
 A worker authors a tree and never runs git; this turns that tree into a draft
 pull request: record, invoke, wait for exit, capture the final message, stage,
-commit with trailers, push work/<slug>, open the PR with `gh pr create --draft`.
+commit with trailers, push work/<slug>, and open the PR with `gh pr create
+--draft` — or, when that branch already has one, add this delivery to the top of
+its body with `gh pr edit`, keeping the record already there beneath it.
 
 --harness native skips the invocation only: the sub-agent was this harness's own,
 so --final-message carries what it returned and --brief is optional.
@@ -352,6 +389,11 @@ if [ "$HARNESS" = devin ]; then
 	say "  devin binary : $DEVIN"
 	say "  account      : tier ${DEVIN_TIER:-<not reported>}, primary org ${DEVIN_ORG:-<none reported>}"
 	say "  permissions  : requesting $DEVIN_MODE, with the git deny and the hook written to $DIR/.devin for the run"
+	# Said here rather than left to be discovered in the export: under devin a
+	# deny is a kill switch, so a dispatch that adds one is choosing to end the
+	# run at that call rather than to narrow what the worker may do in it.
+	[ -n "$EXCLUDED" ] &&
+		say "  exclusions   : $EXCLUDED — under devin these are DENY rules, and a denied call ends the run rather than failing on its own. This dispatch has chosen a kill switch, not a scoping."
 	say "  bounded wait : ${DEVIN_TIMEOUT}s (REMIT_DEVIN_TIMEOUT)"
 fi
 rule_off
@@ -377,8 +419,19 @@ run_worker() { # $1 stdin file or 'none'; rest: the command
 # status"` walked straight past a live deny rule when it was tried. A PreToolUse
 # hook sees the whole command string and closes that, and since a worker
 # realistically needs a shell, the hook is not a second line of defence here: it
-# is the line that holds. The allow list is what a worker needs and no more,
-# because an unlisted command is not prompted in a -p run, it is rejected.
+# is the line that holds — and holds by ending the run, which is what a block
+# costs here (this script's header).
+#
+# The allow list names tools by the shipped build's OWN names, read as
+# `function_name` values out of a real run's export — not the names Cognition
+# documents, which include a `glob` the build does not have. An entry that
+# matches nothing is silent: it grants nothing and says nothing, and the worker
+# that reaches for what it was meant to grant ends the run instead. So the list
+# is what a worker needs and ALL of it — an unlisted command is not prompted in
+# a -p run, it is rejected, and a rejection stops the run rather than the call —
+# with exec narrowed to `Exec(sh)`, so the deny and the hook still stand between
+# a worker and git. A list pruned for tidiness is a run that dies on its first
+# search.
 #
 # `accept-edits` is requested explicitly on every dispatch and every tier. It is
 # never inferred from an organisation's policy, and this configuration behaves
@@ -388,7 +441,7 @@ run_worker() { # $1 stdin file or 'none'; rest: the command
 # Written here, removed before staging, committed nowhere. The copies kept in the
 # run directory are the record of what actually applied.
 DEVIN_DENY='Exec(git) Exec(gh) Write(.git/**) Write(.devin/**)'
-DEVIN_ALLOW='read grep glob Exec(sh)'
+DEVIN_ALLOW='read write grep find_file_by_name todo_write get_output skill mcp_list_tools Exec(sh)'
 devin_json_array() { # $1 space- or comma-separated entries -> "a", "b"
 	printf '%s\n' "$1" | tr ' ,' '\n\n' |
 		awk 'NF { printf "%s%s", sep, "\"" $0 "\""; sep = ", " }'
@@ -421,6 +474,10 @@ EOF
 #!/bin/sh
 # Written by remit-dispatch for one dispatch, and removed after it. Workers never
 # run git: the wrapper performs every git mechanic once the worker has stopped.
+#
+# A block here does not refuse one call and let the worker carry on — under devin
+# the run stops at it. So the message below is written for whoever reads the run
+# afterwards as much as for the worker, which will not get to act on it.
 #
 # This reads the whole PreToolUse payload rather than a parsed field of it, so no
 # quoting, chaining or interpreter-wrapping can hide the command from the test.
@@ -824,12 +881,14 @@ fi
 say "push: $BRANCH accepted by origin."
 printf '%s\n' "$out"
 
-# The worker's returned message is untrusted text going into a rendered
-# document. Two things keep it from impersonating this script's own record, and
-# both are needed: the wrapper's provenance is written FIRST, so nothing the
-# worker writes can render above it; and the worker's words go LAST, inside a
-# code fence, so a `---` or a copied `## Provenance …` heading in them renders as
-# the literal characters it is instead of as document structure. The fence is
+# A branch can be delivered to more than once, so the body is composed per
+# DELIVERY and added to whatever is already there — the rule is in this script's
+# header. The rest of this is what stops a worker's returned message from
+# impersonating this script's own record. Two things do it, and both are needed:
+# the wrapper's provenance is written FIRST inside each section, so nothing the
+# worker writes can render above it; and the worker's words go LAST in it, inside
+# a code fence, so a `---` or a copied `## Provenance …` heading in them renders
+# as the literal characters it is instead of as document structure. The fence is
 # longer than the longest backtick run in the message, so a message containing a
 # fence of its own cannot close ours early and escape.
 ticks=$(grep -o '`\{1,\}' "$FINALFILE" 2>/dev/null | awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }')
@@ -838,8 +897,36 @@ fence_len=$((ticks + 1))
 [ "$fence_len" -ge 3 ] || fence_len=3
 FENCE=$(awk -v n="$fence_len" 'BEGIN { s = ""; while (length(s) < n) s = s "`"; print s }')
 
-BODYFILE="$RUNDIR/pr-body"
-{
+# Does this branch already have a pull request? Asked before anything is
+# composed, because the answer decides whether this delivery opens one or is
+# added to the one that is there. A lookup that FAILS is not read as "there is
+# none": it is said out loud, and the create below then reports for itself.
+PR_NUM='' PR_URL='' PR_DRAFT='' PR_ACTION=opened
+if existing=$(cd "$DIR" && gh pr list --head "$BRANCH" --state open --limit 1 \
+	--json number,url,isDraft --jq '.[] | "\(.number) \(.url) \(.isDraft)"' 2>"$RUNDIR/pr-lookup.err"); then
+	existing=$(printf '%s\n' "$existing" | sed -n 1p)
+	PR_NUM=$(printf '%s\n' "$existing" | awk '{print $1}')
+	PR_URL=$(printf '%s\n' "$existing" | awk '{print $2}')
+	PR_DRAFT=$(printf '%s\n' "$existing" | awk '{print $3}')
+	case "$PR_NUM" in
+	'' | *[!0-9]*) PR_NUM='' PR_URL='' PR_DRAFT='' ;;
+	esac
+else
+	say "note: the existing-pull-request lookup FAILED, so whether $BRANCH already has one is unknown here: $(tr '\n' ' ' <"$RUNDIR/pr-lookup.err")"
+	say "This dispatch will try to open one and report exactly what comes back; it does not update a body it never read."
+fi
+
+write_delivery_section() { # $1 create|update -> this delivery's section, on stdout
+	mode=$1
+	if [ "$mode" = update ]; then
+		printf '## This pull request now carries a later delivery\n\n'
+		printf 'The branch has been delivered to again. What it carries now is the delivery\n'
+		printf 'recorded immediately below — commit `%s`. Everything past the divider that\n' "$SHA"
+		printf 'closes this section is the record of the deliveries before it, kept exactly as\n'
+		printf 'it was written: this wrapper adds a delivery on top, and never edits or\n'
+		printf 'removes one that is already here. Where a section further down names a\n'
+		printf 'different commit, this one supersedes it.\n\n'
+	fi
 	printf '## Provenance — recorded by the wrapper, not by the worker\n\n'
 	printf 'The working tree is the worker'\''s authorship. Branch, commit, push and this\n'
 	printf 'pull request are `%s`'\''s mechanics, performed by the dispatching session:\n' "$ME"
@@ -892,34 +979,119 @@ BODYFILE="$RUNDIR/pr-body"
 	[ "$HARNESS" = native ] ||
 		printf -- '- Worker process exit code: %s (completion, not success)\n' "$WORKER_EXIT"
 	[ -n "$final_note" ] && printf -- '- Note: %s\n' "$final_note"
-	printf '\nThis pull request is a draft: it arrives unverified, and only a recorded\n'
-	printf 'passing verdict takes it out of draft.\n'
+	if [ "$mode" = update ] && [ "$PR_DRAFT" = false ]; then
+		printf '\nThis pull request is NOT a draft — an earlier delivery on it was flipped\n'
+		printf 'ready on a verdict, and this wrapper does not flip it back. This delivery\n'
+		printf 'arrives unverified like every other: nothing the wrapper does verifies it.\n'
+	elif [ "$mode" = update ] && [ "$PR_DRAFT" != true ]; then
+		printf '\nWhether this pull request is a draft could not be read back, so nothing here\n'
+		printf 'claims it either way. This delivery arrives unverified: nothing the wrapper\n'
+		printf 'does verifies it, and only a recorded passing verdict takes anything out of\n'
+		printf 'draft.\n'
+	else
+		printf '\nThis pull request is a draft: this delivery arrives unverified, and only a\n'
+		printf 'recorded passing verdict takes it out of draft.\n'
+	fi
 
 	printf '\n## What the worker returned\n\n'
 	printf 'Everything below is the worker'\''s own text, reproduced verbatim and unedited.\n'
 	printf 'It is quoted, not endorsed, and nothing in it is this wrapper'\''s record of what\n'
-	printf 'ran — that record is the section above, which no worker can write. This is the\n'
-	printf 'end of the document.\n\n'
+	if [ "$mode" = update ]; then
+		printf 'ran — that record is the section above, which no worker can write. The\n'
+		printf 'divider below it opens the earlier record described at the top of this\n'
+		printf 'section.\n\n'
+	else
+		printf 'ran — that record is the section above, which no worker can write. This is the\n'
+		printf 'end of the document.\n\n'
+	fi
 	printf '%s\n' "$FENCE"
 	cat "$FINALFILE"
 	printf '%s\n' "$FENCE"
-} >"$BODYFILE"
+}
 
-if ! PR=$(cd "$DIR" && gh pr create --draft --base "$BASE" --head "$BRANCH" --title "$TITLE" --body-file "$BODYFILE" 2>&1); then
-	say "MECHANICS FAILED at pull request — committed as $SHA and pushed to origin/$BRANCH, but no pull request was opened."
-	printf '%s\n' "$PR"
+BODYFILE="$RUNDIR/pr-body"
+
+body_not_updated() { # $1 what happened; $2 a body file that is ready to apply, or ''
+	say "BODY NOT UPDATED — the delivery is on the branch, and the body of pull request #$PR_NUM still describes an EARLIER delivery."
+	say "  what happened : $1"
+	say "  pull request  : #$PR_NUM $PR_URL — its body is now WRONG about what this branch carries"
+	say "  commit        : $SHA on $BRANCH, pushed and accepted by origin — the delivery is NOT lost"
+	say "  read instead  : the worker's final message, printed above and kept at $FINALFILE"
+	if [ -n "$2" ]; then
+		say "  the body it should carry is already composed at $2 ($(wc -c <"$2" | tr -d ' ') bytes; GitHub refuses a body over 65536)"
+		say "  apply it with : gh pr edit $PR_NUM --body-file $2"
+		say "That one command is the whole remedy, and what it applies is this wrapper's own composition: nobody writes, summarises or hand-edits a pull request body here."
+	else
+		say "  no combined body was composed: this wrapper will not replace a body it could not read, because replacing it would delete the earlier delivery's record. This delivery's own section alone is at $BODYFILE — to read, not to apply."
+	fi
 	exit 3
+}
+
+if [ -n "$PR_NUM" ]; then
+	say "pull request: #$PR_NUM already exists for $BRANCH — this delivery goes on top of its body, and the record already there is kept beneath it."
+	EXISTING_BODY="$RUNDIR/pr-body-existing"
+	if ! (cd "$DIR" && gh pr view "$PR_NUM" --json body --jq .body) >"$EXISTING_BODY" 2>"$EXISTING_BODY.err"; then
+		write_delivery_section update >"$BODYFILE"
+		body_not_updated "the existing body could not be read back: $(tr '\n' ' ' <"$EXISTING_BODY.err")" ''
+	fi
+	# The body that came back is copied through byte for byte, under this
+	# delivery's section and a divider. Nothing in it is parsed, matched or
+	# rewritten — which is what makes "no worker's message is ever edited" a
+	# property of the mechanism instead of a promise about care.
+	{
+		write_delivery_section update
+		printf '\n---\n\n'
+		cat "$EXISTING_BODY"
+	} >"$BODYFILE"
+	if ! out=$(cd "$DIR" && gh pr edit "$PR_NUM" --body-file "$BODYFILE" 2>&1); then
+		body_not_updated "gh pr edit failed: $(printf '%s' "$out" | tr '\n' ' ')" "$BODYFILE"
+	fi
+	# Read the body back rather than trusting an exit code — the same rule the
+	# sandbox and the permission mode are held to. The test is this delivery's
+	# commit line, which survives whatever GitHub normalises on the way through;
+	# a read-back that cannot be done at all is UNCONFIRMED and said so, never
+	# reported as a confirmation.
+	if verify=$( (cd "$DIR" && gh pr view "$PR_NUM" --json body --jq .body) 2>/dev/null ); then
+		printf '%s\n' "$verify" | grep -qF -- "- Commit: $SHA" ||
+			body_not_updated "gh pr edit reported success, but the body read back afterwards does not record commit $SHA" "$BODYFILE"
+		say "pull request: #$PR_NUM updated, and read back — its body now records commit $SHA."
+	else
+		say "note: #$PR_NUM was updated and its body could not be read back to confirm it, so the update is UNCONFIRMED here. Said, not assumed."
+	fi
+	PR=$PR_URL
+	PR_ACTION=updated
+else
+	write_delivery_section create >"$BODYFILE"
+	if ! PR=$(cd "$DIR" && gh pr create --draft --base "$BASE" --head "$BRANCH" --title "$TITLE" --body-file "$BODYFILE" 2>&1); then
+		say "MECHANICS FAILED at pull request — committed as $SHA and pushed to origin/$BRANCH, but no pull request was opened."
+		printf '%s\n' "$PR"
+		say "If the reason is that $BRANCH already has one, the lookup above could not confirm it, and this wrapper does not add a delivery to a body it never read."
+		say "The body this delivery should have carried is composed at $BODYFILE, and the worker's final message is printed above and kept at $FINALFILE. Neither is for anyone to rewrite by hand."
+		exit 3
+	fi
 fi
 
 # --- 6. print the result ------------------------------------------------------
 rule_off
-say "delivered — draft pull request open."
+if [ "$PR_ACTION" = updated ]; then
+	say "delivered — the pull request's body now leads with this delivery."
+else
+	say "delivered — draft pull request open."
+fi
 say "  pull request : $(printf '%s\n' "$PR" | sed -n 's|.*\(https://[^ ]*\).*|\1|p' | sed -n 1p)"
 say "  branch       : $BRANCH -> $BASE"
 say "  commit       : $SHA"
+[ "$PR_ACTION" = updated ] &&
+	say "  body         : this delivery added on top of #$PR_NUM; the earlier record kept beneath it, unedited"
 say "  worker       : $WHERE / ${MODEL_AUTHORED:-$CLI_DEFAULT} (rule $RULE), run id ${RUN_ID:-none printed}"
 say "  run log      : $RUNDIR"
 rule_off
 printf '%s\n' "$PR"
-say "It is a DRAFT. Exit code 0 means these mechanics succeeded — not that the work is good."
+if [ "$PR_ACTION" != updated ] || [ "$PR_DRAFT" = true ]; then
+	say "It is a DRAFT. Exit code 0 means these mechanics succeeded — not that the work is good."
+elif [ "$PR_DRAFT" = false ]; then
+	say "It is NOT a draft: an earlier delivery on it was flipped ready on a verdict and this wrapper did not flip it back — the body says so. Exit code 0 means these mechanics succeeded — not that the work is good."
+else
+	say "Whether it is a draft could not be read back, and nothing here claims it either way. Exit code 0 means these mechanics succeeded — not that the work is good."
+fi
 exit 0

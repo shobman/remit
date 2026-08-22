@@ -14,7 +14,7 @@ their consequences.
 remit has two POSIX scripts and five conventions. It has no service or database. No daemon
 runs. Why it exists, in the practitioner's own words: [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.1.3. Early, and in use.**
+**Version 0.1.4. Early, and in use.**
 
 ## One piece of work, start to finish
 
@@ -188,10 +188,10 @@ sh /tmp/get-remit.sh /path/to/your-repository
 Pin the bootstrap to this release when you need a repeatable install:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.1.3 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.1.4 sh -s -- /path/to/your-repository
 ```
 
-Place `REMIT_REF=v0.1.3` immediately before `sh`, the last command in the pipeline, so
+Place `REMIT_REF=v0.1.4` immediately before `sh`, the last command in the pipeline, so
 `get-remit.sh` receives the variable. If you already have a remit clone, run its installer directly:
 
 ```sh

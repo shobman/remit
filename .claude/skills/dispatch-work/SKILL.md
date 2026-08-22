@@ -155,10 +155,11 @@ sh "$(git rev-parse --show-toplevel)/bin/remit-dispatch" \
 It records the dispatch, invokes the worker CLI with the briefing on the channel that CLI accepts,
 waits for the process to exit, captures the worker's final message, then stages the tree, commits it
 with the session trailers AGENTS.md defines, pushes `work/<slug>`, and opens the pull request to
-`main` as a draft. The PR title is the experience delivered, not the change made — it comes from
-`--title`, or from the item brief's own heading. The body is the worker's final message plus the
-provenance the wrapper records: harness, model, precedence rule, the worker's run id where its CLI
-prints one, and that the tree is the worker's authorship while the git mechanics are the wrapper's.
+`main` as a draft — or, where that branch already has one, adds this delivery to it. The PR title is
+the experience delivered, not the change made — it comes from `--title`, or from the item brief's
+own heading. Each delivery's section of the body is the worker's final message plus the provenance
+the wrapper records: harness, model, precedence rule, the worker's run id where its CLI prints one,
+and that the tree is the worker's authorship while the git mechanics are the wrapper's.
 
 `--slug` names *this dispatch*, not the item: it is the branch, `work/<slug>`, and it is where the
 wrapper looks for `.remit/<slug>/brief.md` when you give it no `--title`. The default is **one pull
@@ -175,11 +176,20 @@ the wrapper will not find an item at that label and refuses to invent a title.
 A dispatch that lands on a branch already delivered to — a later phase, or a must-fix going back to
 a builder — takes the same `--slug` and a tree already standing on that branch: the wrapper creates
 the branch it is given and cannot create one that exists, so such a dispatch sent from a fresh
-`main` tree stops at the branch step. The wrapper will then report that its last step could not open
-a pull request, because one already exists for that branch: the commit and the push succeeded, and
-that PR is where the delivery appears. A must-fix is not another delivery — it is the same one,
-corrected — and its pull request stays a draft until a fresh verdict ends the loop (`evaluate-work`).
-Say all of that plainly rather than reading it as a lost delivery.
+`main` tree stops at the branch step. Sent from a tree that is on the branch, it delivers as any
+other dispatch does, and finds the pull request that branch already has: this delivery's section
+goes on top of that pull request's body and the record already there is kept beneath it, unedited.
+So the one pull request reads newest-first, the practitioner is never handed a body describing a
+delivery the branch has moved past, and nothing about it is yours to compose. A must-fix is not
+another delivery — it is the same one, corrected — and its pull request stays a draft until a fresh
+verdict ends the loop (`evaluate-work`).
+
+When the wrapper says **BODY NOT UPDATED** it means exactly that, and it is not a lost delivery: the
+commit is pushed and on the branch, and that pull request's body still describes an earlier
+delivery. The report names the stale pull request, the composed body, and the single `gh pr edit`
+command that applies it. Run that command; then say plainly what happened. Never hand-write, edit or
+summarise a pull request body yourself — the whole reason the wrapper composes it is that nobody
+does.
 
 Where the worker is a native sub-agent of this harness rather than a CLI, you invoke it yourself and
 then point the wrapper at the tree it left, with `--harness native --final-message <file>`. The

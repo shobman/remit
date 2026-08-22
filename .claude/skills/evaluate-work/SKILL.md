@@ -112,6 +112,16 @@ Give it isolation: a fresh context with its own worktree or scratch space. In Cl
 the Agent tool with `isolation: "worktree"`. If the harness has no such mechanism, say so rather
 than pretending the evaluator is fresh.
 
+Isolation is not containment, and an evaluator's containment is not a worker's. A worker never runs
+git, and a harness that can hold that mechanically should (`dispatch-work`); an evaluator may be
+sent to check a claim about exactly that containment, and a mechanism that refuses every command
+carrying the word `git` blocks the verification rather than the violation. So say in the briefing
+what holds the limits above: the harness's own mechanism where one holds them without blocking the
+checking, and otherwise restraint by instruction, disclosed as such in the briefing and in what you
+relay. Never present an instruction as a mechanism. This convention asks for nothing beyond that —
+if a delivery needs an evaluator held harder than its briefing can hold it, that is the
+practitioner's ruling to make and not yours to invent.
+
 ## What the evaluator must never receive
 
 - **The author's working conversation** — its exploration, its reasoning, its account of how the
