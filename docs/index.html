@@ -165,7 +165,7 @@
 <body>
   <header class="wrap site-head">
     <a class="wordmark" href="#top" aria-label="remit home">remit</a>
-    <span class="version">VERSION 0.1.5</span>
+    <span class="version">VERSION 0.1.6</span>
   </header>
 
   <main id="top">
@@ -207,8 +207,8 @@
         <h2 id="restraints-heading">Five restraints, kept with the work.</h2>
         <div class="anchor-grid">
           <article class="anchor">
-            <h3>Keep talking while workers build</h3>
-            <p>Isolated workers do the legwork while the coordinator keeps its context and stays available to you.</p>
+            <h3>Keep talking while builders build</h3>
+            <p>Isolated builders do the legwork while the coordinator keeps its context and stays available to you.</p>
           </article>
           <article class="anchor">
             <h3>Resume without reconstructing a chat</h3>
@@ -220,7 +220,7 @@
           </article>
           <article class="anchor">
             <h3>Move between AI providers</h3>
-            <p>You name the model at each dispatch, so one model can build and a rival can review. The item moves between them without copy and paste — <a href="#harnesses">five harnesses run remit's workers</a>.</p>
+            <p>You name the model at each dispatch, so one model can build and a rival can review. The item moves between them without copy and paste — <a href="#harnesses">five harnesses run remit's builders</a>.</p>
           </article>
           <article class="anchor">
             <h3>Know who made each change</h3>
@@ -238,7 +238,7 @@
         <figure class="journey-shell">
           <svg viewBox="0 0 1080 500" role="img" aria-labelledby="journey-title journey-desc">
             <title id="journey-title">A remit work item moving from capture to closure</title>
-            <desc id="journey-desc">Four connected steps. Capture creates a parked brief. The practitioner activates it. Dispatch sends a bounded worker and produces a draft pull request. Evaluate records a verdict from a fresh context. Close archives the item when the practitioner ends that work, whether delivered or abandoned.</desc>
+            <desc id="journey-desc">Four connected steps. Capture creates a parked brief. The practitioner activates it. Dispatch sends a bounded builder and produces a draft pull request. Evaluate records a verdict from a fresh context. Close archives the item when the practitioner ends that work, whether delivered or abandoned.</desc>
             <defs>
               <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                 <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--signal)"/>
@@ -264,11 +264,11 @@
                 <rect width="210" height="260" rx="18" fill="var(--paper)" stroke="var(--line)" stroke-width="2"/>
                 <text x="24" y="50" fill="var(--signal)" font-size="15" font-weight="750" letter-spacing="2">02</text>
                 <text x="24" y="88" fill="var(--ink)" font-size="28" font-weight="750">Dispatch</text>
-                <text x="24" y="122" fill="var(--muted)" font-size="16">A bounded worker</text>
+                <text x="24" y="122" fill="var(--muted)" font-size="16">A bounded builder</text>
                 <text x="24" y="146" fill="var(--muted)" font-size="16">authors in isolation.</text>
                 <rect x="24" y="180" width="104" height="34" rx="17" fill="var(--signal-soft)"/>
                 <text x="76" y="203" text-anchor="middle" fill="var(--signal)" font-size="14" font-weight="750">draft PR</text>
-                <text x="24" y="238" fill="var(--muted)" font-size="13">worker gets a bounded task</text>
+                <text x="24" y="238" fill="var(--muted)" font-size="13">builder gets a bounded task</text>
               </g>
               <g transform="translate(560 116)">
                 <rect width="210" height="260" rx="18" fill="var(--paper)" stroke="var(--line)" stroke-width="2"/>
@@ -284,8 +284,8 @@
                 <rect width="210" height="260" rx="18" fill="var(--accent)" stroke="var(--accent)" stroke-width="2"/>
                 <text x="24" y="50" fill="var(--accent-ink)" opacity=".78" font-size="15" font-weight="750" letter-spacing="2">04</text>
                 <text x="24" y="88" fill="var(--accent-ink)" font-size="28" font-weight="750">Close</text>
-                <text x="24" y="122" fill="var(--accent-ink)" opacity=".86" font-size="16">The practitioner accepts</text>
-                <text x="24" y="146" fill="var(--accent-ink)" opacity=".86" font-size="16">or ends the item.</text>
+                <text x="24" y="122" fill="var(--accent-ink)" opacity=".86" font-size="16">The practitioner rules</text>
+                <text x="24" y="146" fill="var(--accent-ink)" opacity=".86" font-size="16">the item finished.</text>
                 <rect x="24" y="180" width="100" height="34" rx="17" fill="var(--accent-ink)"/>
                 <text x="74" y="203" text-anchor="middle" fill="var(--accent)" font-size="14" font-weight="750">archived</text>
                 <text x="24" y="238" fill="var(--accent-ink)" opacity=".78" font-size="13">gone from current views</text>
@@ -321,7 +321,7 @@
           </article>
           <article class="harness">
             <h3>Copilot CLI</h3>
-            <p>The only one here that takes a reasoning effort as well as a model, and checks both before it bills anything. A hook written for the run keeps its worker off git and gh, and the dispatch tests that before it trusts it. There is no read boundary beyond that: the worker runs on your own machine under your own credentials, and every pull request says so.</p>
+            <p>The only one here that takes a reasoning effort as well as a model, and checks both before it bills anything. A hook written for the run keeps its builder off git and gh, and the dispatch tests that before it trusts it. There is no read boundary beyond that: the builder runs on your own machine under your own credentials, and every pull request says so.</p>
           </article>
         </div>
         <p class="harnesses"><a href="https://github.com/shobman/remit#use-your-harness">The README's model list</a> was read on 21 August 2026. The models available to you depend on your subscription, and vendors change their model offerings often. Not every model is available at every subscription level. remit does not maintain a compatibility matrix, so check the sources beside the list for what your subscription includes today. The pull request records which model actually served each run.</p>
@@ -357,7 +357,7 @@
   </main>
 
   <footer>
-    <div class="wrap">remit is MIT licensed. The repository README is the authority for what ships.</div>
+    <div class="wrap">remit is MIT licensed. The installed software is the authority for what remit does.</div>
   </footer>
 </body>
 </html>

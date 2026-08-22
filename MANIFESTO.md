@@ -34,7 +34,7 @@ of work is. And work exists only when I ask for it; it ends only when I say so.
 
 Working with remit is no different than working without it. But:
 
-- My agent is never too busy. Isolated workers do the legwork while the coordinator keeps its
+- My agent is never too busy. Isolated builders do the legwork while the coordinator keeps its
   context and keeps talking to me. That is where the throughput comes from.
 - Context that matters survives. Shut the machine down; days later the work continues where
   it stopped.
