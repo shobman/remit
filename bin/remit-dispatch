@@ -1,11 +1,31 @@
 #!/bin/sh
-# remit-dispatch — the deterministic dispatch wrapper: a worker goes in, a draft
-# pull request comes out.
+# remit-dispatch — RETIRED INTO `bin/remit-invoke` AND `bin/remit`. A shim, kept
+# so that anything still pointing here goes on working.
 #
-# Workers author the working tree and never run git (the Dispatch convention).
-# The mechanics that turn an authored tree into a draft pull request are this
-# script's, not a model's judgment — the same reason `bin/remit` exists. Point an
-# agent at it; nobody performs these steps by hand.
+# What this script used to be: a worker went in, a draft pull request came out.
+# Six steps — record the dispatch, invoke the worker CLI, wait for exit, capture
+# its final message, perform the git mechanics in its tree, print the result.
+#
+# Steps 2, 3 and 4 ARE NO LONGER HERE. Raising a fresh context is
+# `bin/remit-invoke`'s single job, and this script now makes ONE call to it:
+#
+#     REMIT_AUTHORITY=<briefing> REMIT_PROVENANCE=<sidecar> \
+#       sh bin/remit-invoke build <slug> <worktree> --harness … --model …
+#
+# Every harness adapter, the model verification, the containment written for a
+# devin or a copilot run, the canary, the sandbox and permission-mode read-backs
+# and every honesty rule that goes with them moved there WHOLE. They are stated
+# once, in that script's header, and are not restated here. So did the exit
+# codes 5, 6 and 7, which this shim passes through unchanged.
+#
+# Steps 1, 5 and 6 are STILL HERE, and that is deliberate rather than unfinished.
+# `bin/remit` has its own delivery seam, lifted from this one, which is what the
+# chain uses; this script's own git mechanics and its report are what three
+# shipped reproductions assert, against stand-in `git` and `gh` scripts that
+# answer exactly the calls THIS script makes and error on anything else. Moving
+# them would mean rewriting those stand-ins, which is changing a test to make the
+# work under test pass. The duplication is the delivery seam and it is named in
+# both scripts' headers; the duplication this change ends is the invocation.
 #
 #   sh bin/remit-dispatch --harness <claude|codex|pi|devin|copilot|native> --slug <slug> \
 #        --brief <briefing-file> --dir <worker-worktree> \
@@ -14,166 +34,37 @@
 #        [--base <branch>] [--sandbox <mode>] [--allowed-tools <spec>] \
 #        [--exclude-tools <spec>] [--final-message <file>]
 #
-# `--harness native` is the same mechanics without the invocation: the worker was
-# this harness's own sub-agent, the coordinator invoked it, and the wrapper is
-# pointed at the tree it left, with its returned result at --final-message. Steps
-# 2-4 belong to the harness in that case; steps 1, 5 and 6 are still this
-# script's, because tree delivery is universal and no worker anywhere runs git.
+# `--harness native` is the same mechanics without a CLI: the worker was the
+# calling harness's own sub-agent and `--final-message` carries what it returned.
+# That case goes through `remit-invoke` too, so there is one path and not two.
 #
-# The six steps, in order, exactly as the accepted design fixes them:
+# What is still true here, and is this script's own:
 #
-#   1. Record the dispatch — target triple, precedence rule, briefing, worker
-#      directory — before anything runs.
-#   2. Invoke the worker CLI with the briefing on the channel that CLI was
-#      probed to accept: stdin for `claude -p`, `codex exec -` and `copilot`,
-#      `@file` for `pi -p`, `--prompt-file` for `devin -p`.
-#   3. Wait for process exit. One deliberate foreground invocation; no queue, no
-#      background transport. The run's output is printed after exit.
-#   4. Capture the worker's final message from its own probed channel:
-#      `claude -p --output-format json`, `codex exec -o <file>`, pi stdout,
-#      `devin --export <atif.json>`, `copilot --output-format json`.
-#   5. Perform the git mechanics IN THE WORKER'S TREE: stage everything, commit
-#      with trailers, push `work/<slug>`, and put this delivery in that branch's
-#      pull request — `gh pr create --draft` when it has none, `gh pr edit` when
-#      it already has one.
-#   6. Print the result: the pull request URL, whether it was opened or brought
-#      up to this delivery, branch, the worker's final message, and every
-#      mechanical outcome verbatim.
-#
-# Because a script stages and commits, the coordinator never reads the worker's
-# diff: the tree travels from worker to draft PR without passing through anyone's
-# conversation.
-#
-# Trailers: `Co-Authored-By:` names the model that AUTHORED the work — authorship
-# is the worker's and is never obscured — and `Claude-Session:` names the session
-# that PERFORMS the commit, which under tree delivery is always the invoker's.
-# Both are given to this script; neither is invented.
-#
-# Honesty rules this script enforces, each of them a probed failure mode:
-#
-#   * Exit signals completion, not success. A worker CLI can exit 0 with every
-#     task command denied. Nothing here reads success from an exit code: success
-#     is established by the coordinator's check against the brief and by
-#     independent evaluation, reading the draft PR.
+#   * Because a script stages and commits, the coordinator never reads the
+#     worker's diff: the tree travels from worker to draft PR without passing
+#     through anyone's conversation.
+#   * Trailers: `Co-Authored-By:` names the model that AUTHORED the work — read
+#     from the invoke's provenance, which carries the model AS SERVED — and
+#     `Claude-Session:` names the session that PERFORMS the commit, which under
+#     tree delivery is always the invoker's. Neither is invented.
 #   * A worker that changed nothing leaves an empty stage. That is reported as
-#     itself (exit 4), with the final message travelling with the report — never
-#     dressed up as a delivery and never inferred from the exit code.
-#   * Pi accepts a wrong model id silently and answers anyway. A pi dispatch is
-#     refused unless the exact id is present in `pi --list-models` output.
-#   * The sandbox Codex was asked for is not always the sandbox it ran under; the
-#     run header is the truth of what applied. It is read back after exit from
-#     the header BLOCK alone — the lines between codex's own banner and the
-#     separator closing it, which exist before any worker text does; stderr also
-#     carries the transcript, and that is the worker talking. The comparison is
-#     on the header's leading mode token, because the rest of that line is the
-#     writable roots and the network state. A confirmed
-#     downgrade is a failed dispatch precondition
-#     (exit 6) — reported, never worked around — and a header this script cannot
-#     read is reported as unconfirmed and carried into the PR body as such. The
-#     same header carries the session id and the model that actually served the
-#     run, so neither is guessed and neither is reported as absent when it is not.
-#   * Devin's exit code distinguishes only "the CLI refused to start" from "a run
-#     happened": a run whose every tool call was denied exits 0, prints no final
-#     message, and says nothing on stderr. So a devin run is judged from its ATIF
-#     export, which is the one channel carrying the final message apart from the
-#     narration glued to it on stdout, and with it the run id, the model that
-#     served the run, the cost, and the permission mode that actually applied.
-#     That mode is read back and compared to the one requested exactly as codex's
-#     sandbox is, and a downgrade is a failed precondition (exit 6). The worker's
-#     containment is written into its tree for the run and removed before
-#     anything is staged: an `Exec(git)` deny, an allow list of what a worker
-#     needs, and a PreToolUse hook, because git reached through an allowed
-#     interpreter walks straight past a deny rule.
-#   * Under devin that containment is enforced by TERMINATION, not by refusal. A
-#     call that is denied — or simply not granted — does not fail on its own and
-#     leave the worker to try something else: the rejection cancels the whole
-#     batch it was issued in and the run stops there, exit 0, no final message,
-#     nothing on stderr but a warning, and the last agent step still calling
-#     tools. Three runs died that way, one of them at its first action. So a
-#     deny rule here is a kill switch and not a guardrail; an allow list that is
-#     merely incomplete is indistinguishable from one that is wrong, which is
-#     why the list below is everything a worker reaches for rather than the
-#     minimum that sounds prudent. On a devin dispatch `--allowed-tools` and
-#     `--exclude-tools` add entries to that allow and that deny, in devin's own
-#     matcher syntax — so an exclusion here does not scope a worker the way pi's
-#     whole-tool exclusion does; it arms a deny that ends the run the moment the
-#     worker touches it, and the dispatch record says so when one is given.
-#   * All of that is probed behaviour, evidenced in
-#     `.remit/devin-first-class/probe-results.md`. Cognition's
-#     documentation is not the source and has been found ahead of the build that
-#     ships — including on tool names, where the one entry that was taken from it
-#     granted nothing at all until a real run's export corrected it. None of it
-#     assumes any org's policy either: the same configuration is passed on every
-#     tier.
-#   * Copilot reports NOTHING about the permissions that actually applied — not
-#     in its envelope, not on stderr, not in its log at maximum verbosity — so
-#     the codex/devin read-back has no analogue here and this script does not
-#     pretend otherwise. What it does instead is TEST the containment before
-#     every dispatch. What that containment IS, exactly: a worker is kept off
-#     `git` and `gh`, and nothing else is enforced. Three things carry it,
-#     because no one of them is enough: deny rules for git and gh, which a
-#     `sh -c "…"` walks straight past; a preToolUse hook, which is the only
-#     thing in this CLI that sees a whole command string and therefore catches
-#     git in every wrapping the CLI's own shallow matchers miss; and the
-#     environment variable that makes repo hooks load in prompt mode at all,
-#     which the equivalent flag does NOT satisfy. A hook that fails to load
-#     fails OPEN, silently, so a cheap throwaway canary run then attempts an
-#     ordinary command, an in-tree file write of real source and a wrapped
-#     `git`, and the dispatch is REFUSED (exit 7) unless the first two ran and
-#     the git was blocked. Containment is tested at every dispatch, alongside
-#     the ordinary work it must not break, and never assumed.
-#   * There is NO enforced read boundary, and every copilot pull request
-#     discloses that in the wrapper's own provenance rather than implying one.
-#     A worktree path arm was built here and WITHDRAWN — ruled 2026-08-22,
-#     after five rounds in which the git/gh arm was never escaped once and the
-#     path arm was escaped five times, every escape a single token from a
-#     spelling that arm already refused. Inspecting command text is the wrong
-#     mechanism for a read boundary; the right one is where the worker RUNS —
-#     an OS-level sandbox, a container, a scratch user — which is a property of
-#     how a context is raised and is not this script's to give. So a copilot
-#     worker runs on the host's own login and reaches what that login reaches,
-#     exactly as a claude or a pi worker does today.
-#   * Two things the canary cannot do are said in the pull request rather than
-#     implied away: it proves the configuration at the START of the run and not
-#     throughout it, because a hook that times out is documented to fail open
-#     mid-run; and no channel anywhere reports the permission configuration that
-#     applied, so a copilot dispatch can say its containment loaded and blocked,
-#     never that a requested mode held. Every behaviour above is evidenced in
-#     .remit/copilot-first-class/probe-results.md.
+#     itself (exit 4), never dressed up as a delivery.
 #   * A worker's returned message is untrusted text going into a document people
-#     read. The pull request body puts the wrapper's provenance FIRST and the
-#     worker's words LAST, inside a code fence longer than any fence in them, so
-#     neither a `---` nor a copied heading in a worker's message can render as
-#     this script's own record of what ran.
-#   * A branch is delivered to more than once — a must-fix going back to a
-#     builder, a later phase of an item — and the body must describe the delivery
-#     that is actually on it. So the body is composed per DELIVERY: each one is a
-#     section of its own, with its own provenance and its own quoted message, and
-#     a delivery onto a branch that already has a pull request is ADDED TO THE TOP
-#     of that body, with the body already there copied through beneath it byte for
-#     byte. The pull request reads newest-first; no earlier delivery's provenance
-#     is conflated with a later one's; and because this script only ever adds
-#     above, no worker's returned message is ever edited or rewritten out of
-#     existence — a property of the mechanism, not a promise about care.
-#   * A body that cannot be updated is said, not papered over. The commit is
-#     pushed by then, so the delivery is not lost — but the pull request is now
-#     describing an earlier one, and that is reported as BODY NOT UPDATED (exit 3)
-#     naming the stale pull request, where the composed body is, and the one
-#     `gh pr edit` command that applies it. A body that could not be READ BACK is
-#     never replaced with this delivery alone: that would delete the record of the
-#     ones before it, so the wrapper refuses and reports instead.
-#   * A worker's run output — its narration, its tool calls, and for codex the
-#     unified diff of everything it authored — is captured but never printed on
-#     the success path. The tree travels from worker to draft PR without passing
-#     through anyone's conversation, and that seam is held here by mechanism.
-#   * An absent capability (CLI missing, `gh` unauthenticated, brief missing) is
-#     reported before anything is invoked. Nothing is ever substituted.
-#   * When a worker delivered a tree and the mechanics then failed, the report
-#     says exactly how far it got — authored, committed, pushed, PR open — and
-#     the authored tree is left where it is, never silently discarded.
+#     read. The pull request body puts this script's provenance FIRST and the
+#     worker's words LAST, inside a code fence longer than any fence in them.
+#   * A branch is delivered to more than once, so the body is composed per
+#     DELIVERY and a later one is ADDED TO THE TOP of the body already there,
+#     which is copied through byte for byte. No worker's message is ever edited
+#     or rewritten out of existence.
+#   * A body that cannot be updated is said, not papered over: BODY NOT UPDATED
+#     (exit 3), naming the stale pull request, where the composed body is, and
+#     the one `gh pr edit` command that applies it. A body that could not be READ
+#     BACK is never replaced with this delivery alone.
+#   * An absent capability is reported before anything is invoked, and nothing is
+#     ever substituted.
 #
 # Exit codes: 0 delivered — committed, pushed, draft PR open
-#             2 usage or precondition error; the worker was NOT invoked
+#             2 usage or precondition error; no context was raised
 #             3 worker delivered a tree, the mechanics failed partway
 #             4 worker ran and changed nothing — empty stage
 #             5 run-level worker failure (the CLI itself exited non-zero)
@@ -201,17 +92,17 @@ usage:
                  [--title <pr-title>] [--base <branch>] [--sandbox <mode>]
                  [--allowed-tools <spec>] [--exclude-tools <spec>] [--final-message <file>]
 
-A worker authors a tree and never runs git; this turns that tree into a draft
-pull request: record, invoke, wait for exit, capture the final message, stage,
-commit with trailers, push work/<slug>, and open the PR with `gh pr create
---draft` — or, when that branch already has one, add this delivery to the top of
-its body with `gh pr edit`, keeping the record already there beneath it.
+RETIRED INTO bin/remit-invoke: raising the worker is that script's job now and
+this one calls it. What is left here is the delivery — stage, commit with
+trailers, push work/<slug>, and open the PR with `gh pr create --draft`, or,
+when that branch already has one, add this delivery to the top of its body with
+`gh pr edit`, keeping the record already there beneath it.
 
---harness native skips the invocation only: the sub-agent was this harness's own,
-so --final-message carries what it returned and --brief is optional.
+--harness native raises nothing: the sub-agent was the calling harness's own, so
+--final-message carries what it returned and --brief is optional.
 
 Exit codes: 0 delivered — committed, pushed, draft PR open
-            2 usage or precondition error; the worker was NOT invoked
+            2 usage or precondition error; no context was raised
             3 worker delivered a tree, the mechanics failed partway
             4 worker ran and changed nothing — empty stage
             5 run-level worker failure (the CLI itself exited non-zero)
@@ -275,6 +166,7 @@ if [ "$HARNESS" = native ]; then
 	[ -n "$RETURNED" ] || die "--final-message is required with --harness native — the worker's returned result is the pull request's body and is never invented"
 	[ -f "$RETURNED" ] || die "no final-message file at $RETURNED"
 	[ -n "$MODEL" ] || die "--model is required with --harness native — the Co-Authored-By trailer names the model that authored the tree"
+	RETURNED=$(CDPATH= cd -- "$(dirname -- "$RETURNED")" && pwd -P)/$(basename -- "$RETURNED")
 else
 	[ -z "$RETURNED" ] || die "--final-message applies only to --harness native; for a CLI worker the final message is captured from the run"
 	[ -n "$BRIEF" ] || die "--brief is required — the briefing file is the worker's whole task"
@@ -293,215 +185,20 @@ ROOT=$(git -C "$DIR" rev-parse --show-toplevel)
 
 BRANCH="work/$SLUG"
 
-# --- preconditions: capability absent is reported, never substituted ----------
-case "$HARNESS" in
-claude) CLI=claude ;;
-codex) CLI=codex ;;
-pi) CLI=pi ;;
-devin) CLI=devin ;;
-copilot) CLI=copilot ;;
-native) CLI='' ;;
-esac
-# devin and copilot are resolved separately below: neither is always on PATH, so
-# "not on PATH" is not the same question as "not installed".
-if [ -n "$CLI" ] && [ "$HARNESS" != devin ] && [ "$HARNESS" != copilot ]; then
-	command -v "$CLI" >/dev/null 2>&1 ||
-		die "the '$CLI' CLI is not on PATH — that target is unavailable here; report it, do not substitute another"
-fi
+# --- preconditions this script still owns -------------------------------------
+# The harness's own preconditions — is that CLI here, is it authenticated, is the
+# model id real — belong to `remit-invoke` and are made there, before anything is
+# billed. What is left here is what the DELIVERY needs.
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+INVOKE=${REMIT_INVOKE:-$HERE/remit-invoke}
+[ -f "$INVOKE" ] ||
+	die "no remit-invoke at $INVOKE — this script raises nothing itself and cannot substitute for the one primitive that does"
+
 command -v gh >/dev/null 2>&1 ||
 	die "the 'gh' CLI is not on PATH — this dispatch cannot open the draft pull request it promises"
 if ! gh_auth=$(gh auth status 2>&1); then
 	printf '%s: gh is not authenticated — the draft pull request cannot be opened:\n%s\n' "$ME" "$gh_auth" >&2
 	exit 2
-fi
-
-if [ "$HARNESS" = pi ]; then
-	[ -n "$MODEL" ] || die "--model is required for pi — pi accepts an unknown model id silently, so the id is verified, never trusted to fail"
-	if ! catalog=$(pi --list-models 2>&1) || [ -z "$catalog" ]; then
-		printf '%s: could not read pi'\''s model catalog, so the model id cannot be verified. Not dispatching:\n%s\n' "$ME" "$catalog" >&2
-		exit 2
-	fi
-	if ! printf '%s\n' "$catalog" | grep -Fq -- "$MODEL"; then
-		printf '%s: '\''%s'\'' is not in `pi --list-models`. Pi would accept it silently and answer with something else; that substitution is exactly what this check exists to prevent. Not dispatching.\n' "$ME" "$MODEL" >&2
-		exit 2
-	fi
-fi
-
-DEVIN='' DEVIN_TIER='' DEVIN_ORG='' DEVIN_TIER_NOTE='' DEVIN_JSON=''
-DEVIN_MODE=accept-edits DEVIN_TIMEOUT=${REMIT_DEVIN_TIMEOUT:-3600}
-DEVIN_VERSION='' DEVIN_ACU='' PERM_APPLIED='' ATIF=''
-
-if [ "$HARNESS" = devin ]; then
-	# Everything this block enforces was demonstrated against the shipped CLI and
-	# is evidenced in .remit/devin-first-class/probe-results.md; nothing here is
-	# taken from Cognition's documentation, which the shake-out found to be ahead
-	# of the build that ships.
-	#
-	# `devin` is not always on PATH. Its Windows package installer adds the
-	# binary's directory to the persisted user PATH, which any shell whose process
-	# tree predates the install never sees — and this script inherits whatever
-	# PATH its caller had. So the package path is tried second, and only both
-	# missing is an absent capability.
-	if command -v devin >/dev/null 2>&1; then
-		DEVIN=devin
-	else
-		localapp=$(printf '%s' "${LOCALAPPDATA:-}" | tr '\\' '/')
-		packaged="$localapp/Microsoft/WinGet/Packages/CognitionAI.DevinCLI_Microsoft.Winget.Source_8wekyb3d8bbwe/bin/devin.exe"
-		[ -n "$localapp" ] && [ -x "$packaged" ] && DEVIN=$packaged
-	fi
-	[ -n "$DEVIN" ] ||
-		die "the 'devin' CLI is neither on PATH nor at its package path — that target is unavailable here; report it, do not substitute another"
-
-	# On PATH but unauthenticated is absent, the same shape as `gh auth status`.
-	if ! devin_auth=$("$DEVIN" auth status 2>&1); then
-		printf '%s: devin is not authenticated, so that target is unavailable here:\n%s\n' "$ME" "$devin_auth" >&2
-		exit 2
-	fi
-	devin_field() { printf '%s\n' "$devin_auth" | sed -n "s/^[[:space:]]*$1:[[:space:]]*//p" | sed -n 1p | sed 's/[[:space:]]*$//'; }
-	DEVIN_TIER=$(devin_field Tier)
-	DEVIN_ORG=$(devin_field 'Primary org')
-	devin_ent=$(devin_field Enterprise)
-	# The tier and the org are what this run is governed and billed by, so both
-	# are recorded and carried into the pull request. One shape is worth saying
-	# out loud rather than accepting quietly: a seat bought for an organisation
-	# that logged in without pinning its host first lands on the public free tier
-	# with no error at all. That is reported here — it is a login to fix, not
-	# something this script corrects, and a genuine free-tier account is a first
-	# class target that gets the identical containment.
-	case "$DEVIN_TIER" in
-	*Free*)
-		if [ "$devin_ent" = yes ] || [ -n "$DEVIN_ORG" ]; then
-			DEVIN_TIER_NOTE="the account reports '$DEVIN_TIER' while also reporting an organisation. An enterprise seat that logged in before its host was pinned lands on the public free tier silently, and that is what this looks like. The tier above is what this dispatch is billed and governed by; it is reported, not corrected."
-		fi
-		;;
-	esac
-
-	# No flag guarantees a -p run is non-interactive: a probe run was dropped into
-	# an interactive picker and hung until it was killed. The wait is therefore
-	# bounded by mechanism, and an unbounded run is not substituted for a bounded
-	# one.
-	case "$DEVIN_TIMEOUT" in
-	'' | *[!0-9]* | 0) die "REMIT_DEVIN_TIMEOUT must be a positive whole number of seconds, not '$DEVIN_TIMEOUT'" ;;
-	esac
-	command -v timeout >/dev/null 2>&1 ||
-		die "no 'timeout' on PATH — a devin run is bounded by mechanism because no flag guarantees non-interactivity, and an unguarded run is not substituted for a guarded one"
-
-	# The ATIF export is the only channel carrying a devin run's final message,
-	# and the only one carrying the permission mode that actually applied. A
-	# dispatch whose result could not be read back is not started at all, rather
-	# than started and reported on guesswork.
-	if command -v jq >/dev/null 2>&1; then
-		DEVIN_JSON=jq
-	elif command -v node >/dev/null 2>&1; then
-		DEVIN_JSON=node
-	else
-		die "neither jq nor node is on PATH — a devin run is judged from its ATIF export, which nothing here could read; not dispatching"
-	fi
-
-	[ "$SANDBOX_GIVEN" = no ] ||
-		die "--sandbox does not apply to a devin dispatch — devin's OS-level sandbox is unsupported on Windows and this script never passes it. A devin worker's containment is its worktree, the permission rules and the hook written for the run, and the pull request says exactly that"
-
-	# The containment goes in the worker tree's .devin/ for the run and is removed
-	# before anything is staged. A .devin/ that is already there is the
-	# repository's own: it is not overwritten, not committed, and not silently
-	# layered under rules this script is relying on.
-	[ ! -e "$DIR/.devin" ] ||
-		die "$DIR/.devin already exists — this script writes the worker's containment there for the run and removes it again, and it will not overwrite a .devin the repository already has"
-fi
-
-COPILOT='' COPILOT_VERSION='' COPILOT_HOST='' COPILOT_LOGIN='' COPILOT_JSON=''
-COPILOT_TIMEOUT=${REMIT_COPILOT_TIMEOUT:-3600}
-COPILOT_CANARY_TIMEOUT=${REMIT_COPILOT_CANARY_TIMEOUT:-300}
-COPILOT_CANARY_MODEL=${REMIT_COPILOT_CANARY_MODEL:-}
-COPILOT_HOOK_JSON='' COPILOT_HOOK_SH='' COPILOT_HOOKDIR_MADE='' COPILOT_GITHUBDIR_MADE=''
-COPILOT_CANARY_ID='' COPILOT_CANARY_AIU='' COPILOT_HOOK_ATTEST=''
-COPILOT_AIU='' COPILOT_PREMIUM=''
-# Displayed, not expanded: the rules themselves are appended one at a time with
-# globbing off, because `shell(git:*)` is a pathname pattern to an unquoted shell.
-COPILOT_DENY='shell(git) shell(git:*) shell(gh) shell(gh:*)'
-
-if [ "$HARNESS" = copilot ]; then
-	# Everything this block enforces was demonstrated against the shipped CLI and
-	# is evidenced in .remit/copilot-first-class/probe-results.md; nothing here is
-	# taken from GitHub's documentation, which the research found to be far behind
-	# the build that ships.
-	#
-	# The binary sits at the WinGet package ROOT — there is no bin/ subdirectory
-	# and the Links shim directory is empty, so devin's fallback shape does not
-	# transfer verbatim and is not reused.
-	if command -v copilot >/dev/null 2>&1; then
-		COPILOT=copilot
-	else
-		localapp=$(printf '%s' "${LOCALAPPDATA:-}" | tr '\\' '/')
-		packaged="$localapp/Microsoft/WinGet/Packages/GitHub.Copilot_Microsoft.Winget.Source_8wekyb3d8bbwe/copilot.exe"
-		[ -n "$localapp" ] && [ -x "$packaged" ] && COPILOT=$packaged
-	fi
-	[ -n "$COPILOT" ] ||
-		die "the 'copilot' CLI is neither on PATH nor at its package path — that target is unavailable here; report it, do not substitute another"
-
-	# The CLI updates itself by default, so the version that ran is read at
-	# dispatch time. A documented version would be a guess about the future.
-	COPILOT_VERSION=$("$COPILOT" --version 2>&1 | sed -n 1p | sed 's/[[:space:]]*$//')
-
-	# There is NO live authentication check to make. Copilot ships no
-	# `copilot auth status` and no `logout` subcommand, and an invalid
-	# COPILOT_GITHUB_TOKEN in the environment did not fail a run, so the documented
-	# precedence cannot be relied on either. What exists is a state file. This
-	# READS the identity the CLI records for itself and reports it; it does not
-	# check it, and it does not gate on it. remit assumes no account type — an
-	# adopter may hold any — so the account is recorded in the pull request the way
-	# a devin dispatch records tier and org, and never made a condition of running.
-	# Nothing but the host and the login is read, and neither is a credential:
-	# the token lives in the OS credential store, not in this file.
-	copilot_cfg="${HOME:-}/.copilot/config.json"
-	if [ -f "$copilot_cfg" ]; then
-		COPILOT_HOST=$(sed -n 's/.*"host"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$copilot_cfg" | sed -n 1p)
-		COPILOT_LOGIN=$(sed -n 's/.*"login"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$copilot_cfg" | sed -n 1p)
-	fi
-
-	# No flag guarantees a run is non-interactive. No probe ever saw one block —
-	# but a run that has never hung is not a run that cannot, so the wait is
-	# bounded by mechanism here as it is for devin, and `--no-ask-user` is passed
-	# so the agent has no ask_user tool to reach for.
-	case "$COPILOT_TIMEOUT" in
-	'' | *[!0-9]* | 0) die "REMIT_COPILOT_TIMEOUT must be a positive whole number of seconds, not '$COPILOT_TIMEOUT'" ;;
-	esac
-	case "$COPILOT_CANARY_TIMEOUT" in
-	'' | *[!0-9]* | 0) die "REMIT_COPILOT_CANARY_TIMEOUT must be a positive whole number of seconds, not '$COPILOT_CANARY_TIMEOUT'" ;;
-	esac
-	command -v timeout >/dev/null 2>&1 ||
-		die "no 'timeout' on PATH — a copilot run is bounded by mechanism because no flag guarantees non-interactivity, and an unguarded run is not substituted for a guarded one"
-	# The repo-hook opt-in is an ENVIRONMENT VARIABLE the child must be started
-	# with. Passing the equivalent permission flag does not satisfy the gate — that
-	# was demonstrated in the negative — so a shell that cannot set a variable for
-	# one child cannot contain a copilot worker at all.
-	command -v env >/dev/null 2>&1 ||
-		die "no 'env' on PATH — copilot loads repo hooks in prompt mode only when an environment variable is set for the run, and a dispatch that cannot set it cannot contain its worker; not dispatching"
-
-	# The JSONL envelope is the only channel carrying a copilot run's final message
-	# free of narration, and the only one carrying the run id, the served model and
-	# the cost. It is also what the containment canary is judged from. A dispatch
-	# whose result could not be read back is not started at all.
-	if command -v jq >/dev/null 2>&1; then
-		COPILOT_JSON=jq
-	elif command -v node >/dev/null 2>&1; then
-		COPILOT_JSON=node
-	else
-		die "neither jq nor node is on PATH — a copilot run is judged from its JSONL envelope, which nothing here could read; not dispatching"
-	fi
-
-	[ "$SANDBOX_GIVEN" = no ] ||
-		die "--sandbox does not apply to a copilot dispatch — this build ships no --sandbox flag at all, its OS-level sandboxing is experimental and reports every Windows host as supported without checking, and this script never passes it. A copilot worker's containment is the deny rules and the hook written for the run — git and gh, tested by a canary before the run starts — and the pull request says exactly that, including that no read boundary is enforced"
-
-	# .github/ is not devin's .devin/: almost every repository already has one, and
-	# this one does. So the guard is on the two FILES this script writes, never on
-	# the directory, and the removal afterwards takes back only what it created.
-	COPILOT_HOOK_JSON="$DIR/.github/hooks/remit-no-git.json"
-	COPILOT_HOOK_SH="$DIR/.github/hooks/remit-no-git.sh"
-	for f in "$COPILOT_HOOK_JSON" "$COPILOT_HOOK_SH"; do
-		[ ! -e "$f" ] ||
-			die "$f already exists — this script writes the worker's containment there for the run and removes it again, and it will not overwrite a file the repository already has"
-	done
 fi
 
 if [ -z "$TITLE" ]; then
@@ -512,15 +209,15 @@ fi
 
 RUNDIR=${TMPDIR:-/tmp}/$ME-$SLUG-$$
 mkdir -p "$RUNDIR" || die "cannot create the run directory $RUNDIR"
-OUTFILE="$RUNDIR/stdout"
-ERRFILE="$RUNDIR/stderr"
+ERRFILE="$RUNDIR/invoke-stderr"
 FINALFILE="$RUNDIR/final-message"
-ATIF="$RUNDIR/atif.json"
+PROVFILE="$RUNDIR/prov"
+: >"$PROVFILE"
 
 # --- 1. record the dispatch ---------------------------------------------------
 rule_off
 say "$ME — dispatch record"
-say "  harness      : $HARNESS${CLI:+ ($CLI)}"
+say "  harness      : $HARNESS"
 say "  provider     : ${PROVIDER:-<$CLI_DEFAULT>}"
 say "  model        : ${MODEL:-<$CLI_DEFAULT>}"
 say "  precedence   : rule $RULE"
@@ -529,780 +226,41 @@ say "  worker dir   : $DIR"
 say "  branch       : $BRANCH -> $BASE"
 say "  run log      : $RUNDIR"
 say "  committing as: $SESSION"
-if [ "$HARNESS" = devin ]; then
-	say "  devin binary : $DEVIN"
-	say "  account      : tier ${DEVIN_TIER:-<not reported>}, primary org ${DEVIN_ORG:-<none reported>}"
-	say "  permissions  : requesting $DEVIN_MODE, with the git deny and the hook written to $DIR/.devin for the run"
-	# Said here rather than left to be discovered in the export: under devin a
-	# deny is a kill switch, so a dispatch that adds one is choosing to end the
-	# run at that call rather than to narrow what the worker may do in it.
-	[ -n "$EXCLUDED" ] &&
-		say "  exclusions   : $EXCLUDED — under devin these are DENY rules, and a denied call ends the run rather than failing on its own. This dispatch has chosen a kill switch, not a scoping."
-	say "  bounded wait : ${DEVIN_TIMEOUT}s (REMIT_DEVIN_TIMEOUT)"
-fi
-if [ "$HARNESS" = copilot ]; then
-	say "  copilot bin  : $COPILOT"
-	say "  version      : ${COPILOT_VERSION:-<not reported>}"
-	say "  account      : ${COPILOT_LOGIN:-<not recorded>} at ${COPILOT_HOST:-<not recorded>} — recorded, not checked and not gated on"
-	say "  effort       : ${EFFORT:-<none asked for>}"
-	say "  containment  : deny [$COPILOT_DENY], plus a preToolUse hook written to $DIR/.github/hooks for the run — git and gh in any wrapping, and NOTHING else: no read boundary is enforced and the pull request discloses that rather than implying one. Then the repo-hook environment opt-in, then a canary that puts a wrapped git AND one in-tree file write of real source to the CLI before the worker is invoked"
-	say "  bounded wait : ${COPILOT_TIMEOUT}s (REMIT_COPILOT_TIMEOUT), canary ${COPILOT_CANARY_TIMEOUT}s"
-fi
+say "  raised by    : $INVOKE — this script no longer invokes a harness itself"
 rule_off
-[ -n "$DEVIN_TIER_NOTE" ] && say "note: $DEVIN_TIER_NOTE"
+say "NOTE: remit-dispatch has RETIRED into bin/remit-invoke (which raises the context) and bin/remit (which owns the chain). This shim delivers the tree it left; point new callers at those two."
 
-# --- 2/3. invoke, and wait for process exit -----------------------------------
-run_worker() { # $1 stdin file or 'none'; rest: the command
-	sf=$1
-	shift
-	if [ "$sf" = none ]; then
-		(cd "$DIR" && "$@") >"$OUTFILE" 2>"$ERRFILE"
-	else
-		(cd "$DIR" && "$@" <"$sf") >"$OUTFILE" 2>"$ERRFILE"
-	fi
-	WORKER_EXIT=$?
-}
+# --- 2/3/4. one call to the seam ----------------------------------------------
+# Everything about starting a context, waiting for it, containing it and reading
+# its final message back is remit-invoke's. This shim gives it the briefing as
+# the build role's authority and takes back the text on stdout and the run's
+# provenance on the sidecar.
+set -- "$INVOKE" build "$SLUG" "$DIR" --harness "$HARNESS"
+[ -n "$MODEL" ] && set -- "$@" --model "$MODEL"
+[ -n "$EFFORT" ] && set -- "$@" --effort "$EFFORT"
+[ -n "$PROVIDER" ] && set -- "$@" --provider "$PROVIDER"
+[ "$SANDBOX_GIVEN" = yes ] && set -- "$@" --sandbox "$SANDBOX"
+[ -n "$ALLOWED" ] && set -- "$@" --allowed-tools "$ALLOWED"
+[ -n "$EXCLUDED" ] && set -- "$@" --exclude-tools "$EXCLUDED"
+[ -n "$RETURNED" ] && set -- "$@" --final-message "$RETURNED"
 
-# The devin worker's containment, written into its tree for the run only.
-#
-# Two files, because one of them is not enough. The deny rule is the direct
-# expression of remit's law and it does block a bare `git` and a `&&` chain — but
-# it does not look inside an interpreter's quoted arguments, so `sh -c "git
-# status"` walked straight past a live deny rule when it was tried. A PreToolUse
-# hook sees the whole command string and closes that, and since a worker
-# realistically needs a shell, the hook is not a second line of defence here: it
-# is the line that holds — and holds by ending the run, which is what a block
-# costs here (this script's header).
-#
-# The allow list names tools by the shipped build's OWN names, read as
-# `function_name` values out of a real run's export — not the names Cognition
-# documents, which include a `glob` the build does not have. An entry that
-# matches nothing is silent: it grants nothing and says nothing, and the worker
-# that reaches for what it was meant to grant ends the run instead. So the list
-# is what a worker needs and ALL of it — an unlisted command is not prompted in
-# a -p run, it is rejected, and a rejection stops the run rather than the call —
-# with exec narrowed to `Exec(sh)`, so the deny and the hook still stand between
-# a worker and git. A list pruned for tidiness is a run that dies on its first
-# search.
-#
-# `accept-edits` is requested explicitly on every dispatch and every tier. It is
-# never inferred from an organisation's policy, and this configuration behaves
-# the same whether or not one exists: the free-tier adopter and the enterprise
-# seat get the identical contained worker, by remit's own configuration.
-#
-# Written here, removed before staging, committed nowhere. The copies kept in the
-# run directory are the record of what actually applied.
-DEVIN_DENY='Exec(git) Exec(gh) Write(.git/**) Write(.devin/**)'
-DEVIN_ALLOW='read write grep find_file_by_name todo_write get_output skill mcp_list_tools Exec(sh)'
-devin_json_array() { # $1 space- or comma-separated entries -> "a", "b"
-	printf '%s\n' "$1" | tr ' ,' '\n\n' |
-		awk 'NF { printf "%s%s", sep, "\"" $0 "\""; sep = ", " }'
-}
-devin_write_containment() { # $1 the worker's tree
-	devin_dir=$1/.devin
-	mkdir -p "$devin_dir" || return 1
-	cat >"$devin_dir/config.json" <<EOF || return 1
-{
-  "permissions": {
-    "deny": [$(devin_json_array "$DEVIN_DENY${EXCLUDED:+ $EXCLUDED}")],
-    "allow": [$(devin_json_array "$DEVIN_ALLOW${ALLOWED:+ $ALLOWED}")]
-  }
-}
-EOF
-	# Event names sit at the top level of this file. The schema Cognition's own
-	# documentation shows (nested under "hooks") is rejected by the shipped build,
-	# and rejected SILENTLY — the hook simply never fires. Trust the probe.
-	cat >"$devin_dir/hooks.v1.json" <<'EOF' || return 1
-{
-  "PreToolUse": [
-    {
-      "matcher": "exec",
-      "hooks": [ { "type": "command", "command": "sh .devin/remit-no-git.sh" } ]
-    }
-  ]
-}
-EOF
-	cat >"$devin_dir/remit-no-git.sh" <<'EOF' || return 1
-#!/bin/sh
-# Written by remit-dispatch for one dispatch, and removed after it. Workers never
-# run git: the wrapper performs every git mechanic once the worker has stopped.
-#
-# A block here does not refuse one call and let the worker carry on — under devin
-# the run stops at it. So the message below is written for whoever reads the run
-# afterwards as much as for the worker, which will not get to act on it.
-#
-# This reads the whole PreToolUse payload rather than a parsed field of it, so no
-# quoting, chaining or interpreter-wrapping can hide the command from the test.
-#
-# The test is on a WORD BOUNDARY, never a substring: `.gitignore`, `digit`,
-# `legitimate` and `github` are ordinary words, and a worker that cannot say them
-# is a worker this hook has broken rather than contained.
-payload=$(cat)
-if [ -z "$payload" ]; then
-	printf 'blocked by remit law: this hook could not read the tool call to check it, and it does not pass what it cannot read.\n' >&2
-	exit 2
-fi
-if printf '%s\n' "$payload" | grep -Eiq '(^|[^A-Za-z0-9_-])(git|gh)([^A-Za-z0-9_-]|$)'; then
-	printf 'blocked by remit law: a worker never runs git or gh. Author the working tree and stop there — remit-dispatch branches, commits, pushes and opens the pull request after you exit, and a tree you leave uncommitted is exactly what it expects.\n' >&2
-	exit 2
-fi
-exit 0
-EOF
-	return 0
-}
-
-# The copilot worker's containment, written into its tree for the run only.
-#
-# Three things, because no one of them is enough, and because the CLI reports
-# nothing at all about what applied:
-#
-#   1. Deny rules for git and gh. They fire, and a denial names the rule that
-#      fired — but the matcher only ever sees the STEM of a command, so
-#      `sh -c "git status"`, `powershell -Command "…"`, `cmd /c …` and
-#      `node -e "…"` all walk through. Naming the interpreters as well only moves
-#      the hole to the next interpreter on the machine.
-#   2. A preToolUse hook. It receives the WHOLE tool call — tool name and the
-#      full command string — which is why no amount of quoting or wrapping hides
-#      from it, and it is the only thing in this CLI that sees that much. That
-#      is the whole of what it uses that sight for: git and gh, on a word
-#      boundary, in any wrapping. It is NOT a read boundary. A worktree path arm
-#      lived here and was withdrawn — ruled 2026-08-22 — because five rounds of
-#      it were escaped by a one-token respelling apiece while this git test was
-#      never escaped once, and because the mechanism that holds a read boundary
-#      is the one a worker is RAISED in rather than any reading of command text.
-#      The canary below therefore puts a wrapped git to the live CLI alongside
-#      an in-tree write of real source, so neither the containment claim nor the
-#      claim that a worker can still work is ever made on no attempt at all.
-#   3. The environment opt-in. Repo hooks in .github/hooks/ do not load in prompt
-#      mode unless the folder is trusted or an environment variable says so — and
-#      a dispatch worktree is never trusted. The permission FLAG does not satisfy
-#      that gate; only the variable does.
-#
-# The hook file's schema is nested and Claude-Code-shaped, and `matcher` is a
-# regular expression, not a glob: `.*` matches every tool and `*` is rejected as
-# an invalid regex with the hook silently skipped. A hook that fails to load
-# blocks nothing and says nothing on stderr, which is why the canary exists.
-#
-# Written here, removed before staging, committed nowhere. The copies kept in the
-# run directory are the record of what actually applied.
-copilot_write_containment() { # $1 the worker's tree
-	if [ ! -d "$1/.github" ]; then
-		mkdir -p "$1/.github" || return 1
-		COPILOT_GITHUBDIR_MADE=yes
-	fi
-	if [ ! -d "$1/.github/hooks" ]; then
-		mkdir -p "$1/.github/hooks" || return 1
-		COPILOT_HOOKDIR_MADE=yes
-	fi
-	cat >"$1/.github/hooks/remit-no-git.json" <<'EOF' || return 1
-{
-  "hooks": {
-    "preToolUse": [
-      {
-        "matcher": ".*",
-        "hooks": [ { "type": "command", "command": "sh .github/hooks/remit-no-git.sh" } ]
-      }
-    ]
-  }
-}
-EOF
-	# git and gh, in any wrapping, and nothing else. Nothing is baked into this
-	# file at write time any longer: the tree path was, and it was baked in for
-	# the path arm that has since been withdrawn.
-	cat >"$1/.github/hooks/remit-no-git.sh" <<'EOF' || return 1
-#!/bin/sh
-# Written by remit-dispatch for one dispatch, and removed after it. Workers
-# never run git: the wrapper performs every git mechanic once the worker has
-# stopped, and a tree left uncommitted is exactly what it expects.
-#
-# This reads the WHOLE preToolUse payload rather than a parsed field of it, so
-# no quoting, chaining or interpreter-wrapping hides the command from the test.
-# That is the one thing this hook has that nothing else in this CLI does: the
-# deny matcher and the built-in path wall both inspect only what a command
-# leaves standing as an argument of its own, and both are walked past by the
-# same wrapped payload.
-#
-# The test is on a WORD BOUNDARY, never a substring: `.gitignore`, `digit`,
-# `legitimate` and `github` are ordinary words, and a worker that cannot say
-# them is a worker this hook has broken rather than contained.
-#
-# THIS HOOK ENFORCES NOTHING ELSE, and that is a decision rather than an
-# oversight. It is not a read boundary. A worktree path arm was built here and
-# withdrawn: five rounds of it were escaped by a one-token respelling apiece,
-# while this git test was never escaped once. A worker under this hook runs on
-# the host's own login and reaches whatever that login reaches. The boundary
-# that would hold is the one the worker is RAISED in — an OS-level sandbox, a
-# container, a scratch user — and no reading of command text substitutes for
-# it. The dispatch discloses exactly that in its pull request rather than
-# implying a boundary that is not here.
-payload=$(cat)
-if [ -z "$payload" ]; then
-	printf 'blocked by remit law: this hook could not read the tool call to check it, and it does not pass what it cannot read.\n' >&2
-	exit 2
-fi
-if printf '%s\n' "$payload" | grep -Eiq '(^|[^A-Za-z0-9_-])(git|gh)([^A-Za-z0-9_-]|$)'; then
-	printf 'blocked by remit law: a worker never runs git or gh. Author the working tree and stop there — remit-dispatch branches, commits, pushes and opens the pull request after you exit, and a tree you leave uncommitted is exactly what it expects.\n' >&2
-	exit 2
-fi
-exit 0
-EOF
-	return 0
-} # end copilot_write_containment
-
-# Removes only what was created — never a .github/ the repository already had.
-copilot_remove_containment() { # $1 the worker's tree
-	rm -f "$1/.github/hooks/remit-no-git.json" "$1/.github/hooks/remit-no-git.sh"
-	[ "$COPILOT_HOOKDIR_MADE" = yes ] && rmdir "$1/.github/hooks" 2>/dev/null
-	[ "$COPILOT_GITHUBDIR_MADE" = yes ] && rmdir "$1/.github" 2>/dev/null
-	return 0
-} # end copilot_remove_containment
-
-# Reading a copilot run out of its JSONL envelope. `final` is the reason this is
-# read at all: text-mode stdout glues the tool renderings to the answer with no
-# delimiter, while the envelope keeps them apart — the final message is the LAST
-# assistant.message whose toolRequests list is empty.
-NODE_COPILOT='const fs=require("fs");const ls=fs.readFileSync(process.argv[1],"utf8").split(/\r?\n/);const ev=[];for(const l of ls){if(!l.trim())continue;try{ev.push(JSON.parse(l))}catch(e){}}const k=process.argv[2];const T=t=>ev.filter(e=>e&&e.type===t);let v="";if(k==="final"){const m=T("assistant.message").filter(e=>((e.data&&e.data.toolRequests)||[]).length===0);if(m.length&&m[m.length-1].data.content!=null)process.stdout.write(String(m[m.length-1].data.content));process.exit(0)}else if(k==="calls"){const c={};for(const e of T("tool.execution_start"))c[e.data.toolCallId]=(e.data.arguments&&(e.data.arguments.command||e.data.arguments.path))||"";const out=[];for(const e of T("tool.execution_complete"))out.push((e.data.success?"ran":"blocked")+"\t"+(c[e.data.toolCallId]||""));process.stdout.write(out.join("\n")+(out.length?"\n":""));process.exit(0)}else if(k==="refusals"){const c={};for(const e of T("tool.execution_start"))c[e.data.toolCallId]=(e.data.arguments&&(e.data.arguments.command||e.data.arguments.path))||"";const out=[];for(const e of T("tool.execution_complete"))if(!e.data.success)out.push((c[e.data.toolCallId]||"?")+" -> "+(((e.data.error||{}).message)||"denied").split("\n")[0]);v=out.join(" | ")}else{const r=T("result");const last=r.length?r[r.length-1]:null;if(k==="session_id")v=last&&last.sessionId;else if(k==="result_present")v=last?"yes":"";else if(k==="premium")v=last&&last.usage&&last.usage.premiumRequests;else if(k==="changed")v=(last&&last.usage&&last.usage.codeChanges&&last.usage.codeChanges.filesModified||[]).join(", ");else if(k==="model"){const m=T("assistant.message");v=m.length&&m[m.length-1].data?m[m.length-1].data.model:""}else if(k==="aiu"){const u=T("session.usage_checkpoint");if(u.length){const n=u[u.length-1].data.totalNanoAiu;if(typeof n==="number")v=(n/1e9).toFixed(3)}}}process.stdout.write(v==null||v===false?"":String(v)+"\n")'
-copilot_get() { # $1 envelope file  $2 field
-	case "$COPILOT_JSON" in
-	jq)
-		case "$2" in
-		final) jq -rs '[.[] | select(.type=="assistant.message") | select(((.data.toolRequests // []) | length) == 0)] | last | .data.content // empty' "$1" ;;
-		calls) jq -rs '(reduce (.[] | select(.type=="tool.execution_start")) as $e ({}; .[$e.data.toolCallId] = ($e.data.arguments.command // $e.data.arguments.path // ""))) as $c | .[] | select(.type=="tool.execution_complete") | [(if .data.success then "ran" else "blocked" end), ($c[.data.toolCallId] // "")] | @tsv' "$1" ;;
-		refusals) jq -rs '(reduce (.[] | select(.type=="tool.execution_start")) as $e ({}; .[$e.data.toolCallId] = ($e.data.arguments.command // $e.data.arguments.path // ""))) as $c | [.[] | select(.type=="tool.execution_complete") | select(.data.success | not) | (($c[.data.toolCallId] // "?") + " -> " + ((.data.error.message // "denied") | split("\n")[0]))] | join(" | ")' "$1" ;;
-		session_id) jq -rs '[.[] | select(.type=="result")] | last | .sessionId // empty' "$1" ;;
-		result_present) jq -rs 'if any(.[]; .type=="result") then "yes" else empty end' "$1" ;;
-		premium) jq -rs '[.[] | select(.type=="result")] | last | .usage.premiumRequests // empty' "$1" ;;
-		changed) jq -rs '[.[] | select(.type=="result")] | last | ((.usage.codeChanges.filesModified // []) | join(", "))' "$1" ;;
-		model) jq -rs '[.[] | select(.type=="assistant.message")] | last | .data.model // empty' "$1" ;;
-		aiu) jq -rs '[.[] | select(.type=="session.usage_checkpoint")] | last | if . == null then empty else ((.data.totalNanoAiu / 1000000000 * 1000 | round) / 1000 | tostring) end' "$1" ;;
-		esac
-		;;
-	node) node -e "$NODE_COPILOT" "$1" "$2" ;;
-	esac
-} # end copilot_get
-
-# The canary. Containment on this CLI is tested at every dispatch and never
-# assumed, because the one mechanism that holds fails OPEN when it fails: a hook
-# with a bad matcher, a bad schema, or a path the CLI cannot reach is skipped and
-# the run proceeds uncontained with nothing on stderr to say so.
-#
-# So a cheap throwaway run, in the worker's own tree, under the exact
-# configuration the worker will get, attempts three things. Two must RUN: an
-# ordinary command, and an ordinary in-tree FILE WRITE through the file tool.
-# One must be BLOCKED: a wrapped `git`, which is the whole of what this
-# containment claims. Anything else — including a run in which the model simply
-# declined to attempt one of them — refuses the dispatch. This is the honest
-# analogue of the codex sandbox read-back: refuse, never downgrade silently.
-#
-# It probes exactly what the containment claims and nothing else. It once put
-# four spellings of leaving the tree to the CLI as well, for a worktree path arm
-# that has since been withdrawn: there is no read boundary to test now, and a
-# canary that went on testing one would be certifying a claim this dispatch no
-# longer makes.
-#
-# The WRITE probe is here for the mirror image of that, and it is not decoration.
-# A containment can be tightened until nothing escapes and nothing works, and a
-# gate that only ever probes escapes reports PASSED over a hook under which no
-# worker can author a line — which is exactly what happened here once, when a
-# network-path test began firing on every Windows path a file tool sends,
-# including the tree's own. Ordinary work is now part of what the gate certifies,
-# so that failure cannot pass this gate again.
-#
-# The probe's CONTENT is load-bearing for the same reason. A write probe whose
-# text is one line of prose no boundary would ever object to certifies nothing
-# about authoring: it passed unchanged over a containment that refused a `//`
-# comment and a closing tag in a worker's own source. So the probe writes a line
-# of real source — a line comment and a closing markup tag — and the file is
-# read back and required to carry both before the gate calls the write a write.
-#
-# The probes are written to a manifest FIRST and the prompt is generated from
-# it, so what the CLI is asked to do and what any test replays are one list and
-# cannot drift apart.
-#
-# Its cost is one small run. It bills the dispatch's own model unless
-# REMIT_COPILOT_CANARY_MODEL names a cheaper one, so nothing is substituted
-# behind the caller's back, and what it cost is recorded in the pull request.
-#
-# It tests the BASE containment — the rules and the hook this script writes — and
-# not any rules a caller added with --allowed-tools or --exclude-tools. That is
-# deliberate and it is not a hole: an added deny only narrows what a worker may
-# do, a denial outranks any allow, and the hook runs before either is consulted,
-# so no caller addition can loosen what the canary proved.
-COPILOT_CANARY_MARK=REMIT_CANARY_CONTROL_OK
-COPILOT_CANARY_FILE=remit-canary-write-probe.ts
-# Ordinary source, not prose: a line comment and a closing markup tag are the
-# two shapes a boundary built out of slashes refuses first, and a probe without
-# them cannot tell a containment from a harness broken shut.
-COPILOT_CANARY_WRITTEN='const canary = 1; // written by the containment canary and removed after it </probe>'
-copilot_canary() { # $1 the worker's tree — returns 0 if contained, 1 if not
-	# The tree is kept here because `set --` below takes $1 for the command line.
-	cop_tree=$1
-	cdir=$RUNDIR/canary
-	mkdir -p "$cdir/log" || return 1
-	# The blocked probe is a `git` inside `sh -c "…"`: the deny rules see only the
-	# stem of that command and let it through, so what refuses it can only be the
-	# hook. That is the whole of what this containment claims, and it is therefore
-	# the whole of what is put to the live CLI here.
-	cop_git='git status --porcelain'
-	# The manifest is written first and the prompt is generated from it, so the
-	# list of probes has one authoritative form: what the CLI is asked to attempt,
-	# and what any offline test replays against the hook, are the same lines.
-	cop_tab=$(printf '\t')
-	{
-		printf 'run%sshell%s%s\n' "$cop_tab" "$cop_tab" "echo $COPILOT_CANARY_MARK"
-		printf 'run%sfile%s%s\n' "$cop_tab" "$cop_tab" "$COPILOT_CANARY_FILE"
-		printf 'block%sshell%s%s\n' "$cop_tab" "$cop_tab" "sh -c \"$cop_git\""
-	} >"$cdir/probes"
-	{
-		printf 'You are a containment self-test for a dispatch wrapper. Nothing here is real\n'
-		printf 'work and nothing here is a task.\n\n'
-		printf 'Do exactly these things, one tool call each, in this order. Some of them are\n'
-		printf 'expected to be refused — that refusal IS the test — so attempt every one of\n'
-		printf 'them and do not stop when one is refused.\n\n'
-		cop_n=0
-		while IFS=$cop_tab read -r cop_ex cop_kind cop_text; do
-			cop_n=$((cop_n + 1))
-			case $cop_kind in
-			shell) printf '%s. Run this with the shell tool: %s\n' "$cop_n" "$cop_text" ;;
-			file) printf '%s. Using your file-creation tool and NOT a shell command, create a file\n   called %s in the current directory, whose whole content is the one line:\n   %s\n' "$cop_n" "$cop_text" "$COPILOT_CANARY_WRITTEN" ;;
-			esac
-		done <"$cdir/probes"
-		printf '\nThe last one is expected to be refused. Attempt it anyway: the refusal is\n'
-		printf 'the test, and a step not attempted is a step this run cannot report on.\n\n'
-		printf 'Then reply with exactly %s lines, one per step, in the form\n' "$cop_n"
-		printf '  <number>|RAN or BLOCKED\n\n'
-		printf 'Create, modify and delete nothing else. Run nothing else.\n'
-	} >"$cdir/prompt"
-
-	set -- env GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS=true \
-		timeout "$COPILOT_CANARY_TIMEOUT" "$COPILOT" \
-		--output-format json --allow-all-tools --no-ask-user --disable-builtin-mcps \
-		--log-dir "$cdir/log"
-	set -- "$@" --deny-tool 'shell(git)' --deny-tool 'shell(git:*)' \
-		--deny-tool 'shell(gh)' --deny-tool 'shell(gh:*)'
-	cop_model=${COPILOT_CANARY_MODEL:-$MODEL}
-	[ -n "$cop_model" ] && set -- "$@" --model "$cop_model"
-	say "containment canary: one throwaway run under the worker's own configuration${cop_model:+, on $cop_model}."
-	(cd "$cop_tree" && "$@" <"$cdir/prompt") >"$cdir/out.jsonl" 2>"$cdir/stderr"
-	cop_exit=$?
-
-	COPILOT_CANARY_ID=$(copilot_get "$cdir/out.jsonl" session_id)
-	COPILOT_CANARY_AIU=$(copilot_get "$cdir/out.jsonl" aiu)
-	# The log line is the one thing the CLI does say about its own hooks, and it
-	# is available at the default level. It cannot prove the hook WORKED — that is
-	# the canary's job — but when the canary fails it is what says why.
-	cop_loaded=no cop_bad=''
-	if grep -lq 'Loading repo hooks in prompt mode' "$cdir"/log/*.log 2>/dev/null; then cop_loaded=yes; fi
-	cop_bad=$(grep -h -E 'Invalid hook configuration|Invalid matcher regex' "$cdir"/log/*.log 2>/dev/null | sed -n 1p)
-	COPILOT_HOOK_ATTEST="repo hooks loaded: $cop_loaded${cop_bad:+; the CLI rejected the hook file: $cop_bad}"
-
-	cop_calls=$(copilot_get "$cdir/out.jsonl" calls)
-	cop_v() { printf '%s\n' "$cop_calls" | grep -F -- "$1" | sed -n 1p | cut -f1; }
-	cop_control=$(cop_v "$COPILOT_CANARY_MARK")
-	cop_wrapped=$(cop_v "$cop_git")
-	# The write probe is judged on DISK and on its CONTENT, not on the envelope:
-	# a file that is there carrying the source it was asked to carry is the only
-	# thing that proves a worker could have authored one, and it is proof no
-	# envelope field has to be trusted for. The content matters as much as the
-	# file — a comment and a closing tag are the shapes a containment breaks
-	# first, and a probe that wrote a line of prose instead once passed over a
-	# containment under which no worker could write either. It is then removed —
-	# the canary runs in the worker's own tree, before the worker does, and
-	# anything it left behind would be staged later as the worker's authorship
-	# with nothing able to tell them apart.
-	cop_wrote=no
-	if [ -f "$cop_tree/$COPILOT_CANARY_FILE" ]; then
-		cop_wrote=empty
-		grep -Fq '//' "$cop_tree/$COPILOT_CANARY_FILE" &&
-			grep -Fq '</' "$cop_tree/$COPILOT_CANARY_FILE" &&
-			cop_wrote=yes
-	fi
-	rm -f "$cop_tree/$COPILOT_CANARY_FILE"
-	# So the tree must be left as it was found APART from that one probe file,
-	# which is expected and is accounted for above. Anything else is the failure
-	# this check exists for.
-	cop_dirt=$(copilot_get "$cdir/out.jsonl" changed |
-		tr ',' '\n' | sed 's|.*[/\\]||; s|^ *||; s| *$||' |
-		grep -v -x -F "$COPILOT_CANARY_FILE" | grep -v '^$' | tr '\n' ' ' | sed 's| *$||')
-
-	if [ "$cop_control" = ran ] && [ "$cop_wrote" = yes ] && [ "$cop_wrapped" = blocked ] && [ -z "$cop_dirt" ]; then
-		say "containment canary PASSED: the ordinary command ran, an ordinary in-tree file write RAN and left on disk a line of real source carrying a \`//\` comment and a closing tag, and the wrapped git — which the deny rules cannot see inside — was blocked. That is what this containment claims and all it claims: no read boundary is enforced, and the pull request says so. Session ${COPILOT_CANARY_ID:-not reported}, ${COPILOT_CANARY_AIU:-unreported} AI credits. Log attestation: $COPILOT_HOOK_ATTEST."
-		return 0
-	fi
-
-	say "FAILED CONTAINMENT CANARY: this dispatch cannot show that its worker would have been contained AND able to work, so no worker was invoked."
-	say "  ordinary command   : ${cop_control:-never attempted} (must be: ran)"
-	say "  in-tree file write : $cop_wrote (must be: yes — the file must be on disk after the run AND carry the \`//\` comment and the closing tag it was asked for; 'empty' means the file is there but its source is not, which is a containment that permits a write and refuses what workers actually write)"
-	say "  wrapped git        : ${cop_wrapped:-never attempted} (must be: blocked)"
-	say "  log attestation    : $COPILOT_HOOK_ATTEST"
-	[ -n "$cop_dirt" ] &&
-		say "  tree left dirty    : $cop_dirt (must be: nothing beyond the write probe, which is removed) — the canary wrote into the worker's tree, and nothing later could tell its files from the worker's"
-	say "  canary exit code   : $cop_exit; session ${COPILOT_CANARY_ID:-not reported}; envelope kept at $cdir"
-	say "A 'never attempted' line is not proof the containment holds: it means the canary model did not issue that call, so the test did not run. A 'ran' on the wrapped git line means the containment did NOT hold and a worker would have been free to do the same. A 'no' or an 'empty' on the file-write line is the opposite failure and refuses the dispatch just as firmly: a containment that also refuses ordinary authoring is not a containment, it is a broken harness, and a gate that never tries to write the shapes workers write cannot tell the two apart. Either way this is reported, not worked around, and never downgraded to a warning."
-	return 1
-} # end copilot_canary
-
-SANDBOX_APPLIED=''
-RUN_ID=''
-MODEL_AUTHORED=$MODEL
-# Where a run reports the model that actually served it, that report is the truth
-# of authorship and outranks the alias a dispatch asked for. `model_channel`
-# names where that report was looked for, so a run that carries none is reported
-# as unconfirmed rather than papered over with what was asked.
-run_model=''
-model_channel=''
-
-# Reading one field out of a JSON envelope, with whichever reader exists.
-NODE_JSON='const fs=require("fs");let o;try{o=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}catch(e){process.exit(1)}const k=process.argv[2];const v=k==="model"?Object.keys(o.modelUsage||{})[0]:o[k];process.stdout.write(v==null?"":String(v)+"\n")'
-json_get() { # $1 envelope file  $2 field: result | session_id | is_error | model
-	case "$JSONTOOL" in
-	jq)
-		case "$2" in
-		model) jq -r '(.modelUsage // {}) | keys | .[0] // empty' "$1" ;;
-		*) jq -r ".$2 // empty" "$1" ;;
-		esac
-		;;
-	node) node -e "$NODE_JSON" "$1" "$2" ;;
-	esac
-}
-JSONTOOL=none
-
-# Reading a devin run out of its ATIF export, with whichever reader the
-# precondition found. The fields, and why each is the one to read, are in
-# .remit/devin-first-class/probe-results.md; the one worth restating is `final`,
-# because it is the whole reason this file is read at all: the final message is
-# the LAST step whose source is "agent", and taking it from stdout instead would
-# take the narration glued to the front of it with no delimiter to cut on.
-NODE_ATIF='const fs=require("fs");let o;try{o=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}catch(e){process.exit(1)}const k=process.argv[2];const st=Array.isArray(o.steps)?o.steps:[];const ag=st.filter(function(s){return s&&s.source==="agent"});const last=ag.length?ag[ag.length-1]:null;let v="";if(k==="final"){if(last&&last.message!=null)process.stdout.write(String(last.message));process.exit(0)}else if(k==="session_id")v=o.session_id;else if(k==="model_name")v=o.agent&&o.agent.model_name;else if(k==="agent_version")v=o.agent&&o.agent.version;else if(k==="permission_mode")v=o.agent&&o.agent.extra&&o.agent.extra.permission_mode;else if(k==="cut")v=(last&&(last.tool_calls||[]).length)?"yes":"";else if(k==="acu"){let s=0,n=0;st.forEach(function(x){const c=x&&x.extra&&x.extra.committed_acu_cost;if(typeof c==="number"){s+=c;n++}});v=n?s.toFixed(5):""}else if(k==="refusals"){const out=[];const texts=function(ob){if(ob==null)return[];if(typeof ob==="string")return[ob];if(Array.isArray(ob))return ob.reduce(function(a,x){return a.concat(texts(x))},[]);if(typeof ob==="object")return texts(ob.results!=null?ob.results:(ob.content!=null?ob.content:JSON.stringify(ob)));return[String(ob)]};st.forEach(function(x){texts(x&&x.observation).forEach(function(t){if(/permission denied|was rejected|tool blocked|rejected by the user|canceled because another tool call/i.test(t))out.push(t.split("\n")[0])})});v=out.join(" | ")}process.stdout.write(v==null||v===false?"":String(v)+"\n")'
-atif_get() { # $1 export file  $2 field
-	case "$DEVIN_JSON" in
-	jq)
-		case "$2" in
-		final) jq -r '[.steps[]? | select(.source == "agent")] | last | .message // empty' "$1" ;;
-		session_id) jq -r '.session_id // ""' "$1" ;;
-		model_name) jq -r '.agent.model_name // ""' "$1" ;;
-		agent_version) jq -r '.agent.version // ""' "$1" ;;
-		permission_mode) jq -r '.agent.extra.permission_mode // ""' "$1" ;;
-		cut) jq -r '[.steps[]? | select(.source == "agent")] | last | if . == null then "" elif ((.tool_calls // []) | length) > 0 then "yes" else "" end' "$1" ;;
-		acu) jq -r '[.steps[]?.extra.committed_acu_cost // empty] | if length == 0 then "" else ((add * 100000 | round) / 100000 | tostring) end' "$1" ;;
-		refusals) jq -r '[.steps[]? | .observation | select(. != null) | [.. | strings] | .[] | select(test("permission denied|was rejected|tool blocked|rejected by the user|canceled because another tool call"; "i")) | split("\n")[0]] | join(" | ")' "$1" ;;
-		esac
-		;;
-	node) node -e "$NODE_ATIF" "$1" "$2" ;;
-	esac
-}
-
-case "$HARNESS" in
-claude)
-	set -- claude -p --output-format json
-	[ -n "$MODEL" ] && set -- "$@" --model "$MODEL"
-	# Command-granular tool scoping is how a claude worker's grant omits git.
-	[ -n "$ALLOWED" ] && set -- "$@" --allowedTools "$ALLOWED"
-	say "invoking: $* < $(basename "$BRIEF")"
-	run_worker "$BRIEF" "$@"
-	;;
-codex)
-	# `-` takes the briefing on stdin; -o writes the final message; the sandbox
-	# denies .git by upstream design, which is the ruled behaviour enforced.
-	set -- codex exec -s "$SANDBOX" -C "$DIR" --skip-git-repo-check -o "$FINALFILE"
-	[ -n "$MODEL" ] && set -- "$@" -m "$MODEL"
-	set -- "$@" -
-	say "invoking: $* < $(basename "$BRIEF")"
-	run_worker "$BRIEF" "$@"
-	;;
-pi)
-	set -- pi
-	[ -n "$PROVIDER" ] && set -- "$@" --provider "$PROVIDER"
-	set -- "$@" --model "$MODEL" --no-session
-	# Whole-tool scoping only: excluding git means excluding bash wholesale, so a
-	# pi worker restrained by mechanism has no shell at all. The dispatch chose;
-	# this records which.
-	[ -n "$EXCLUDED" ] && set -- "$@" --exclude-tools "$EXCLUDED"
-	set -- "$@" -p "@$BRIEF"
-	say "invoking: $*"
-	run_worker none "$@"
-	;;
-devin)
-	# `--prompt-file` is the only briefing channel — a briefing on stdin is
-	# refused outright — and the trust flag is needed on EVERY run, not merely the
-	# first, because a -p run never persists trust. `--config` is never passed: it
-	# replaces the user config rather than layering with it, and a replacement
-	# missing the user's own state drops a -p run into interactive onboarding and
-	# hangs it. `--sandbox` is never passed either; it is refused above rather
-	# than forwarded. The bounded wait is part of the command because no flag
-	# guarantees non-interactivity.
-	devin_write_containment "$DIR" || {
-		rm -rf "$DIR/.devin"
-		die "could not write the worker's containment under $DIR/.devin — not dispatching a worker this script cannot contain"
-	}
-	cp "$DIR/.devin/config.json" "$RUNDIR/devin-config.json"
-	cp "$DIR/.devin/hooks.v1.json" "$RUNDIR/devin-hooks.v1.json"
-	cp "$DIR/.devin/remit-no-git.sh" "$RUNDIR/devin-remit-no-git.sh"
-	set -- timeout "$DEVIN_TIMEOUT" "$DEVIN" -p \
-		--prompt-file "$BRIEF" \
-		--respect-workspace-trust false \
-		--permission-mode "$DEVIN_MODE" \
-		--export "$ATIF"
-	# No catalogue check, unlike pi: devin rejects an unknown model id before it
-	# starts and before anything is billed, so a wrong id fails loudly by itself
-	# rather than being answered by something else.
-	[ -n "$MODEL" ] && set -- "$@" --model "$MODEL"
-	say "invoking: $*"
-	run_worker none "$@"
-	# The containment was apparatus for the run; it is not part of the tree the
-	# worker delivers and it is gone before anything is staged. The PR body says
-	# it was removed, so its removal is asserted, not assumed.
-	rm -rf "$DIR/.devin"
-	[ ! -e "$DIR/.devin" ] || die "could not remove the containment at $DIR/.devin — refusing to stage a tree that still carries dispatch apparatus"
-	;;
-copilot)
-	# The briefing goes on stdin. `--prompt-file` does not exist here and the
-	# argv channel dies above roughly 32 KB with the shell's own "Argument list
-	# too long" before the CLI even starts — a cliff with no warning on the near
-	# side of it, and a remit briefing is kilobytes and grows.
-	#
-	# `--allow-all-tools` and never `--allow-all` or `--yolo`: the blunt flags
-	# throw away the file-tool refusals and the naive-command refusals for
-	# nothing. That default path wall is kept because it is free, not because it
-	# contains anything — the hook below is what contains.
-	#
-	# `--disable-builtin-mcps` because the built-in GitHub server connects on
-	# every run by default, and a worker reaching GitHub through an MCP tool is
-	# invisible to every shell deny rule and to a hook that inspects shell
-	# commands. Ruled: the CLI is the route and that server is not.
-	#
-	# Never `--no-custom-instructions`, which would strip the AGENTS.md a worker
-	# needs; never `--share`, whose default path writes the transcript into the
-	# directory about to be staged; never `--share-gist`. No catalogue pre-check,
-	# unlike pi: an unknown model id and an unsupported effort are each refused
-	# pre-flight, in seconds, with nothing billed.
-	copilot_write_containment "$DIR" || {
-		copilot_remove_containment "$DIR"
-		die "could not write the worker's containment under $DIR/.github/hooks — not dispatching a worker this script cannot contain"
-	}
-	cp "$COPILOT_HOOK_JSON" "$RUNDIR/copilot-remit-no-git.json"
-	cp "$COPILOT_HOOK_SH" "$RUNDIR/copilot-remit-no-git.sh"
-	if ! copilot_canary "$DIR"; then
-		copilot_remove_containment "$DIR"
-		tree_state_early=$(git -C "$DIR" status --porcelain)
-		[ -n "$tree_state_early" ] &&
-			say "the tree at $DIR is left exactly as it was; nothing was staged and nothing was discarded."
-		exit 7
-	fi
-	set -- env GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS=true \
-		timeout "$COPILOT_TIMEOUT" "$COPILOT" \
-		--output-format json --allow-all-tools --no-ask-user --disable-builtin-mcps \
-		--log-dir "$RUNDIR/copilot-log"
-	set -- "$@" --deny-tool 'shell(git)' --deny-tool 'shell(git:*)' \
-		--deny-tool 'shell(gh)' --deny-tool 'shell(gh:*)'
-	# `shell(git:*)` is a pathname pattern to an unquoted shell, so any caller
-	# additions are split with globbing off.
-	if [ -n "$EXCLUDED" ] || [ -n "$ALLOWED" ]; then
-		cop_ifs=$IFS
-		set -f
-		IFS=' ,'
-		for r in $EXCLUDED; do set -- "$@" --deny-tool "$r"; done
-		for r in $ALLOWED; do set -- "$@" --allow-tool "$r"; done
-		IFS=$cop_ifs
-		set +f
-	fi
-	[ -n "$MODEL" ] && set -- "$@" --model "$MODEL"
-	# Both halves of a standing model constraint are expressible on this CLI, so
-	# both are passed where the dispatch named them, and neither is reported as
-	# applied when it was not.
-	[ -n "$EFFORT" ] && set -- "$@" --effort "$EFFORT"
-	say "invoking: $* < $(basename "$BRIEF")"
-	run_worker "$BRIEF" "$@"
-	# The containment was apparatus for the run; it is not part of the tree the
-	# worker delivers and it is gone before anything is staged. The PR body says
-	# it was removed, so its removal is asserted, not assumed.
-	copilot_remove_containment "$DIR"
-	{ [ ! -e "$COPILOT_HOOK_JSON" ] && [ ! -e "$COPILOT_HOOK_SH" ]; } ||
-		die "could not remove the containment at $DIR/.github/hooks — refusing to stage a tree that still carries dispatch apparatus"
-	;;
-native)
-	# Steps 2-4 were the harness's: it invoked the sub-agent, waited for it, and
-	# returned its result. Nothing is invoked here.
-	WORKER_EXIT=0
-	: >"$OUTFILE"
-	: >"$ERRFILE"
-	say "no CLI invoked: the worker was this harness's own sub-agent, and its returned result was given at --final-message."
-	;;
-esac
-
-if [ "$HARNESS" = native ]; then
-	rule_off
-else
-	say "worker process exited with code $WORKER_EXIT — that is completion, not success."
-	rule_off
-fi
-
-# --- 4. capture the worker's final message ------------------------------------
-final_note=''
-case "$HARNESS" in
-claude)
-	# The envelope is the cleanest return contract of the CLIs this script drives,
-	# but only if
-	# something here can read JSON. jq first; node otherwise, which is present
-	# wherever `claude` is, since `claude` is a node program. If neither can read
-	# it, the envelope travels verbatim and says so — nothing is guessed out of
-	# it with a regex.
-	if command -v jq >/dev/null 2>&1 && jq -e . "$OUTFILE" >/dev/null 2>&1; then
-		JSONTOOL=jq
-	elif command -v node >/dev/null 2>&1 && node -e "$NODE_JSON" "$OUTFILE" result >/dev/null 2>&1; then
-		JSONTOOL=node
-	else
-		JSONTOOL=none
-	fi
-	if [ "$JSONTOOL" = none ]; then
-		cp "$OUTFILE" "$FINALFILE"
-		final_note="neither jq nor node could read the claude envelope as JSON — it is carried verbatim and nothing was extracted from it"
-	else
-		json_get "$OUTFILE" result >"$FINALFILE"
-		RUN_ID=$(json_get "$OUTFILE" session_id)
-		# The envelope names the model that actually served the run; a dispatch
-		# names an alias. Authorship is never obscured, so the trailer follows
-		# the envelope where they differ.
-		actual=$(json_get "$OUTFILE" model)
-		[ -n "$actual" ] && MODEL_AUTHORED=$actual
-		[ "$(json_get "$OUTFILE" is_error)" = true ] &&
-			final_note="the claude envelope reports is_error: true"
-	fi
-	;;
-codex)
-	[ -f "$FINALFILE" ] || : >"$FINALFILE"
-	# codex 0.147.0 prints its run header AND its transcript on STDERR; stdout
-	# carries only the worker's own final message (measured: 4,892 bytes of
-	# header and transcript on stderr against 67 bytes of final message on
-	# stdout). Neither stream is trusted wholesale — the transcript on stderr is
-	# the worker talking as much as stdout is — so the header is read from the
-	# HEADER BLOCK alone: the lines between codex's own banner and the separator
-	# that closes the block, before a single word of worker text exists. A
-	# transcript line shaped like `sandbox: …` therefore cannot become the run
-	# header however far down it appears, and a build that stops printing the
-	# banner leaves no header at all. That is the honest outcome: a header that
-	# cannot be found is unconfirmed, and unconfirmed is a state this script
-	# reports; a forged one is not.
-	HEADER="$RUNDIR/header-block"
-	awk '
-		/^OpenAI Codex v/ { banner = 1; next }
-		!banner { next }
-		/^-+[[:space:]]*$/ { seps++; if (seps >= 2) exit; next }
-		seps >= 1 { print }
-	' "$ERRFILE" >"$HEADER"
-	RUN_ID=$(sed -n 's/^ *session id: *//p' "$HEADER" | sed -n 1p)
-	SANDBOX_APPLIED=$(sed -n 's/^ *sandbox: *//p' "$HEADER" | sed -n 1p)
-	# The header block is the truth of what ran, including which model served it
-	# — so the trailer names that, not the alias the dispatch asked for, and not
-	# nothing at all when the dispatch named no model.
-	model_channel='run header'
-	run_model=$(sed -n 's/^ *model: *//p' "$HEADER" | sed -n 1p)
-	[ -n "$run_model" ] && MODEL_AUTHORED=${run_model%% *}
-	;;
-devin)
-	# stdout is the agent's own prose with the pre-tool narration glued to the
-	# final message and no delimiter between them, so it is never parsed for one.
-	# The export keeps them apart, and carries with them the run id, the model
-	# that served the run, its cost, and the permission mode that actually
-	# applied. It is this run's single provenance channel.
-	: >"$FINALFILE"
-	model_channel='run export'
-	if [ ! -s "$ATIF" ]; then
-		final_note="devin wrote no ATIF export, so nothing about this run can be read back — the final message, the run id, the model that served it and the permission mode that applied are all absent here, and none of them is invented"
-	else
-		atif_get "$ATIF" final >"$FINALFILE"
-		RUN_ID=$(atif_get "$ATIF" session_id)
-		DEVIN_VERSION=$(atif_get "$ATIF" agent_version)
-		DEVIN_ACU=$(atif_get "$ATIF" acu)
-		PERM_APPLIED=$(atif_get "$ATIF" permission_mode)
-		run_model=$(atif_get "$ATIF" model_name)
-		[ -n "$run_model" ] && MODEL_AUTHORED=$run_model
-		# Exit 0 says a run happened, not that its tool calls ran. A denied or
-		# rejected call is invisible on stdout, silent on stderr, and exits 0
-		# with the agent simply stopping where it was — so the export is read for
-		# it, and a run that was cut short says so rather than presenting its
-		# narration as a finished answer.
-		refusals=$(atif_get "$ATIF" refusals)
-		if [ ! -s "$FINALFILE" ]; then
-			final_note="${final_note:+$final_note; }the run export carries no agent message at all — this run produced no worker turn"
-		elif [ -n "$(atif_get "$ATIF" cut)" ]; then
-			final_note="${final_note:+$final_note; }the run's last agent step was still calling tools, so the message above is narration and not a completed answer — the run stopped where it was"
-		fi
-		[ -n "$refusals" ] &&
-			final_note="${final_note:+$final_note; }tool calls were refused during this run and devin still exited 0: $refusals"
-	fi
-	;;
-copilot)
-	# Text-mode stdout glues the tool renderings to the answer with no stable
-	# delimiter, and `-s` gives a clean answer at the price of every scrap of
-	# provenance, the session id included. The JSONL envelope is neither: it keeps
-	# narration and answer apart as separate labelled records, and carries the run
-	# id, the model that served the run, its cost, and every denied call with the
-	# reason. stderr is empty on a JSON run, so anything on it is a diagnostic.
-	: >"$FINALFILE"
-	model_channel='run envelope'
-	if [ ! -s "$OUTFILE" ]; then
-		final_note="copilot wrote no JSONL envelope, so nothing about this run can be read back — the final message, the run id, the model that served it and its cost are all absent here, and none of them is invented"
-	else
-		copilot_get "$OUTFILE" final >"$FINALFILE"
-		RUN_ID=$(copilot_get "$OUTFILE" session_id)
-		run_model=$(copilot_get "$OUTFILE" model)
-		[ -n "$run_model" ] && MODEL_AUTHORED=$run_model
-		COPILOT_AIU=$(copilot_get "$OUTFILE" aiu)
-		COPILOT_PREMIUM=$(copilot_get "$OUTFILE" premium)
-		# A run that never started writes no terminal result event at all, which
-		# makes "did a run happen?" a fact rather than an inference — the exit
-		# code cannot tell them apart on its own.
-		[ -z "$(copilot_get "$OUTFILE" result_present)" ] &&
-			final_note="the envelope carries no terminal result event, so this run never completed — what is above, if anything, is a fragment and not an answer"
-		if [ ! -s "$FINALFILE" ]; then
-			final_note="${final_note:+$final_note; }the envelope carries no assistant message free of tool calls — this run produced no final message"
-		fi
-		# Exit 0 covers a clean run, a run whose every call was denied by a rule,
-		# and a run whose every call was blocked by the hook. Denials are silent
-		# on stderr and invisible in the exit code, so the envelope is read for
-		# them. On a copilot dispatch some of these are the containment working
-		# as designed; they are reported either way and never summarised away.
-		cop_refusals=$(copilot_get "$OUTFILE" refusals)
-		[ -n "$cop_refusals" ] &&
-			final_note="${final_note:+$final_note; }tool calls were refused during this run and copilot still exited 0 — the containment firing looks exactly like this, and so does a worker being stopped from doing its task: $cop_refusals"
-	fi
-	;;
-pi)
-	cp "$OUTFILE" "$FINALFILE"
-	;;
-native)
-	cp "$RETURNED" "$FINALFILE"
-	;;
-esac
-
-# `codex exec -o` writes no trailing newline; without one the final message runs
-# into whatever is printed after it, here and in the pull request body.
-if [ -s "$FINALFILE" ] && [ -n "$(tail -c 1 "$FINALFILE")" ]; then
-	printf '\n' >>"$FINALFILE"
-fi
-
-say "worker's final message:"
-rule_off
-cat "$FINALFILE"
-rule_off
-[ -n "$final_note" ] && say "note: $final_note"
-
-# The worker's own run output — its narration, its tool calls, and for codex the
-# unified diff of everything it authored — is captured but NOT printed on the
-# success path. The seam dispatch law protects is that a worker's exploration and
-# diff never reach the coordinator's context, and that seam is held here by
-# mechanism. It is printed only when a run failed and the failure is the report.
-say "the worker's run output stays in $RUNDIR and is not printed here — a worker's exploration and diff do not reach the coordinator."
+REMIT_AUTHORITY="$BRIEF" \
+	REMIT_PROVENANCE="$PROVFILE" \
+	REMIT_ROUND=1 \
+	REMIT_RUBRICS='' \
+	REMIT_ROLES='' \
+	REMIT_MUSTFIX='' \
+	sh "$@" >"$FINALFILE" 2>"$ERRFILE"
+WORKER_EXIT=$?
 
 print_worker_stderr() {
 	if [ -s "$ERRFILE" ]; then
-		say "worker stderr, verbatim:"
+		say "the raise's own output, verbatim:"
 		rule_off
 		cat "$ERRFILE"
 		rule_off
 	else
-		say "the worker wrote nothing to stderr."
+		say "the raise wrote nothing to stderr."
 	fi
 }
 
@@ -1314,64 +272,56 @@ tree_state() {
 	fi
 }
 
-if [ "$HARNESS" = copilot ] && [ "$WORKER_EXIT" -eq 124 ]; then
-	say "the run did not stop on its own and was killed at the ${COPILOT_TIMEOUT}s bound. No probe of this CLI ever saw a run block, but a run that has never hung is not a run that cannot, and a hang is reported as a hang — never as completion, and never as a delivery."
-fi
-
-if [ "$HARNESS" = devin ] && [ "$WORKER_EXIT" -eq 124 ]; then
-	say "the run did not stop on its own and was killed at the ${DEVIN_TIMEOUT}s bound. A -p run can still be dropped into a prompt no flag suppresses, and a hang is reported as a hang — never as completion, and never as a delivery."
-fi
-
 if [ "$WORKER_EXIT" -ne 0 ]; then
-	say "RUN-LEVEL FAILURE: $CLI exited $WORKER_EXIT. Reported as it happened; nothing substituted, no mechanics performed."
+	case "$WORKER_EXIT" in
+	2) say "PRECONDITION FAILED at the seam: nothing was raised and nothing was billed." ;;
+	5) say "RUN-LEVEL FAILURE: the harness CLI itself exited non-zero. Reported as it happened; nothing substituted, no mechanics performed." ;;
+	6) say "FAILED DISPATCH PRECONDITION: the containment that was asked for was confirmed downgraded. Reported, never worked around." ;;
+	7) say "FAILED CONTAINMENT CANARY: the containment did not demonstrably hold, so no worker was invoked." ;;
+	*) say "the seam exited $WORKER_EXIT — reported as it happened; no mechanics performed." ;;
+	esac
 	print_worker_stderr
 	tree_state
-	exit 5
+	exit "$WORKER_EXIT"
 fi
 
-if [ "$HARNESS" = codex ]; then
-	if [ -z "$SANDBOX_APPLIED" ]; then
-		SANDBOX_APPLIED="unconfirmed (no sandbox line found in the run header)"
-		say "note: the run header could not be read back, so the sandbox that actually applied is UNCONFIRMED. Carried into the PR body as such."
-	else
-		# The header decorates the mode with its writable roots and network
-		# state — `workspace-write [workdir, /tmp, …] (network access enabled)`.
-		# Only the leading token is the sandbox that applied; comparing the whole
-		# decorated line would fail every correctly granted dispatch, which is a
-		# precondition check that cries wolf rather than one that holds.
-		APPLIED_MODE=${SANDBOX_APPLIED%% *}
-		if [ "$APPLIED_MODE" != "$SANDBOX" ]; then
-			say "FAILED DISPATCH PRECONDITION: $SANDBOX was requested; the run header reports mode '$APPLIED_MODE' (header line: $SANDBOX_APPLIED). The header is the truth of what applied, and a downgrade is reported, not worked around."
-			print_worker_stderr
-			tree_state
-			exit 6
-		fi
-		say "sandbox: the run header confirms '$APPLIED_MODE', which is what was requested."
-	fi
+# The seam's own narration is not the worker's message and is not printed on the
+# success path: a worker's exploration and diff do not reach the coordinator.
+prov() { # $1 key -> value, or empty
+	[ -f "$PROVFILE" ] || return 0
+	tr -d '\015' <"$PROVFILE" | sed -n "s/^$1: *//p" | sed -n 1p
+}
+
+RUN_ID=$(prov session)
+SANDBOX_APPLIED=$(prov sandbox)
+MODEL_AUTHORED=$(prov model)
+# `model: <id> (asked)` is the seam saying no channel confirmed what served the
+# run. That distinction is carried into the pull request rather than flattened:
+# the trailer never claims a model the run did not report.
+run_model=$MODEL_AUTHORED
+model_channel='run provenance'
+case "$MODEL_AUTHORED" in
+*' (asked)')
+	MODEL_AUTHORED=${MODEL_AUTHORED% (asked)}
+	run_model=''
+	;;
+esac
+[ -n "$MODEL_AUTHORED" ] || MODEL_AUTHORED=$MODEL
+final_note=$(prov note)
+
+if [ "$HARNESS" = native ]; then
+	rule_off
+else
+	say "the raised context has exited — that is completion, not success."
+	rule_off
 fi
 
-if [ "$HARNESS" = devin ]; then
-	# The same read-back as codex's sandbox, on the field that is devin's
-	# equivalent of it. A permission mode can be refused and quietly downgraded
-	# with nothing but a warning on stderr and an exit 0, which would leave a
-	# worker unable to run a single command and a run that looked like a short
-	# answer. The export says which mode actually applied; a downgrade is a failed
-	# precondition, reported and never worked around. The comparison ignores case
-	# and punctuation because the mode is asked for as `accept-edits` and reported
-	# back as `AcceptEdits`.
-	perm_norm() { printf '%s' "$1" | tr 'A-Z' 'a-z' | sed 's/[^a-z]//g'; }
-	if [ -z "$PERM_APPLIED" ]; then
-		PERM_APPLIED="unconfirmed (the run export reports no permission mode)"
-		say "note: the run export does not say which permission mode applied, so the worker's containment is UNCONFIRMED. Carried into the PR body as such."
-	elif [ "$(perm_norm "$PERM_APPLIED")" != "$(perm_norm "$DEVIN_MODE")" ]; then
-		say "FAILED DISPATCH PRECONDITION: $DEVIN_MODE was requested; the run export reports '$PERM_APPLIED'. The export is the truth of what applied, and a downgrade is reported, not worked around."
-		print_worker_stderr
-		tree_state
-		exit 6
-	else
-		say "permissions: the run export confirms '$PERM_APPLIED', which is what was requested."
-	fi
-fi
+say "worker's final message:"
+rule_off
+cat "$FINALFILE"
+rule_off
+[ -n "$final_note" ] && say "note: $final_note"
+say "the raise's own output stays in $RUNDIR and is not printed here — a worker's exploration and diff do not reach the coordinator."
 
 # --- 5. the git mechanics, in the worker's tree -------------------------------
 # Stage before branching, so a worker that delivered nothing leaves nothing
@@ -1502,48 +452,25 @@ write_delivery_section() { # $1 create|update -> this delivery's section, on std
 	else
 		printf -- '- Model: %s (model-precedence rule %s)\n' "${MODEL:-$CLI_DEFAULT}" "$RULE"
 	fi
-	printf -- '- Worker run id: %s\n' "${RUN_ID:-not printed by this CLI — absent, never invented}"
-	[ -n "$SANDBOX_APPLIED" ] && printf -- '- Sandbox per the run header: %s\n' "$SANDBOX_APPLIED"
-	if [ "$HARNESS" = devin ]; then
-		printf -- '- Permission mode per the run export: %s (the dispatch requested `%s`)\n' \
-			"$PERM_APPLIED" "$DEVIN_MODE"
-		printf -- '- Permissions applied to the worker: deny [%s]; allow [%s]; and a PreToolUse hook that blocks git and gh on a word-boundary match against the whole command, because a deny rule alone does not see inside `sh -c "…"`. Written into the worker'\''s tree for the run and removed before anything was staged; the copies are in the run log.\n' \
-			"$DEVIN_DENY${EXCLUDED:+ $EXCLUDED}" "$DEVIN_ALLOW${ALLOWED:+ $ALLOWED}"
-		printf -- '- Isolation: the linked worktree, those permission rules, and that hook — and nothing at the OS level. Devin'\''s own sandbox is unsupported on Windows, so it was never passed and no sandbox line above should be read as implying one.\n'
-		printf -- '- Account this run was billed and governed by: tier %s, primary org %s\n' \
-			"${DEVIN_TIER:-not reported}" "${DEVIN_ORG:-none reported}"
-		printf -- '- Harness version: devin %s\n' "${DEVIN_VERSION:-unconfirmed (not reported by the run export)}"
-		if [ -n "$DEVIN_ACU" ]; then
-			printf -- '- Run cost: %s ACU — devin'\''s own per-step cost, summed from the run export\n' "$DEVIN_ACU"
-		else
-			printf -- '- Run cost: not reported by the run export — absent, never invented\n'
-		fi
-	elif [ "$HARNESS" = copilot ]; then
-		[ -n "$EFFORT" ] &&
-			printf -- '- Reasoning effort: `%s`, passed on the command line and refused pre-flight by the CLI had this model not supported it. Both halves of the model constraint are expressible here, so neither is recorded as unenforceable.\n' "$EFFORT"
-		printf -- '- Permission configuration that actually applied: **not reported by this CLI, in any channel** — not in the envelope, not on stderr, not in the log at maximum verbosity. codex reads its sandbox back out of its run header and devin reads its permission mode out of its export; copilot has no analogue, so nothing below should be read as a mode compared against one requested. What is below is what the containment was demonstrated to DO.\n'
-		printf -- '- Containment applied to the worker: deny rules [%s], which fire and name themselves but only ever see the stem of a command; a `preToolUse` hook, which sees the whole tool call and therefore catches `git` and `gh` in EVERY wrapping the stem matchers miss — `sh -c "…"`, `powershell -Command`, `cmd /c`, `node -e`, a chained command, a subshell; and the environment opt-in without which repo hooks do not load in prompt mode at all. Written into the worker'\''s tree at `.github/hooks/` for the run and removed before anything was staged; the copies are in the run log.\n' \
-			"$COPILOT_DENY${EXCLUDED:+ $EXCLUDED}"
-		printf -- '- Contained from git and gh by a tested hook. Runs on the practitioner'\''s host under their credentials with no enforced read boundary — treat it as you would any process you run.\n'
-		printf -- '- That disclosure is a ruling, not an omission. A worktree path arm was built into this hook and **withdrawn** — ruled 2026-08-22, after five build-and-evaluate rounds in which the git/gh arm was never escaped once and the path arm was escaped five times, each escape a single token from a spelling that arm already refused. Inspecting command text is the wrong mechanism for a read boundary; the one that holds is where a worker RUNS — an OS-level sandbox, a container, a scratch user — which is a property of how the context was raised and is not this wrapper'\''s to give. A claude or a pi worker reaches exactly as far today, and the same disclosure applies to them.\n'
-		printf -- '- Containment canary: **PASSED** before this worker was invoked. A throwaway run under this exact configuration attempted three things — an ordinary command, an in-tree file write through the file tool, and a wrapped `git`; the first two ran and the git was blocked. The wrapped git is the probe that matters, because the deny rules cannot see inside it and only the hook can refuse it. A containment that also refuses ordinary authoring is a broken harness rather than a containment, which is why the write is attempted beside it — and the file it writes is a line of real source carrying a `//` comment and a closing tag, read back off disk and required to still hold both, because a probe of unobjectionable prose certifies nothing about the shapes workers actually write. Anything else would have refused the dispatch (exit 7) rather than downgrading it to a warning. Canary session %s, cost %s AI credits. Log attestation: %s.\n' \
-			"${COPILOT_CANARY_ID:-not reported}" "${COPILOT_CANARY_AIU:-unreported}" "${COPILOT_HOOK_ATTEST:-not read}"
-		printf -- '- What the canary does **not** establish, said plainly rather than implied away: it proves the configuration at the **start** of this run, not throughout it — a hook that times out is documented to let the tool call continue, which is a fail-open this project has never reproduced and cannot rule out mid-run; and because nothing reports the configuration that applied, this dispatch can say its containment loaded and blocked, never that a requested mode held for the whole run.\n'
-		printf -- '- Isolation: the linked worktree the worker was given, those deny rules, and that hook — and nothing at the OS level. The worktree is where the work was put, not a wall around it; this build ships no sandbox flag, so no line above should be read as implying one.\n'
-		printf -- '- Account this run was billed and governed by: %s at %s. Recorded, not gated: remit assumes no account type and an adopter may hold any. There is also **no live authentication check to make** — this CLI ships no auth-status and no logout subcommand, and an invalid token in the environment did not fail a run — so the line above is read from the CLI'\''s own state file and is not a check that passed.\n' \
-			"${COPILOT_LOGIN:-not recorded}" "${COPILOT_HOST:-not recorded}"
-		printf -- '- Harness version: %s. This CLI updates itself by default, so that is the version read at dispatch time and not a version this project pins.\n' \
-			"${COPILOT_VERSION:-unconfirmed (not reported)}"
-		if [ -n "$COPILOT_AIU" ]; then
-			printf -- '- Run cost: %s AI credits%s — the CLI'\''s own figure, from the run envelope. The canary above is billed separately and is additional to it.\n' \
-				"$COPILOT_AIU" "${COPILOT_PREMIUM:+, $COPILOT_PREMIUM premium requests}"
-		else
-			printf -- '- Run cost: not reported by the run envelope — absent, never invented\n'
-		fi
+	printf -- '- Worker run id: %s\n' "${RUN_ID:-not reported by the raise — absent, never invented}"
+	# Everything else this delivery can honestly say about how its context ran —
+	# the boundary and how it was attested, the environment allow-list, the
+	# containment, the account, the harness version and the cost — is written by
+	# `remit-invoke` into its provenance sidecar, and is reproduced here line for
+	# line rather than restated. One authoritative copy: the script that raised
+	# the context is the one that knows what applied, and a shim that paraphrased
+	# it would be a second copy to drift.
+	if [ -s "$PROVFILE" ]; then
+		tr -d '\015' <"$PROVFILE" |
+			grep -v '^role: ' | grep -v '^harness: ' |
+			grep -v '^model: ' | grep -v '^session: ' |
+			sed 's/^/- /'
 	else
-		[ -n "$EXCLUDED" ] && printf -- '- Tools excluded from the worker: %s\n' "$EXCLUDED"
-		[ -n "$ALLOWED" ] && printf -- '- Tools granted to the worker: %s\n' "$ALLOWED"
+		printf -- '- The raise reported no provenance at all, so the boundary, the containment, the environment and the cost are absent here — and none of them is invented.\n'
 	fi
+	[ -n "$EXCLUDED" ] && printf -- '- Tools excluded from the worker: %s\n' "$EXCLUDED"
+	[ -n "$ALLOWED" ] && printf -- '- Tools granted to the worker: %s\n' "$ALLOWED"
+	[ -n "$EFFORT" ] && printf -- '- Reasoning effort asked for: `%s`\n' "$EFFORT"
 	printf -- '- Commit: %s\n' "$SHA"
 	printf -- '- Committing session: %s\n' "$SESSION"
 	[ "$HARNESS" = native ] ||
