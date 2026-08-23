@@ -7,9 +7,11 @@
 # What it installs, and where each harness expects it (researched, not
 # invented):
 #
-#   bin/remit                      the one POSIX mechanic — it does not fork
-#   bin/remit-dispatch             the dispatch wrapper: a worker's authored tree
-#                                  becomes a draft pull request, mechanically
+#   bin/remit                      the work-item state machine, including the
+#                                  delivery seam — it does not fork per harness
+#   bin/remit-invoke               the one AI seam: a fresh context, in a named
+#                                  harness, with a briefing, in a worktree,
+#                                  returning its text
 #   .claude/skills/<name>/         the five conventions, where Claude Code
 #                                  discovers project skills
 #   .agents/skills/<name>/         the same five files, where Codex, Devin and
@@ -25,17 +27,77 @@
 #                                  to, never replaced
 #   <git>/hooks/pre-push           the push guards, in the shared hooks dir so
 #                                  every linked worktree inherits them
-#   .remit/                        an empty work location
+#   .remit/hooks/no-agent-tool.sh  the agent-tool guard: ONE script, registered
+#                                  by every harness here that has a pre-tool hook
+#   .github/hooks/remit-no-agent-tool.json
+#                                  Copilot CLI's registration of it
+#   .claude/settings.json          Claude Code's registration of it, OFFERED: the
+#                                  file is created when absent, and when it is
+#                                  yours the block to merge is printed and
+#                                  nothing is touched
+#   .remit/work-items/             the work location, empty
+#   .remit/field-reports/          observations from real use, empty
+#   .remit/rules/                  the practitioner's rubrics — the empty shape
+#                                  and the ONE rubric remit ships, and nothing
+#                                  else, ever
+#
+# And what it does NOT install, deliberately: `.remit/settings.json`, the
+# registry of which harnesses and models a repository may raise a context on.
+# Nothing here can know a host's seats, and a template registering seats a target
+# does not have would be a file that could only refuse. `sh bin/remit setup`
+# proposes one from what a host actually has, and `sh bin/remit setup --write`
+# saves that proposal — the save is the script's, never a redirection over the
+# file setup reads. Until there is one, `bin/remit-invoke` refuses every raise
+# and says so.
 #   .remit/.install/manifest       the record: what was installed, at what
 #                                  version — the seam the upgrade uses
 #
+# The payload's single source for each of those is one file in this checkout:
+# `bin/`, `install/skills/<name>/SKILL.md`, `install/AGENTS-remit.md`,
+# `install/hooks/pre-push`. This repository's own `.claude/`, `.agents/` and
+# `.pi/` are INSTALLED COPIES, written by running this script against itself,
+# exactly as in any other target.
+#
+# `.remit/rules/` is the one thing here this script does not author. Its content
+# is `bin/remit`'s to write — `remit rules init` lays down the empty shape and
+# the one universal rubric, and only a retro the practitioner calls writes
+# anything more. So this script RUNS that command, in a throwaway repository of
+# its own in a temp directory, and installs what it produced as ordinary payload.
+# Two reasons it is not run in the target: `remit` commits AND PUSHES what it
+# writes, and this script never pushes a repository you own; and treating the
+# seed as payload is what gives a rubrics file the same four honest outcomes as
+# every other file, so a `refined.md` a retro has since written into is KEPT
+# rather than overwritten by an upgrade. (In its scratch repository `rules init`
+# has no remote, commits, and says it is durable on that machine only — that
+# report is about the scratch repository and is discarded with it.)
+#
+# Git tracks no empty directory, so `work-items/` and `field-reports/` are
+# created on disk here and enter the target's history with its first item and
+# its first report. `.remit/rules/` and the manifest are files and are committed.
+#
 # It never installs this repository's own law documents (.remit/problem.md,
-# solution.md, tech-design.md) — those are remit's, not the target's.
+# solution.md, tech-design.md, testing.md) — those are remit's, not the target's.
 #
 # Re-running IS the upgrade: against a newer payload it rewrites only files
 # whose current content matches what the manifest says remit installed.
 # Anything the target repository already had, and anything a person edited
 # since install, is kept and reported — never overwritten.
+#
+# RETIRED PAYLOAD is removed on the same terms. A file remit installed once and
+# no longer ships — the five prose conventions that preceded the five skills,
+# and the dispatch wrapper whose two halves are now `bin/remit` and
+# `bin/remit-invoke` — is deleted when it still matches what the manifest says
+# remit put there, and KEPT WITH A NOTICE when it does not, because a file
+# somebody edited is theirs whatever its name used to mean here.
+#
+# One file, one honest outcome:
+#   installed  it was absent; it is now remit's payload
+#   updated    it was exactly what remit last installed; now the new payload
+#   unchanged  it already equals the payload
+#   kept       it is the target's own, or locally edited since install —
+#              remit does not overwrite it, and does not delete it
+#   removed    remit installed it, remit no longer ships it, and it is still
+#              exactly what remit put there
 #
 # The result is committed in the target (only the paths this install touched)
 # and never pushed: pushing a repository you own is your act, not an
@@ -54,16 +116,33 @@ die() { printf 'remit install: %s\n' "$1" >&2; exit 2; }
 SRC=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 VERSION=$(cat "$SRC/VERSION" 2>/dev/null) || die "no VERSION file at $SRC — is this a complete remit checkout?"
 
-SKILLS="capture-work resume-work dispatch-work evaluate-work close-work"
+SKILLS="remit-new remit-resume remit-close remit-status remit-retro"
+
+# What remit used to ship and does not any more. Named here because the only way
+# to retire an installed file honestly is to know it was ours.
+RETIRED_FILES="bin/remit-dispatch"
+# `.remit/rules/roles.md` retired into `.remit/settings.json` on 2026-08-23.
+# `remit rules init` no longer writes it, so it is removed from targets remit
+# installed it into — on the same terms as any other retired payload.
+RETIRED_RULEFILES=".remit/rules/roles.md"
+RETIRED_SKILLS="capture-work resume-work dispatch-work evaluate-work close-work"
+
+RULEFILES="refined accepted closed"
 ADAPTER="$SRC/install/AGENTS-remit.md"
 HOOK_SRC="$SRC/install/hooks/pre-push"
+GUARD_SRC="$SRC/install/hooks/no-agent-tool.sh"
+GUARD_COPILOT="$SRC/install/hooks/copilot-no-agent-tool.json"
+GUARD_CLAUDE="$SRC/install/hooks/claude-settings.json"
 
 [ -f "$SRC/bin/remit" ] || die "payload missing: $SRC/bin/remit"
-[ -f "$SRC/bin/remit-dispatch" ] || die "payload missing: $SRC/bin/remit-dispatch"
+[ -f "$SRC/bin/remit-invoke" ] || die "payload missing: $SRC/bin/remit-invoke"
 [ -f "$ADAPTER" ] || die "payload missing: $ADAPTER"
 [ -f "$HOOK_SRC" ] || die "payload missing: $HOOK_SRC"
+for f in "$GUARD_SRC" "$GUARD_COPILOT" "$GUARD_CLAUDE"; do
+	[ -f "$f" ] || die "payload missing: $f"
+done
 for s in $SKILLS; do
-	[ -f "$SRC/.claude/skills/$s/SKILL.md" ] || die "payload missing: $SRC/.claude/skills/$s/SKILL.md"
+	[ -f "$SRC/install/skills/$s/SKILL.md" ] || die "payload missing: $SRC/install/skills/$s/SKILL.md"
 done
 
 # --- target: a Git repository's primary worktree ------------------------------
@@ -79,10 +158,20 @@ common_dir=$(CDPATH= cd -- "$TGT" && CDPATH= cd -- "$(git rev-parse --git-common
 MANIFEST=".remit/.install/manifest"
 MANIFEST_ABS="$TGT/$MANIFEST"
 
+SCRATCH=$(mktemp -d 2>/dev/null) || SCRATCH=${TMPDIR:-/tmp}/remit-install-$$
+mkdir -p "$SCRATCH" || die "cannot make a scratch directory"
+trap 'rm -rf "$SCRATCH"' EXIT INT TERM
+
 printf 'remit install v%s -> %s\n' "$VERSION" "$TGT"
 
 # --- helpers ------------------------------------------------------------------
-hash_of() { git hash-object -- "$1"; }
+# Hashed THROUGH THE TARGET, which has already been checked to be a git
+# repository's primary worktree. A bare `git hash-object` would be answered by
+# whatever repository the caller happened to be standing in, and an installer
+# has no business caring which directory it was launched from — a linked
+# worktree whose git pointer another operating system cannot read is enough to
+# stop it dead, and that has nothing to do with the target being installed into.
+hash_of() { git -C "$TGT" hash-object -- "$1"; }
 
 # What the manifest says remit installed there last time. Empty if never.
 manifest_id() { # $1 record-type  $2 path
@@ -99,12 +188,6 @@ record() { # $1 type  $2 id  $3 path
 TOUCHED=''    # tracked paths this run changed (to stage and commit)
 report() { printf '  %-10s %s%s\n' "$1" "$2" "${3:+ — $3}"; }
 
-# One file, one honest outcome:
-#   installed  it was absent; it is now remit's payload
-#   updated    it was exactly what remit last installed; now the new payload
-#   unchanged  it already equals the payload
-#   kept       it is the target's own, or locally edited since install —
-#              remit does not overwrite it
 install_file() { # $1 src-abs  $2 dst-rel
 	src=$1 dst=$2
 	new_id=$(hash_of "$src")
@@ -134,6 +217,30 @@ install_file() { # $1 src-abs  $2 dst-rel
 	fi
 }
 
+# The mirror of install_file, for payload remit no longer ships. It deletes only
+# what it can prove it wrote, and says so; anything else is the target's and
+# stays. A removed file's record is dropped from the manifest, so a later run
+# has nothing to say about it at all.
+retire_file() { # $1 dst-rel  $2 what replaced it, in words
+	dst=$1 why=$2
+	[ -e "$TGT/$dst" ] || return 0
+	old_id=$(manifest_id file "$dst")
+	cur_id=$(hash_of "$TGT/$dst")
+	if [ -z "$old_id" ]; then
+		report kept "$dst" "retired from remit's payload, but this copy is not remit's; left alone — $why"
+		return 0
+	fi
+	if [ "$cur_id" != "$old_id" ]; then
+		record file "$old_id" "$dst"
+		report kept "$dst" "retired from remit's payload, but edited locally since install; left alone — $why"
+		return 0
+	fi
+	rm -f "$TGT/$dst"
+	rmdir "$(dirname "$TGT/$dst")" 2>/dev/null || true
+	report removed "$dst" "$why"
+	TOUCHED="$TOUCHED $dst"
+}
+
 # --- the mechanics and the five conventions, where each harness looks ---------
 # Three copies, five harnesses: Devin and Copilot CLI both discover project
 # skills at .agents/skills too, so neither needs a copy of its own. Copilot CLI's
@@ -141,10 +248,51 @@ install_file() { # $1 src-abs  $2 dst-rel
 # and .claude/skills/, so the copy written here is the one it reads, and adding a
 # fourth location for it would be a second home for content that already has one.
 install_file "$SRC/bin/remit" "bin/remit"
-install_file "$SRC/bin/remit-dispatch" "bin/remit-dispatch"
+install_file "$SRC/bin/remit-invoke" "bin/remit-invoke"
 for s in $SKILLS; do
 	for loc in .claude .agents .pi; do
-		install_file "$SRC/.claude/skills/$s/SKILL.md" "$loc/skills/$s/SKILL.md"
+		install_file "$SRC/install/skills/$s/SKILL.md" "$loc/skills/$s/SKILL.md"
+	done
+done
+
+# --- the agent-tool guard: one script, registered where a harness has hooks ---
+# The rule it enforces is stated ONCE, in the managed AGENTS.md section above,
+# for every harness. What is installed here is the enforcement, and only two of
+# the five harnesses have a pre-tool hook to register it with; for the other
+# three that section says plainly that it holds by instruction.
+install_file "$GUARD_SRC" ".remit/hooks/no-agent-tool.sh"
+install_file "$GUARD_COPILOT" ".github/hooks/remit-no-agent-tool.json"
+
+# Claude Code's registration is an OFFER, not an install. `.claude/settings.json`
+# is a file people keep their own settings in and it is not remit's to rewrite:
+# absent, it is created carrying the guard and nothing else; already carrying the
+# guard, it is left alone and reported unchanged; anything else is KEPT and the
+# block to merge is printed. That is the same restraint the pre-push hook shows a
+# repository with its own core.hooksPath.
+claude_settings="$TGT/.claude/settings.json"
+guard_cmd='sh .remit/hooks/no-agent-tool.sh'
+if [ ! -e "$claude_settings" ]; then
+	mkdir -p "$TGT/.claude"
+	cp "$GUARD_CLAUDE" "$claude_settings"
+	report installed ".claude/settings.json" "Claude Code's PreToolUse registration of the agent-tool guard"
+	TOUCHED="$TOUCHED .claude/settings.json"
+elif grep -Fq "$guard_cmd" "$claude_settings"; then
+	report unchanged ".claude/settings.json" "it already registers the agent-tool guard"
+else
+	report kept ".claude/settings.json" "it is yours and remit does not rewrite it; to make Claude Code enforce the guard, merge this into its \"hooks\" object deliberately"
+	sed 's/^/               /' "$GUARD_CLAUDE"
+fi
+
+# --- what remit no longer ships ----------------------------------------------
+for f in $RETIRED_FILES; do
+	retire_file "$f" "its harness adapters are bin/remit-invoke's and its delivery half is bin/remit's"
+done
+for f in $RETIRED_RULEFILES; do
+	retire_file "$f" "which harness and model a role sits on lives in .remit/settings.json now; \`sh bin/remit setup\` proposes one from what this host has"
+done
+for s in $RETIRED_SKILLS; do
+	for loc in .claude .agents .pi; do
+		retire_file "$loc/skills/$s/SKILL.md" "replaced by the five remit-* conventions"
 	done
 done
 
@@ -175,8 +323,7 @@ elif ! grep -q '^<!-- remit:begin' "$AGENTS"; then
 	report updated "AGENTS.md" "remit section appended; existing content untouched"
 	TOUCHED="$TOUCHED AGENTS.md"
 else
-	cur_block="$TGT/.remit/.install/agents-block.tmp"
-	mkdir -p "$(dirname "$cur_block")"
+	cur_block="$SCRATCH/agents-block"
 	awk '/^<!-- remit:begin/{b=1;next} /^<!-- remit:end/{b=0;next} b' "$AGENTS" >"$cur_block"
 	cur_id=$(hash_of "$cur_block")
 	if [ "$cur_id" = "$new_id" ]; then
@@ -235,9 +382,29 @@ else
 	fi
 fi
 
-# --- the work location and the record -----------------------------------------
-mkdir -p "$TGT/.remit/.install"
+# --- the work location --------------------------------------------------------
+mkdir -p "$TGT/.remit/.install" "$TGT/.remit/work-items" "$TGT/.remit/field-reports"
 
+# `.remit/rules/` is bin/remit's to write. Produced in a throwaway repository of
+# its own — for the two reasons in this script's header — and installed from
+# there as payload.
+seed="$SCRATCH/rules-seed"
+mkdir -p "$seed"
+if git init -q "$seed" >/dev/null 2>&1 &&
+	git -C "$seed" config user.email remit-install@localhost &&
+	git -C "$seed" config user.name "remit install" &&
+	git -C "$seed" config commit.gpgsign false &&
+	(cd "$seed" && sh "$SRC/bin/remit" rules init) >/dev/null 2>&1 &&
+	[ -f "$seed/.remit/rules/refined.md" ]; then
+	for f in $RULEFILES; do
+		[ -f "$seed/.remit/rules/$f.md" ] || die "\`remit rules init\` did not write $f.md — the rubrics seed is not what this script expects"
+		install_file "$seed/.remit/rules/$f.md" ".remit/rules/$f.md"
+	done
+else
+	die "could not lay down .remit/rules/: \`sh $SRC/bin/remit rules init\` did not produce it in a throwaway repository. Nothing about the rubrics folder is written by this script itself, so there is nothing to fall back to."
+fi
+
+# --- the record ---------------------------------------------------------------
 new_manifest="$MANIFEST_ABS.tmp"
 {
 	printf 'remit install manifest v1\n'
@@ -257,7 +424,7 @@ fi
 staged=''
 ignored=''
 for p in $TOUCHED; do
-	if git -C "$TGT" add -- "$p" 2>/dev/null; then
+	if git -C "$TGT" add -A -- "$p" 2>/dev/null; then
 		staged="$staged $p"
 	else
 		ignored="$ignored $p"

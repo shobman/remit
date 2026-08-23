@@ -6,7 +6,7 @@
 # Two guards, both mechanical:
 #
 #   1. Pushes to main are permitted only from the repository's primary
-#      worktree. Linked worktrees are workers' territory; workers deliver on
+#      worktree. Linked worktrees are builders' territory; builders deliver on
 #      work/* branches and never move main.
 #
 #   2. Commits newly introduced on work/* branches must carry both session

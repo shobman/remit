@@ -9,7 +9,7 @@ stay with the person who owns their consequences. It is two POSIX scripts and fi
 no service, no database, no daemon. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.1.7. Early, and in use.**
+**Version 0.2.0. Early, and in use.**
 
 ## One piece of work, start to finish
 
@@ -21,7 +21,7 @@ nothing nagged about it afterwards.
 Days later the practitioner wanted a small, real task to prove a newly added harness. He said: fix
 it. One builder got one brief — the defect, the boundary, the proof required — and found five
 broken sites where the note recorded one. It fixed all five and stopped, running no Git commands;
-builders never do. `bin/remit-dispatch` committed its tree, named the authoring model in the
+builders never do. `bin/remit` committed its tree, named the authoring model in the
 commit itself, pushed a branch and opened a draft pull request. An evaluator that had not written
 the fix reproduced the failure, verified the repair under three shells, and recorded a passing
 verdict; only then did the draft become ready.
@@ -64,7 +64,7 @@ to reconstruct and none is invented: where the record says nothing, the agent sa
 
 One bounded task goes to one isolated builder — research, documentation, wireframing, coding —
 carrying the outcome, boundary, constraints and proof in its brief. The builder authors files and
-runs no Git commands; `bin/remit-dispatch` turns the tree it leaves into a draft pull request.
+runs no Git commands; `bin/remit` turns the tree it leaves into a draft pull request.
 Builders work in separate worktrees, so parallel work does not collide and the coordinator stays
 available to you while they run. Parallel work saves elapsed time. It grants no wider authority.
 
@@ -112,11 +112,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.1.7` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.2.0` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.1.7 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.2.0 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:
@@ -136,26 +136,38 @@ The installer adds:
 | Path | Purpose |
 |---|---|
 | `bin/remit` | Lists items and performs state changes. |
-| `bin/remit-dispatch` | Turns an authored tree into a draft pull request. |
+| `bin/remit-invoke` | Raises a fresh context in a named harness and returns its text. |
 | `.claude/skills/`, `.agents/skills/`, `.pi/skills/` | The five conventions, in the discovery path each harness reads — see [Use your harness](#use-your-harness). |
 | `AGENTS.md` | One marker-delimited, shared section, without replacing existing content. |
 | `<git>/hooks/pre-push` | The guard, when no hook exists; on re-run remit's own hook is updated or reported unchanged, and any other hook or custom hooks path is kept and reported. |
-| `.remit/` | The empty work location. |
+| `.remit/hooks/no-agent-tool.sh` | The agent-tool guard: one script, registered by every harness here that has a pre-tool hook. |
+| `.github/hooks/remit-no-agent-tool.json` | Copilot CLI's registration of that guard. |
+| `.claude/settings.json` | Claude Code's registration of it, **offered**: created when absent; when the file is yours it is kept and the block to merge is printed. |
+| `.remit/` | The empty work location: `work-items/`, `field-reports/`, and `rules/` with the one rubric remit ships. |
 | `.remit/.install/manifest` | A record of the installed content and version. |
+
+It does not install `.remit/settings.json`, the registry of which harnesses and models a
+repository may raise a context on. No installer can know a host's seats, and a template
+registering seats a target does not have would be a file that could only refuse. `sh bin/remit
+setup` reads the host and proposes one on stdout for you to accept or edit; `sh bin/remit setup
+--write` saves that proposal itself. Never redirect `setup` over the registry — that file is the
+one it reads, to carry your seats forward and report drift against them.
 
 ## Use your harness
 
 remit is built for five harnesses, one to each heading below. The installer places the five
-conventions in the discovery path each one reads, and `bin/remit-dispatch` demonstrates CLI
+conventions in the discovery path each one reads, and `bin/remit-invoke` demonstrates CLI
 invocation for all five. Change the harness without changing the item's identity, boundary,
 decisions, state or history; where one lacks an isolation or pull-request capability, the agent
 reports the absence and stops at what that harness can actually do.
 
-Name the model at the dispatch: `bin/remit-dispatch` takes `--model` and hands it to the harness's
-own CLI, and the installed `dispatch-work` convention decides what that model should be. The pull
-request names the model that actually served the run, read back from the run's own report where
-the harness prints one; where that report is silent it records the model as unconfirmed rather
-than assuming the dispatch got what it asked for.
+Which harness and which model a role sits on is `.remit/settings.json`'s, and yours: nothing is
+raised on a seat you did not register there, nothing falls back and nothing is substituted, and
+every refusal happens before anything is billed. `bin/remit-invoke`'s header is the law of that
+file — what its shape is, how a `--harness` or `--model` is resolved against it, and what each
+refusal means. The pull request names the model that actually served the run, read back from the
+run's own report where the harness prints one; where that report is silent it records the model as
+unconfirmed rather than assuming the dispatch got what it asked for.
 
 Each heading gives where that harness's conventions land, what it does with a model id it does not
 know, and what its own command or local source said when I read it on 21 August 2026.

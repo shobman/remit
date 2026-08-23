@@ -82,9 +82,13 @@
 #   remit report new <name>      file a field report from stdin
 #   remit report close <name>    archive it to `field-reports/.archive/`
 #   remit rules init             lay down `.remit/rules/` — the three gate files
-#                                and `roles.md` — with the one rubric remit ships
-#                                and nothing else. Idempotent, and it NEVER
-#                                overwrites a file that is already there.
+#                                — with the one rubric remit ships and nothing
+#                                else. Idempotent, and it NEVER overwrites a file
+#                                that is already there.
+#   remit setup [--write]        read this host, and PROPOSE a registry for it on
+#                                stdout. Bare it writes nothing; `--write` saves
+#                                the proposal itself, atomically, having read the
+#                                registry already there first
 #   remit migrate                the one-time move of a pre-`work-items/` layout
 #   remit activate <slug>        retired: prints what replaced it, exits 2
 #
@@ -133,7 +137,7 @@
 # ==============================================================================
 #
 #   bin/remit-invoke <role> <slug> <worktree>
-#       role in research | draft | build | evaluate | repair-brief
+#       role in research | build | evaluate | repair-brief
 #
 # stdout is the step's text and nothing else. `REMIT_INVOKE=<path>` substitutes
 # the command (the test suite drives the chain with a scripted stand-in). That
@@ -150,16 +154,36 @@
 #   REMIT_AUTHORITY   absolute path of the brief, or of the current phase file
 #                     when the brief names one (a pointer that is dangling or
 #                     named twice stops the mechanism instead of guessing)
-#   REMIT_RUBRICS     absolute path of THE GATE'S OWN rubric file — and of no
-#                     other. `refined.md` for the gate into `refined`,
+#   REMIT_RUBRICS     absolute path of THE GATE'S OWN rubric file, WHOLE — and of
+#                     no other. `refined.md` for the gate into `refined`,
 #                     `accepted.md` for the gate into `accepted`, `closed.md` for
 #                     the gate into `closed`. Empty for every role but `evaluate`,
 #                     and empty when the file is not there. One gate's evaluator
 #                     is never handed another gate's standards.
-#   REMIT_ROLES       absolute path of `.remit/rules/roles.md`, or empty when
-#                     there is none. It says which harness and model each role
-#                     runs on; `remit-invoke` resolves the seat from it, and
-#                     nothing here reads it beyond checking its form.
+#   REMIT_STANDARDS   absolute path of a DERIVED file this script writes into its
+#                     own scratch: the `## fix` section of the gate the work is
+#                     heading into, and nothing else from that file. Handed to
+#                     `research` and `build` — and to no other role — and empty
+#                     when the section is empty or the file is not there.
+#                     `refined.md`'s for `research`, `accepted.md`'s for a
+#                     `build`.
+#
+#                     WHO SEES WHICH RUBRICS, ruled by the practitioner,
+#                     2026-08-23: "`fix` rubrics are the bar and go to the
+#                     builder; `promote`, `hold` and `accept` are judgements
+#                     about the work and stay with the evaluator." The evidence
+#                     is that an author who can see the oracle optimises for
+#                     it rather than for the work (ImpossibleBench; "Building
+#                     to the Test"). So the bar is handed over — a standard
+#                     nobody may see is not a standard — and the judgements
+#                     about whether the work may move, must be seen, or may be
+#                     let go are not.
+#   REMIT_SETTINGS    absolute path of `.remit/settings.json` — the REGISTRY of
+#                     which harnesses and models this repository may raise a
+#                     context on, and which seat each role takes. `remit-invoke`
+#                     resolves every seat through it and refuses everything it
+#                     does not carry; its shape and its refusals are that
+#                     script's header, and nothing here reads it at all.
 #   REMIT_PROVENANCE  absolute path of a file the invoke writes its provenance
 #                     into, as `key: value` lines. Keys read here: `session:`,
 #                     `model:`, `harness:`. Anything else is ignored. An empty or
@@ -177,8 +201,6 @@
 #                 line — the practitioner's own words naming what to establish,
 #                 not a header line this script owns — and only while there is no
 #                 `research.md` beside the brief yet.
-#   draft         the brief's body, beginning with its `# Title`. Written into
-#                 `brief.md` UNDER the header lines, which stay this script's.
 #   build         the builder's own final message. It authored the worktree; the
 #                 text is untrusted and travels into the pull request body inside
 #                 a code fence, below this script's provenance.
@@ -211,13 +233,22 @@
 #                       whatever its `Verdict:` line said.
 #         accept: <id>: <evidence>    disposes the `Finding:` above it.
 #
-#      A citation that MOVES work or settles a finding — `promote`, `accept` — is
-#      applied only when the gate file actually carries a rubric with that id, in
-#      that section: an evaluator with no rubric to cite may not let work on or
-#      settle a finding. A citation that STOPS work — `hold`, `fix` — is applied
-#      whether or not the id is known, and the unknown id is said in the record:
-#      refusing it would move work the evaluator said to stop, and that is the
-#      one error this script will not make.
+#      ALL FOUR CITATIONS ARE SYMMETRIC. A citation is applied only when the gate
+#      file actually carries a rubric with that id, in that section. One that does
+#      not is recorded `— NOT APPLIED: <id> is not a rubric this gate carries` and
+#      changes NOTHING: nothing is promoted, nothing is held, no must-fix is
+#      raised from it, and a `Finding:` it followed stays an ordinary finding. An
+#      evaluator with no rubric to cite can neither promote, hold, fix nor accept.
+#
+#      Ruled by the practitioner, 2026-08-23, superseding this script's earlier
+#      asymmetry — under which `hold` and `fix` applied on any id at all,
+#      stopping being read as the safe direction: "i don't understand why a
+#      hold and fix would stop work 'safely' when there is no id — the entire
+#      brief was to continue work without me … if we think we want to allow the
+#      evaluator's discretion, we add a rubric that is the hold or fix." The one
+#      stop that needs no rubric is a plain `Must-fix:` line — the outcome,
+#      boundary or proof not delivered — and it loops exactly as it always did.
+#      Discretion, where it is wanted, is a rubric he writes.
 #
 #      Every other line is carried into `log.md` verbatim. The WHOLE returned
 #      text is appended as it was returned; the lines above are what MOVES
@@ -228,12 +259,15 @@
 # .remit/rules/ — THE RUBRICS, AND THE READ SIDE
 # ==============================================================================
 #
-# THREE GATES, ONE FILE EACH, and a fourth file for the seats:
+# THREE GATES, ONE FILE EACH:
 #
 #   .remit/rules/refined.md    what it takes to become `refined`
 #   .remit/rules/accepted.md   what it takes to become `accepted`
 #   .remit/rules/closed.md     what it takes to become `closed`
-#   .remit/rules/roles.md      which harness and model each role runs on
+#
+# Which harness and model a role sits on is NOT in this folder. It retired into
+# `.remit/settings.json` on 2026-08-23; `bin/remit-invoke`'s header is the law of
+# that file, and `remit setup` proposes one from what a host actually has.
 #
 # A GATE FILE has four sections, each a level-2 heading whose text is exactly
 # `promote`, `hold`, `fix` or `accept` — the practitioner's four words, and the
@@ -243,7 +277,6 @@
 # folder, a missing file or an empty section matches nothing and changes nothing.
 #
 #   - <id>: <criterion in prose>        in any of the four sections
-#   - <role>: <harness> <model>         in roles.md, under `## roles`
 #
 # NOTHING HERE IS MATCHED MECHANICALLY. There is no path, no glob, no count and
 # no check in a rubric: a rubric is a criterion a fresh context judges. This
@@ -254,10 +287,11 @@
 # a merge.
 #
 # The one thing this script reads OUT of a gate file, beyond checking its form,
-# is whether the `promote` and `accept` sections carry the id a citation names,
-# and whether the `promote` section has anything in it at all. The second is what
-# decides whether a gate is worth ASKING: an item whose `until` does not reach
-# the next stage can only get there on a promote, so where a gate file has no
+# is whether the section a citation names carries the id it names — for all four
+# of them — and whether the `promote` section has anything in it at all. The
+# second is what decides whether a gate is worth ASKING: an item whose `until`
+# does not reach the next stage can only get there on a promote, so where a
+# gate file has no
 # `promote` rubric there is nothing to cite and the item waits without a fresh
 # context ever being raised — no attention of the practitioner's, and no spend.
 #
@@ -280,6 +314,7 @@
 #   ## delivery — <pull request or commit> — <date>
 #   ## research — <commit> — <date>
 #   ## ruling — <the practitioner's words> — <date>
+#   ## admitted — <date>          (only when `new` goes straight on to the chain)
 #   ## stopped — <reason> — <date>
 #   ## escalated — <reason> — <date>
 #   ## closed — <date>
@@ -307,23 +342,20 @@
 # THE DELIVERY SEAM
 # ==============================================================================
 #
-# After a `build` invoke has authored the worktree, `resume` performs exactly
-# what `bin/remit-dispatch` performs from "stage the authored tree" onward:
-# stage everything, commit with the authorship and committing-session trailers,
-# push `work/<slug>`, and put the delivery in that branch's pull request —
-# `gh pr create --draft` when it has none, `gh pr edit` when it already has one,
-# this delivery's section added ON TOP of the body already there, which is copied
+# After a `build` invoke has authored the worktree, `resume` stages everything,
+# commits with the authorship and committing-session trailers, pushes
+# `work/<slug>`, and puts the delivery in that branch's pull request — `gh pr
+# create --draft` when it has none, `gh pr edit` when it already has one, this
+# delivery's section added ON TOP of the body already there, which is copied
 # through byte for byte. The builder's returned text is fenced below the
 # provenance, in a fence longer than any run of backticks in it, so that nothing
 # it contains can render as this script's own record.
 #
-# That code is LIFTED from `bin/remit-dispatch`, which still carries its own copy
-# of it. The wrapper has retired as an INVOCATION script — every harness adapter
-# left it for `bin/remit-invoke` and it calls that now — but its delivery half
-# stayed, because three shipped reproductions assert its git and gh calls and its
-# report against stand-ins that answer exactly those calls. The remaining
-# duplication is the delivery seam alone, it is named in both headers, and it
-# ends when those reproductions are re-aimed at this script.
+# THE SEAM EXISTS ONCE, here. The old dispatch wrapper carried a second copy of
+# it beside a second copy of the harness adapters; the adapters went to
+# `bin/remit-invoke` and the delivery half came here, and the wrapper is gone.
+# `t/unit/repro-pr-body-second-delivery.sh` is the reproduction that drove this
+# behaviour and it asserts it against this script.
 #
 # The build worktree is `<git-common-dir>/remit-worktrees/<slug>` on branch
 # `work/<slug>`, branched from the primary worktree's current branch. It sits
@@ -347,8 +379,8 @@
 # Each stage move is a gate, and each gate is an `evaluate` invoke handed that
 # gate's rubric file and nothing else:
 #
-#   new -> refined      after the draft: everything said at filing, against the
-#                       brief.                     REMIT_RUBRICS=rules/refined.md
+#   new -> refined      everything said at filing, against the brief the
+#                       practitioner wrote.        REMIT_RUBRICS=rules/refined.md
 #   refined -> accepted after the build and its delivery: everything in the work
 #                       item's folder, against the delivery.
 #                                                 REMIT_RUBRICS=rules/accepted.md
@@ -360,8 +392,30 @@
 # when its file carries a `promote` rubric that could carry the item there
 # anyway. It is PASSED when the `until` reaches that stage or the gate's
 # evaluator cited a `promote` — and never while it cited a `hold`, or while a
-# `fix` or any other must-fix stands. An item at `new` with nothing said runs no
-# chain at all until it is resumed, exactly as the law's table reads.
+# `fix` or any other must-fix stands.
+#
+# GATE 1 HAS NO AUTHOR, and that is the whole of the practitioner's ruling of
+# 2026-08-23: "file it, park it, idea, backlog — all just file the idea i write
+# verbatim. moving it to a brief, when i ask to, requires me — so you need to ask
+# me all the details you want for the rubric to be satisfied, you can't make that
+# shit up … nothing should update my brief."
+#
+#   * The gate into `refined` is: research IF the brief carries a `**Research:**`
+#     line in his words, then evaluate. No fresh context writes into `brief.md`,
+#     ever, and there is no role in this script that can — the `draft` role left
+#     the chain with that ruling.
+#   * A FAIL there therefore has nowhere to go but to him. The item STOPS at
+#     `new`, ACTIVE, with the must-fix on the record and the stop naming it —
+#     `fix: <id>` where a `fix` rubric was cited, the must-fix's own first line
+#     otherwise. There is no second round: the loop and its two stops belong to
+#     gates 2 and 3, where a builder can act on what came back.
+#   * The brief a repair proposal would amend is his too: escalation raises
+#     `repair-brief` at gates 2 and 3 and puts the proposal in `log.md`, and the
+#     brief is untouched until he rules.
+#
+# An item at `new` with nothing said runs no chain at all until it is resumed —
+# unless `refined.md` carries a `promote` that could carry it, which is the one
+# thing `new` asks the gate for on its own. That is the law's table, row one.
 
 set -u
 
@@ -373,10 +427,15 @@ usage() {
 usage:
   remit new <slug> [--until refined|accepted|closed] [--park]
                          create .remit/work-items/<slug>/ from the brief on
-                         stdin; born ACTIVE at stage `new`. --park files it
-                         instead, and a parked item moves for nothing. --until X
-                         --park is one ruling: a resume runs it to X and parks it
-                         there, and no promote carries it past X.
+                         stdin; born ACTIVE at stage `new`. With --until it then
+                         RUNS THE CHAIN, here, in this same command, exactly as
+                         `resume` would, and prints the row where it stopped.
+                         With nothing said it runs the chain only if refined.md
+                         carries a promote a gate could cite; otherwise it sits.
+                         --park files it instead and nothing runs: a parked item
+                         moves for nothing. --until X --park is one ruling: a
+                         resume runs it to X and parks it there, and no promote
+                         carries it past X.
   remit resume <slug> [--until refined|accepted|closed [--park]]
                          the whole chain: activate, record the ruling, then move
                          one gate at a time as far as the until says, or as far
@@ -394,11 +453,20 @@ usage:
   remit report new <name>    file .remit/field-reports/<name>.md from stdin
   remit report close <name>  archive it to field-reports/.archive/
   remit rules init       lay down .remit/rules/ — refined.md, accepted.md,
-                         closed.md, roles.md — with the four section headings the
+                         closed.md — with the four section headings the
                          practitioner writes his rubrics under, and the one
                          rubric remit ships. Idempotent; it never overwrites a
                          file that is already there, and it writes no rubric of
                          its own beyond that one.
+  remit setup [--write]  read this host — which harness CLIs are here, what each
+                         one says about its account and its models — and PROPOSE
+                         a .remit/settings.json on stdout, with a report of what
+                         it found and how it drifts from the registry already
+                         there. Bare, it WRITES NOTHING. With --write it saves
+                         that proposal to .remit/settings.json itself, having
+                         read the one already there first, and commits nothing.
+                         Never redirect this command over the registry: that
+                         empties the file it reads before it runs.
   remit migrate          one-time: .remit/<slug>/ -> .remit/work-items/<slug>/,
                          evaluation.md -> log.md, **State:** -> **Attention:** +
                          **Stage:**, root field-reports/ -> .remit/field-reports/
@@ -407,8 +475,9 @@ usage:
 Only the practitioner decides an item is closed, or how far it may go without
 them. This script records and applies that; it decides nothing.
 
-list only reads. Every other change is committed, and pushed when a remote is
-configured.
+list, and setup without --write, only read. `setup --write` writes the one file
+it was asked to and commits nothing. Every other change is committed, and pushed
+when a remote is configured.
 
 Exit codes: 0 done — committed, and pushed if a remote exists. A `resume` that
               stopped where it was told to stop is 0.
@@ -435,6 +504,7 @@ slug=''
 want_until=''
 want_park=no
 listing=active
+want_write=no
 report_cmd=''
 report_name=''
 
@@ -512,6 +582,17 @@ report)
 	*[!a-z0-9.-]* | -* | '') die "invalid report name '$report_name' — use lower-case letters, digits, hyphens and dots" ;;
 	esac
 	;;
+setup)
+	# `--write` is the ONLY way this script saves the registry, and it exists so
+	# that saving never means aiming a shell redirection at the file `setup`
+	# reads. Without it: propose on stdout, change nothing.
+	case "${1-}" in
+	'') ;;
+	--write) want_write=yes ;;
+	*) usage ;;
+	esac
+	[ $# -le 1 ] || usage
+	;;
 rules)
 	[ $# -eq 1 ] || usage
 	case "$1" in
@@ -534,12 +615,18 @@ esac
 root=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a Git repository"
 
 # The work surface changes from one place only — the repository's primary
-# worktree. A linked worktree is a worker's territory; a state change made there
+# worktree. A linked worktree is a builder's territory; a state change made there
 # would race the primary view and could land on a work branch. In the primary
 # worktree the git dir and the common git dir are the same directory.
 git_dir=$(CDPATH= cd -- "$(git rev-parse --git-dir)" && pwd -P)
 common_dir=$(CDPATH= cd -- "$(git rev-parse --git-common-dir)" && pwd -P)
-if [ "$git_dir" != "$common_dir" ]; then
+# `setup` WITHOUT `--write` is the exception, and only because it changes
+# nothing: it reads the host, reads the registry that is there and prints a
+# proposal. Which worktree that is read from cannot make the answer different.
+# `setup --write` saves, and a save here would land in the linked worktree's own
+# `.remit/settings.json` while the primary — the one the practitioner reads and
+# commits — never saw it. So the flag is refused where every other change is.
+if [ "$git_dir" != "$common_dir" ] && { [ "$cmd" != setup ] || [ "$want_write" = yes ]; }; then
 	die "refusing to run from a linked worktree — the work surface changes only from the primary worktree at $(dirname "$common_dir")"
 fi
 
@@ -549,11 +636,34 @@ ITEMARCH="$ITEMS/.archive"
 REPORTS="$REMITDIR/field-reports"
 REPORTARCH="$REPORTS/.archive"
 RUBRICS="$REMITDIR/rules"
+SETTINGS_REL=".remit/settings.json"
+SETTINGSFILE="$root/$SETTINGS_REL"
+# RETIRED into the registry by the ruling of 2026-08-23. Nothing writes it any
+# more and no seat is resolved from it; `setup` and `migrate` read it once, to
+# carry its lines forward, and it is named here for that and nothing else.
 ROLESFILE="$RUBRICS/roles.md"
 
 # The gate a stage is entered THROUGH, and the file that gate is judged against.
 gate_file() { # $1 the stage being entered -> a path, whether or not it exists
 	printf '%s/%s.md\n' "$RUBRICS" "$1"
+}
+
+# The `## fix` section of a gate file, verbatim, and nothing else from it — the
+# bar an authoring role is held to. Prints nothing when the section is empty, so
+# a caller can tell "no standards here" from "standards, and they are these".
+gate_fix_section() { # $1 refined|accepted|closed -> the `- ` lines of its `## fix`
+	_gp=$(gate_file "$1")
+	[ -f "$_gp" ] || return 0
+	nocr "$_gp" | awk '
+		/^##/ {
+			sec = $0
+			sub(/^##[ \t]*/, "", sec)
+			sub(/[ \t]*$/, "", sec)
+			infix = (tolower(sec) == "fix")
+			next
+		}
+		infix && /^- / { print }
+	'
 }
 
 item="$ITEMS/$slug"
@@ -730,7 +840,7 @@ commit_step() {
 # This reads the FORM and nothing else. No criterion is interpreted here: what a
 # rubric means is the evaluate role's to judge, and the citation it returns is
 # all this script acts on.
-rubrics_dump_file() { # $1 refined|accepted|closed|roles
+rubrics_dump_file() { # $1 refined|accepted|closed
 	_p="$RUBRICS/$1.md"
 	[ -f "$_p" ] || return 0
 	nocr "$_p" | awk -v file="$1" '
@@ -743,8 +853,7 @@ rubrics_dump_file() { # $1 refined|accepted|closed|roles
 			next
 		}
 		/^#/ { next }
-		file == "roles" && sec != "roles" { next }
-		file != "roles" && sec != "promote" && sec != "hold" && sec != "fix" && sec != "accept" { next }
+		sec != "promote" && sec != "hold" && sec != "fix" && sec != "accept" { next }
 		!/^- / { next }
 		{
 			line = $0
@@ -757,10 +866,6 @@ rubrics_dump_file() { # $1 refined|accepted|closed|roles
 			sub(/[ \t]+$/, "", rest)
 			if (id == "" || id ~ /[ \t]/) bad(NR, $0)
 			if (rest == "") bad(NR, $0)
-			if (file == "roles") {
-				if (id != "research" && id != "draft" && id != "build" && id != "evaluate" && id != "repair-brief") bad(NR, $0)
-				if (split(rest, w, /[ \t]+/) != 2) bad(NR, $0)
-			}
 			print file "\t" sec "\t" id "\t" rest
 		}
 	'
@@ -768,7 +873,7 @@ rubrics_dump_file() { # $1 refined|accepted|closed|roles
 
 rubrics_dump() {
 	[ -d "$RUBRICS" ] || return 0
-	for _f in refined accepted closed roles; do
+	for _f in refined accepted closed; do
 		rubrics_dump_file "$_f"
 	done
 }
@@ -902,15 +1007,38 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	_role=$1 _out=$2 _wt=$3
 	_mf=${4:-}
 	: >"$WORK/prov"
-	# The gate's own file, to the gate's own evaluator, and to nobody else.
+	# The gate's own file, WHOLE, to the gate's own evaluator, and to nobody else.
 	_rub=''
 	if [ "$_role" = evaluate ] && [ -n "$GATE" ] && [ -f "$(gate_file "$GATE")" ]; then
 		_rub=$(gate_file "$GATE")
 	fi
+	# And the `fix` section of the gate the work is HEADING INTO — the bar, and
+	# nothing else from that file — to the roles that author. Derived here into
+	# this script's own scratch: the gate file itself never leaves for them.
+	_std=''
+	if [ -n "$STANDARDS_GATE" ]; then
+		case "$_role" in
+		build | research)
+			if [ -n "$(gate_fix_section "$STANDARDS_GATE")" ]; then
+				{
+					printf '# The standards this work is held to\n\n'
+					printf 'The `## fix` section of `.remit/rules/%s.md`, verbatim: the practitioner'"'"'s own\n' "$STANDARDS_GATE"
+					printf 'bar for the gate this work is heading into. What falls short of one of these is\n'
+					printf 'a must-fix and comes back to a fresh author. Nothing else from that file is\n'
+					printf 'here, and nothing here is a rubric for you to cite — citing is the evaluator'"'"'s.\n\n'
+					printf '## fix\n\n'
+					gate_fix_section "$STANDARDS_GATE"
+				} >"$WORK/standards.md"
+				_std="$WORK/standards.md"
+			fi
+			;;
+		esac
+	fi
 	REMIT_ITEM="$item" \
 		REMIT_AUTHORITY="$AUTHORITY" \
 		REMIT_RUBRICS="$_rub" \
-		REMIT_ROLES="$ROLES_ARG" \
+		REMIT_STANDARDS="$_std" \
+		REMIT_SETTINGS="$SETTINGSFILE" \
 		REMIT_PROVENANCE="$WORK/prov" \
 		REMIT_ROUND="$ROUND" \
 		REMIT_MUSTFIX="$_mf" \
@@ -976,8 +1104,25 @@ escalate() { # $1 reason
 }
 
 # ==============================================================================
-# the delivery seam — lifted from bin/remit-dispatch, step 5 onward
+# the delivery seam — the one place a builder's tree becomes a pull request
 # ==============================================================================
+
+# The composed body, moved OUT of this run's scratch so that the remedy a failure
+# prints names a file that is still there after the run exits. A remedy pointing
+# at a path the exit trap has just removed is not a remedy.
+# It sets KEPT_BODY and KEPT_NOTE rather than printing, because a `$(...)` around
+# it would set them in a subshell and the caller would name a path it never got.
+KEPT_BODY=''
+KEPT_NOTE=''
+keep_pr_body() {
+	KEPT_BODY="${TMPDIR:-/tmp}/remit-$slug-pr-body-$SHA.md"
+	if cp "$WORK/pr-body" "$KEPT_BODY" 2>/dev/null; then
+		KEPT_NOTE="The body it should carry — this delivery on top, every earlier one kept beneath — is composed at $KEPT_BODY: apply it with: gh pr edit $PR_NUM --body-file $KEPT_BODY"
+	else
+		KEPT_BODY=''
+		KEPT_NOTE="The body it should carry was composed and could NOT be kept anywhere a later command could read it, so there is no file to point you at"
+	fi
+}
 
 deliver() { # $1 worktree  $2 file holding the builder's returned text
 	_wt=$1 _final=$2
@@ -1057,7 +1202,12 @@ deliver() { # $1 worktree  $2 file holding the builder's returned text
 	fi
 
 	if [ -n "$PR_NUM" ]; then
-		say "pull request: #$PR_NUM already exists for $_branch — this delivery goes on top of its body, and the record already there is kept beneath it."
+		if [ "$PR_DRAFT" = false ]; then
+			_dstate="It is NOT a draft — an earlier delivery took it ready — and this delivery does not put it back."
+		else
+			_dstate="It is a draft."
+		fi
+		say "pull request: #$PR_NUM already exists for $_branch — this delivery goes on top of its body, and the record already there is kept beneath it. $_dstate"
 		if ! (cd "$_wt" && gh pr view "$PR_NUM" --json body --jq .body) >"$WORK/pr-body-existing" 2>"$WORK/pr-body-existing.err"; then
 			DELIVER_ERR="the existing pull request body could not be read back, and a body this script never read is never replaced — that would delete the earlier delivery's record: $(tr '\n' ' ' <"$WORK/pr-body-existing.err")"
 			return 1
@@ -1068,12 +1218,14 @@ deliver() { # $1 worktree  $2 file holding the builder's returned text
 			cat "$WORK/pr-body-existing"
 		} >"$WORK/pr-body"
 		if ! out=$(cd "$_wt" && gh pr edit "$PR_NUM" --body-file "$WORK/pr-body" 2>&1); then
-			DELIVER_ERR="gh pr edit failed — the delivery IS on the branch, and the body of #$PR_NUM still describes an EARLIER delivery. The body it should carry is composed at $WORK/pr-body: $(printf '%s' "$out" | tr '\n' ' ')"
+			keep_pr_body
+			DELIVER_ERR="gh pr edit failed — the delivery IS on the branch, and the body of #$PR_NUM still describes an EARLIER delivery. $KEPT_NOTE — $(printf '%s' "$out" | tr '\n' ' ')"
 			return 1
 		fi
 		if verify=$( (cd "$_wt" && gh pr view "$PR_NUM" --json body --jq .body) 2>/dev/null ); then
 			if ! printf '%s\n' "$verify" | grep -qF -- "- Commit: $SHA"; then
-				DELIVER_ERR="gh pr edit reported success, but the body read back afterwards does not record commit $SHA"
+				keep_pr_body
+				DELIVER_ERR="gh pr edit reported success, but the body read back afterwards does not record commit $SHA. $KEPT_NOTE"
 				return 1
 			fi
 			say "pull request: #$PR_NUM updated, and read back — its body now records commit $SHA."
@@ -1081,6 +1233,9 @@ deliver() { # $1 worktree  $2 file holding the builder's returned text
 			say "note: #$PR_NUM was updated and its body could not be read back to confirm it, so the update is UNCONFIRMED here. Said, not assumed."
 		fi
 	else
+		# Nothing exists yet, so this one is opened as a draft and the section
+		# says so because that is what is about to be true.
+		PR_DRAFT=true
 		delivery_section create >"$WORK/pr-body"
 		if ! out=$(cd "$_wt" && gh pr create --draft --base "$BASE" --head "$_branch" \
 			--title "$slug: delivery from the build role" --body-file "$WORK/pr-body" 2>&1); then
@@ -1118,8 +1273,14 @@ delivery_section() { # $1 create|update
 	printf -- '- Session: %s\n' "${_session:-not reported by the invoke — absent, never invented}"
 	printf -- '- Commit: %s\n' "$SHA"
 	printf -- '- Round: %s\n' "$ROUND"
-	printf '\nThis pull request is a draft: this delivery arrives unverified, and only a\n'
-	printf 'recorded passing verdict takes it out of draft.\n'
+	if [ "$PR_DRAFT" = false ]; then
+		printf '\nThis pull request is NOT a draft: an earlier delivery on this branch passed its\n'
+		printf 'gate and `%s` flipped it ready. THIS delivery arrives unverified like any other,\n' "$ME"
+		printf 'and the verdict on it is the one below this section when it is written.\n'
+	else
+		printf '\nThis pull request is a draft: this delivery arrives unverified, and only a\n'
+		printf 'recorded passing verdict takes it out of draft.\n'
+	fi
 	printf '\n## What the builder returned\n\n'
 	printf 'Everything below is the builder'"'"'s own text, reproduced verbatim and unedited.\n'
 	printf 'It is quoted, not endorsed, and nothing in it is this script'"'"'s record of what\n'
@@ -1166,20 +1327,11 @@ build_worktree() {
 	return 0
 }
 
-# Replace the brief's body, keeping the script-owned header exactly as it was.
-put_body() { # $1 brief  $2 the new body
-	_at=$(hdr "$1" Attention)
-	_st=$(hdr "$1" Stage)
-	_un=$(hdr "$1" Until)
-	nocr "$2" >"$1.tmp"
-	case "$(sed -n '/./{p;q;}' "$1.tmp")" in
-	'# '*) ;;
-	*) rm -f "$1.tmp"; return 1 ;;
-	esac
-	mv "$1.tmp" "$1"
-	put_header "$1" "$_at" "$_st" "$_un" KEEP
-	return 0
-}
+# NOTHING HERE WRITES A BRIEF'S BODY. A `put_body` lived here until the
+# practitioner's ruling of 2026-08-23 — "nothing should update my brief" — took
+# the `draft` role out of the chain. The header block above the body is still
+# this script's (`put_header`); every word below it is his, and the only thing
+# that changes it is him.
 
 # ==============================================================================
 # the loop
@@ -1190,16 +1342,24 @@ put_body() { # $1 brief  $2 the new body
 # must-fix of round n-1. Round five never runs.
 #
 # One run of this is ONE GATE. `$1` is the stage the gate leads into, and its
-# rubric file is what that gate's evaluator is handed. `$3` says whether the
-# author runs before the first evaluate: it does at the two gates that produce
-# something (a drafted brief, a delivery), and it does NOT at the closing gate,
-# which judges what is already there — but it does on every later round of that
-# gate too, because a must-fix goes back to a builder wherever it was raised.
+# rubric file is what that gate's evaluator is handed. `$2` names the author a
+# must-fix goes back to — `build`, or `none` where there is nobody this script
+# may send it to. `$3` says whether that author runs before the first evaluate:
+# it does at the gate that produces a delivery, and it does NOT at the closing
+# gate, which judges what is already there — but it does on every later round of
+# that gate, because a must-fix goes back to a builder wherever it was raised.
+#
+# `none` IS GATE 1, and it is the practitioner's ruling of 2026-08-23 in code:
+# only he changes a brief, so a must-fix there has no author to go to and no
+# second round to run. This returns 2 for that — distinct from the 1 that means
+# escalate — with LOOP_STOP carrying the reason his row will show, and the caller
+# stops the item where it is, for him.
 #
 # What the gate's evaluator cited is left in GATE_PROMOTE and GATE_HOLD for the
 # caller, which is the only thing that moves a stage.
-run_gate() { # $1 gate stage  $2 draft|build  $3 yes|no — author before the first evaluate
+run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the first evaluate
 	GATE=$1
+	STANDARDS_GATE=$1
 	_author=$2
 	_authornow=$3
 	GATE_PROMOTE=''
@@ -1209,25 +1369,10 @@ run_gate() { # $1 gate stage  $2 draft|build  $3 yes|no — author before the fi
 	_prev=''
 	: >"$WORK/mustfix"
 	while :; do
-		if [ "$_authornow" != yes ]; then
+		if [ "$_author" = none ] || [ "$_authornow" != yes ]; then
+			# Nothing authors here: either this gate has no author at all, or
+			# what it judges is already on disk from an earlier step.
 			_authornow=yes
-		elif [ "$_author" = draft ]; then
-			if ! invoke draft "$WORK/draft" "$root" "$WORK/mustfix"; then
-				LOOP_STOP="cannot act: remit-invoke"
-				return 1
-			fi
-			if [ ! -s "$WORK/draft" ]; then
-				LOOP_STOP="cannot act: the draft role returned nothing"
-				return 1
-			fi
-			if ! put_body "$brief" "$WORK/draft"; then
-				LOOP_STOP="cannot act: the draft role returned text with no '# Title' heading"
-				return 1
-			fi
-			commit_step "remit: $slug brief drafted (round $ROUND)" ".remit/work-items/$slug"
-			printf 'The brief was drafted by the draft role, round %s.\n' "$ROUND" |
-				log_append "delivery — $(git -C "$root" rev-parse --short HEAD) — $(now)"
-			commit_step "remit: $slug record the draft" ".remit/work-items/$slug"
 		else
 			if ! build_worktree; then
 				LOOP_STOP="cannot act: could not prepare the build worktree"
@@ -1269,11 +1414,14 @@ run_gate() { # $1 gate stage  $2 draft|build  $3 yes|no — author before the fi
 			;;
 		esac
 
-		# What this gate's file actually carries. A citation that MOVES work or
-		# settles a finding is applied only against these; one that STOPS work is
-		# applied whichever id it named.
+		# What this gate's file actually carries. ALL FOUR citations are applied
+		# only against these: an evaluator with no rubric to cite can neither
+		# promote, hold, fix nor accept (the seam contract in this script's
+		# header, and the practitioner's ruling of 2026-08-23 that made them symmetric).
 		_promote_ids=$(rubric_ids "$GATE" promote)
 		_accept_ids=$(rubric_ids "$GATE" accept)
+		_hold_ids=$(rubric_ids "$GATE" hold)
+		_fix_ids=$(rubric_ids "$GATE" fix)
 
 		GATE_PROMOTE=''
 		for _cid in $(nocr "$WORK/verdict" | sed -n 's/^promote: *//p' | sed 's/:.*//'); do
@@ -1284,8 +1432,24 @@ run_gate() { # $1 gate stage  $2 draft|build  $3 yes|no — author before the fi
 				;;
 			esac
 		done
-		GATE_HOLD=$(nocr "$WORK/verdict" | sed -n 's/^hold: *\([^:]*\).*/\1/p' | sed -n 1p)
-		_fixid=$(nocr "$WORK/verdict" | sed -n 's/^fix: *\([^:]*\).*/\1/p' | sed -n 1p)
+		GATE_HOLD=''
+		for _cid in $(nocr "$WORK/verdict" | sed -n 's/^hold: *\([^:]*\).*/\1/p'); do
+			case " $_hold_ids" in
+			*" $_cid "*)
+				GATE_HOLD=$_cid
+				break
+				;;
+			esac
+		done
+		_fixid=''
+		for _cid in $(nocr "$WORK/verdict" | sed -n 's/^fix: *\([^:]*\).*/\1/p'); do
+			case " $_fix_ids" in
+			*" $_cid "*)
+				_fixid=$_cid
+				break
+				;;
+			esac
+		done
 
 		# A `fix:` citation is a must-fix, and a must-fix means the loop runs
 		# whatever the verdict line said it was.
@@ -1299,14 +1463,19 @@ run_gate() { # $1 gate stage  $2 draft|build  $3 yes|no — author before the fi
 				printf -- '- the verdict line returned `%s`; a `fix:` citation is a must-fix, so it is a FAIL and the loop runs\n' "$V"
 			printf -- '- gate: into %s, judged against %s\n' "$GATE" ".remit/rules/$GATE.md"
 			printf -- '- round: %s\n' "$ROUND"
-			nocr "$WORK/verdict" | awk -v start="$_n" -v pids=" $_promote_ids" -v aids=" $_accept_ids" '
+			nocr "$WORK/verdict" |
+				awk -v start="$_n" -v pids=" $_promote_ids" -v aids=" $_accept_ids" \
+					-v hids=" $_hold_ids" -v fids=" $_fix_ids" '
 				function known(list, id) { return index(list, " " id " ") > 0 }
 				function idof(l, i) { i = l; sub(/:.*/, "", i); return i }
+				function unknown(word, l) {
+					return "- rubric " word ": " l " — NOT APPLIED: " idof(l) " is not a rubric this gate carries"
+				}
 				/^Finding: / { n = start++; sub(/^Finding: /, ""); print "- finding " n ": " $0; last = n; next }
 				/^accept: / {
 					l = substr($0, 9)
 					if (!known(aids, idof(l))) {
-						print "- rubric accept: " l " — NOT APPLIED: this gate file carries no `accept` rubric with that id"
+						print unknown("accept", l)
 					} else if (last > 0) {
 						print "- finding " last " disposition: accepted by rubric " l
 					} else {
@@ -1316,6 +1485,7 @@ run_gate() { # $1 gate stage  $2 draft|build  $3 yes|no — author before the fi
 				}
 				/^fix: / {
 					l = substr($0, 6)
+					if (!known(fids, idof(l))) { print unknown("fix", l); next }
 					print "- rubric fix: " l
 					if (last > 0) print "- finding " last " disposition: fix by rubric " l
 					next
@@ -1323,10 +1493,15 @@ run_gate() { # $1 gate stage  $2 draft|build  $3 yes|no — author before the fi
 				/^promote: / {
 					l = substr($0, 10)
 					if (known(pids, idof(l))) print "- rubric promote: " l
-					else print "- rubric promote: " l " — NOT APPLIED: this gate file carries no `promote` rubric with that id"
+					else print unknown("promote", l)
 					next
 				}
-				/^hold: / { print "- rubric hold: " substr($0, 7); next }
+				/^hold: / {
+					l = substr($0, 7)
+					if (known(hids, idof(l))) print "- rubric hold: " l
+					else print unknown("hold", l)
+					next
+				}
 			'
 			printf '\nReturned by the evaluate role, verbatim:\n\n'
 			cat "$WORK/verdict"
@@ -1335,14 +1510,37 @@ run_gate() { # $1 gate stage  $2 draft|build  $3 yes|no — author before the fi
 
 		[ "$V_EFF" != FAIL ] && return 0
 
-		# A `fix:` citation is must-fix text exactly as a `Must-fix:` line is, and
-		# is compared as such by the same-must-fix-twice stop.
-		nocr "$WORK/verdict" | awk '
+		# A `fix:` citation the gate file carries is must-fix text exactly as a
+		# `Must-fix:` line is, and is compared as such by the same-must-fix-twice
+		# stop. One it does not carry was NOT APPLIED above and is not must-fix
+		# text either — it raised nothing, so there is nothing to send back.
+		nocr "$WORK/verdict" | awk -v fids=" $_fix_ids" '
+			function idof(l, i) { i = l; sub(/:.*/, "", i); return i }
 			/^Must-fix: / { print substr($0, 11); next }
-			/^fix: / { print "fix " substr($0, 6); next }
+			/^fix: / {
+				l = substr($0, 6)
+				if (index(fids, " " idof(l) " ") > 0) print "fix " l
+				next
+			}
 		' >"$WORK/mustfix.new"
 		_mf=$(cat "$WORK/mustfix.new")
 		mv "$WORK/mustfix.new" "$WORK/mustfix"
+
+		# GATE 1: there is nobody to send it back to. Only the practitioner
+		# changes a brief, so the must-fix goes on the record and the item waits
+		# for him at the stage it is in. No round two, and no escalation either:
+		# nothing failed here except the brief, and that is his to rule on.
+		if [ "$_author" = none ]; then
+			LOOP_STOP_DETAIL="a must-fix at the gate into $GATE"
+			if [ -n "$_fixid" ]; then
+				LOOP_STOP="fix: $_fixid"
+			elif [ -n "$_mf" ]; then
+				LOOP_STOP=$(printf '%s\n' "$_mf" | sed -n 1p)
+			else
+				LOOP_STOP="a must-fix with no text"
+			fi
+			return 2
+		fi
 
 		if [ "$ROUND" -ge 4 ]; then
 			LOOP_STOP_DETAIL="4 fails"
@@ -1440,17 +1638,10 @@ rubrics_seed() {
 		} >"$_p"
 		SEEDED="$SEEDED $_g.md"
 	done
-	if [ ! -e "$ROLESFILE" ]; then
-		{
-			printf '# Which harness and model each role runs on\n\n'
-			printf 'One line per role — `- <role>: <harness> <model>` — for research, draft, build,\n'
-			printf 'evaluate and repair-brief. `bin/remit-invoke` resolves the seat from here.\n'
-			printf 'No line means the role takes whatever default is standing, and nothing here is\n'
-			printf 'inferred from anywhere else.\n\n'
-			printf '## roles\n'
-		} >"$ROLESFILE"
-		SEEDED="$SEEDED roles.md"
-	fi
+	# NO roles.md. Which harness and model a role sits on retired out of this
+	# folder and into `.remit/settings.json` on 2026-08-23. That file is the
+	# practitioner's own: `remit setup` proposes one from what is on the host, and
+	# nothing — not this script, not the installer — writes it unasked.
 	return 0
 }
 
@@ -1460,7 +1651,11 @@ rubrics_seed() {
 
 WORK=$(mktemp -d 2>/dev/null) || WORK=${TMPDIR:-/tmp}/remit-$$
 mkdir -p "$WORK" || die "cannot make a scratch directory"
-cleanup() { rm -rf "$WORK"; }
+# `SAVETMP` is the half-written registry `setup --write` builds beside the real
+# one. It is named here so that an interrupt between building it and renaming it
+# leaves nothing behind: the registry is either the old file or the new one.
+SAVETMP=''
+cleanup() { rm -rf "$WORK"; [ -n "$SAVETMP" ] && rm -f "$SAVETMP"; return 0; }
 trap 'cleanup' EXIT
 trap 'cleanup; rm -f "$marker"; exit 130' INT TERM
 
@@ -1471,11 +1666,13 @@ PR_URL=''
 FINALTEXT=''
 BASE=$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'main\n')
 AUTHORITY="$brief"
-ROLES_ARG=''
-[ -f "$ROLESFILE" ] && ROLES_ARG="$ROLESFILE"
 
 # The gate a run of the loop is judging, and what its evaluator cited there.
 GATE=''
+# The gate the work is HEADING INTO, whose `fix` section is the authoring roles'
+# bar. It is the same gate while the loop runs; `research` runs before the first
+# gate and is held to that gate's bar too.
+STANDARDS_GATE=''
 GATE_PROMOTE=''
 GATE_HOLD=''
 LOOP_STOP=''
@@ -1485,9 +1682,28 @@ LOOP_STOP_DETAIL=''
 # the verbs
 # ==============================================================================
 
-case "$cmd" in
-
-new)
+# ==============================================================================
+# `new`: admit the item, and then run the chain when his word says to
+# ==============================================================================
+#
+# Ruled by the practitioner, 2026-08-23: "if i said until --refined it needs to
+# run the next chain; if i said nothing, it should check the rubrics on whether
+# it can auto promote." So `new` is the same chain `resume` is, decided once,
+# here, from what he said and what `refined.md` carries:
+#
+#   --park                  it sits. Whatever else was said, he has said no.
+#   --until X (no --park)   the chain runs NOW, in this same command, and prints
+#                           the row where it stopped.
+#   nothing said            the chain runs only if `refined.md`'s `promote`
+#                           section carries something a gate's evaluator could
+#                           cite to carry it. With nothing there, no fresh
+#                           context is raised and nothing is spent: it sits at
+#                           `new` with `until ran out`, which is the law's table,
+#                           row one.
+#
+# Sets CHAIN, and returns what the commit returned.
+CHAIN=no
+create_item() {
 	rubrics_check
 	[ -e "$item" ] && die "work item '$slug' already exists at .remit/work-items/$slug"
 	[ -e "$itemarchive" ] && die "'$slug' is already archived at .remit/work-items/.archive/$slug"
@@ -1506,6 +1722,14 @@ new)
 	else
 		att=active
 	fi
+	CHAIN=no
+	if [ "$want_park" = no ]; then
+		if [ -n "$want_until" ]; then
+			CHAIN=yes
+		elif [ -n "$(rubric_ids refined promote)" ]; then
+			CHAIN=yes
+		fi
+	fi
 	recorded_until=$(until_value "$want_until" "$want_park")
 	put_header "$brief" "$att" new "$recorded_until" ''
 	log_ensure
@@ -1518,13 +1742,39 @@ new)
 			printf 'Filed. A parked item moves for nothing — not for a promote, not for anything\nbut `remit resume`.\n'
 		fi | log_append "stopped — parked — $(now)"
 		say "created .remit/work-items/$slug — parked at stage new${recorded_until:+, until $recorded_until}."
+	elif [ "$CHAIN" = yes ]; then
+		if [ -n "$want_until" ]; then
+			printf 'Born active at `new`. The chain runs now, in this same command, as far as\n`%s`.\n' "$want_until" | log_append "admitted — $(now)"
+		else
+			printf 'Born active at `new`. Nothing was said about how far it may go, and\n`refined.md` carries a `promote` a gate could cite, so the chain asks that\ngate now, in this same command.\n' | log_append "admitted — $(now)"
+		fi
+		say "created .remit/work-items/$slug — active at stage new${want_until:+, until $want_until}."
 	else
 		printf 'Born active at `new`.\n' | log_append "stopped — until ran out — $(now)"
-		say "created .remit/work-items/$slug — active at stage new${want_until:+, until $want_until}."
+		say "created .remit/work-items/$slug — active at stage new."
 	fi
 	commit_and_push "remit: create $slug" ".remit/work-items/$slug"
-	exit $?
-	;;
+}
+
+# `new` that runs the chain IS `resume`, in the same invocation: the item was
+# just written, the ruling is already on its header, and there is exactly one
+# implementation of a gate in this script. The `--until` is not passed on — it
+# was recorded at admission, and recording it twice would put two rulings in the
+# record for one word of his.
+if [ "$cmd" = new ]; then
+	create_item
+	_nrc=$?
+	if [ "$CHAIN" != yes ]; then
+		exit $_nrc
+	fi
+	[ "$_nrc" = 2 ] && exit 2
+	[ "$_nrc" = 3 ] && PUSH_FAILED=yes
+	cmd=resume
+	want_until=''
+	want_park=no
+fi
+
+case "$cmd" in
 
 park)
 	[ -f "$brief" ] || die "no work item '$slug' — expected .remit/work-items/$slug/brief.md"
@@ -1592,6 +1842,334 @@ report)
 		exit $?
 		;;
 	esac
+	;;
+
+setup)
+	# PROPOSES. Bare, it writes nothing, commits nothing and pushes nothing — the
+	# registry is the practitioner's file, and a script that installed a seat he
+	# had not read would be the very thing his ruling of 2026-08-23 forbids.
+	#
+	# `--write` is him asking for the save, and it is HIS ACT going through this
+	# script rather than through his shell. The distinction is not ceremony: this
+	# command READS `.remit/settings.json` to carry forward the seats only he
+	# could have known and to report drift against them, and `setup > that file`
+	# empties it before this script opens it — the carry-forward silently becomes
+	# nothing and the drift report has nothing to drift from. So there is one save
+	# and it is here, after every read, atomically, and it commits nothing.
+	command -v jq >/dev/null 2>&1 ||
+		die "no 'jq' on PATH — the registry is JSON, and this proposal is built with jq rather than by pasting a format that then has to parse. Install jq, or write .remit/settings.json by hand from the shape in bin/remit-invoke's header"
+	[ -f "$INVOKE" ] ||
+		die "no seam at $INVOKE — the host probe lives there, because the script that has to FIND each CLI at raise time is the one place that knows where they are"
+
+	err() { printf '%s\n' "$1" >&2; }
+
+	probe="$WORK/probe"
+	if ! sh "$INVOKE" --probe-host >"$probe" 2>"$WORK/probe.err"; then
+		sed 's/^/    /' "$WORK/probe.err" >&2
+		die "the host probe failed; nothing is proposed from a host this script could not read"
+	fi
+
+	# What is registered now, flattened the same way the seam flattens it, so a
+	# re-run carries forward what only the practitioner could have known. This
+	# read happens BEFORE anything is written anywhere, and that ordering is the
+	# whole reason `--write` exists rather than a redirection.
+	cur="$WORK/cur"
+	: >"$cur"
+	cur_ok=no
+	had_registry=no
+	if [ -f "$SETTINGSFILE" ]; then
+		had_registry=yes
+		if jq -r '
+			( (.harnesses // {}) | to_entries[] | "H\t\(.key)\t\(.value.cli // "")\t\((.value.models // []) | join(" "))" ),
+			( (.defaults  // {}) | to_entries[] | "D\t\(.key)\t\(.value.harness // "")\t\(.value.model // "")" )
+		' "$SETTINGSFILE" >"$cur" 2>/dev/null; then
+			cur_ok=yes
+		else
+			: >"$cur"
+			# Unreadable, and `--write` would put the proposal where it stands. A
+			# file this script cannot parse is still the practitioner's — the seats
+			# in it are recoverable by fixing one line and unrecoverable once
+			# overwritten — so the save refuses and the proposal is offered instead.
+			[ "$want_write" = yes ] &&
+				die "$SETTINGS_REL is there and this script cannot read it as JSON, so nothing in it can be carried forward and --write would overwrite seats only you know. Fix the file, or move it aside, then run --write. Without the flag this command still proposes a registry on stdout"
+			err "note: $SETTINGSFILE is there and this script could not read it as JSON, so nothing was carried forward from it. \`bin/remit-invoke\` refuses every raise while that is true, and its own message names the line."
+		fi
+	fi
+
+	# `roles.md` retires INTO this file. Its lines are the practitioner's own and
+	# they are carried, not dropped: a role with a line there and no seat here
+	# becomes a proposed seat, and the report says where it came from.
+	rol="$WORK/rol"
+	: >"$rol"
+	if [ -f "$ROLESFILE" ]; then
+		nocr "$ROLESFILE" | awk '
+			/^##[[:space:]]/ { sec = tolower($2); next }
+			sec != "roles" { next }
+			/^-[[:space:]]/ {
+				line = $0
+				sub(/^-[[:space:]]*/, "", line)
+				i = index(line, ":")
+				if (i == 0) next
+				r = substr(line, 1, i - 1)
+				gsub(/^[[:space:]]+|[[:space:]]+$/, "", r)
+				v = substr(line, i + 1)
+				gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+				if (split(v, w, /[[:space:]]+/) != 2) next
+				print r "\t" w[1] "\t" w[2]
+			}
+		' >"$rol"
+	fi
+
+	from_cur() { # $1 H|D  $2 key  $3 field number -> the value, or empty
+		awk -F"$TAB" -v k="$1" -v n="$2" -v f="$3" '$1 == k && $2 == n { print $f; exit }' "$cur"
+	}
+	from_rol() { # $1 role  $2 field number (2 harness, 3 model) -> the value, or empty
+		awk -F"$TAB" -v n="$1" -v f="$2" '$1 == n { print $f; exit }' "$rol"
+	}
+
+	REPORT=''
+	note() { REPORT="$REPORT$1
+"; }
+
+	# --- the harnesses this host actually has --------------------------------
+	#
+	# The probe's records are tab separated and some of their fields are legally
+	# EMPTY. `read` with IFS set to a tab would silently swallow those, because a
+	# tab is IFS whitespace and a run of it delimits ONE field — so each field is
+	# cut out by position instead, which is the only reading that survives an
+	# empty one.
+	prop="$WORK/prop"
+	: >"$prop"
+	present=''
+	catalogued=''
+	while IFS= read -r pline; do
+		[ -n "$pline" ] || continue
+		ph=$(printf '%s\n' "$pline" | cut -f1)
+		pcli=$(printf '%s\n' "$pline" | cut -f2)
+		pstate=$(printf '%s\n' "$pline" | cut -f3)
+		pwhere=$(printf '%s\n' "$pline" | cut -f4)
+		pauth=$(printf '%s\n' "$pline" | cut -f5)
+		pids=$(printf '%s\n' "$pline" | cut -f6)
+		pnote=$(printf '%s\n' "$pline" | cut -f7)
+		if [ "$pstate" != present ]; then
+			note "  $ph — ABSENT: $pnote"
+			continue
+		fi
+		present="$present $ph"
+		note "  $ph — present at $pwhere${pauth:+; $pauth}"
+		pmodels=$pids
+		psrc='probed from this host'
+		[ -n "$pids" ] && catalogued="$catalogued $ph"
+		if [ -z "$pmodels" ]; then
+			pmodels=$(from_cur H "$ph" 4)
+			psrc='carried from the registry already here; nothing on this host confirms it either way'
+		fi
+		if [ -z "$pmodels" ]; then
+			pmodels=$(awk -F"$TAB" -v hh="$ph" '$2 == hh { print $3 }' "$rol" | awk 'NF' | sort -u | tr '\n' ' ' | sed 's/ *$//')
+			[ -n "$pmodels" ] && psrc='carried from .remit/rules/roles.md, which retires into this file; nothing on this host confirms it either way'
+		fi
+		if [ -z "$pmodels" ]; then
+			note "      no model id — $pnote. Write the ids you mean."
+		else
+			note "      models: $pmodels ($psrc)"
+			note "      $pnote"
+		fi
+		printf 'H%s%s%s%s%s%s\n' "$TAB" "$ph" "$TAB" "$pcli" "$TAB" "$pmodels" >>"$prop"
+	done <"$probe"
+
+	prop_has() { # $1 harness -> 0 when the proposal carries it
+		awk -F"$TAB" -v h="$1" '$1 == "H" && $2 == h { f = 1 } END { exit f ? 0 : 1 }' "$prop"
+	}
+	prop_model() { # $1 harness  $2 model -> 0 when the proposal registers it there
+		awk -F"$TAB" -v h="$1" -v m="$2" '
+			$1 == "H" && $2 == h { n = split($4, w, " "); for (i = 1; i <= n; i++) if (w[i] == m) f = 1 }
+			END { exit f ? 0 : 1 }' "$prop"
+	}
+	prop_add_model() { # $1 harness  $2 model — the seat has to be registered too
+		awk -F"$TAB" -v OFS="$TAB" -v h="$1" -v m="$2" '
+			$1 == "H" && $2 == h { $4 = ($4 == "" ? m : $4 " " m) } { print }' "$prop" >"$prop.new" &&
+			mv "$prop.new" "$prop"
+	}
+
+	# --- the seat each role takes --------------------------------------------
+	incomplete=no
+	note ''
+	note 'the seat each role takes'
+	for role in research build evaluate repair-brief; do
+		seat_h='' seat_m='' seat_src=''
+		cur_h=$(from_cur D "$role" 3)
+		cur_m=$(from_cur D "$role" 4)
+		if [ -n "$cur_h" ] && [ -n "$cur_m" ] && prop_has "$cur_h" && prop_model "$cur_h" "$cur_m"; then
+			seat_h=$cur_h seat_m=$cur_m seat_src='already registered, and still here'
+		else
+			rol_h=$(from_rol "$role" 2)
+			rol_m=$(from_rol "$role" 3)
+			if [ -n "$rol_h" ] && [ -n "$rol_m" ] && prop_has "$rol_h"; then
+				seat_h=$rol_h seat_m=$rol_m
+				seat_src='carried from .remit/rules/roles.md, which retires into this file'
+				if ! prop_model "$rol_h" "$rol_m"; then
+					prop_add_model "$rol_h" "$rol_m"
+					seat_src="$seat_src; $rol_m was added to $rol_h, and nothing on this host confirms it"
+				fi
+			fi
+		fi
+		if [ -n "$seat_h" ]; then
+			note "  $role: $seat_h $seat_m ($seat_src)"
+		else
+			incomplete=yes
+			if [ -n "$cur_h" ]; then
+				note "  $role: EMPTY — it was seated on $cur_h $cur_m, and that is not what this host offers. Name one you do want."
+			else
+				note "  $role: EMPTY — nothing here seats it. Name one."
+			fi
+		fi
+		printf 'D%s%s%s%s%s%s\n' "$TAB" "$role" "$TAB" "$seat_h" "$TAB" "$seat_m" >>"$prop"
+	done
+
+	awk -F"$TAB" '$1 == "H" && $4 == "" { f = 1 } END { exit f ? 0 : 1 }' "$prop" && incomplete=yes
+
+	# --- drift, only where there is a registry to drift from -----------------
+	if [ "$cur_ok" = yes ]; then
+		drift=''
+		# Same cut-by-position reading as the probe loop, for the same reason: a
+		# registered harness with no models is one empty field, and a `read` on a
+		# tab would lose it.
+		while IFS= read -r cline; do
+			[ -n "$cline" ] || continue
+			k=$(printf '%s\n' "$cline" | cut -f1)
+			a=$(printf '%s\n' "$cline" | cut -f2)
+			b=$(printf '%s\n' "$cline" | cut -f3)
+			c=$(printf '%s\n' "$cline" | cut -f4)
+			case "$k" in
+			H)
+				if ! prop_has "$a"; then
+					drift="$drift  $a is registered and this host does not have it — every raise on that seat refuses until it is installed or taken out
+"
+				else
+					# ONLY where a catalogue was actually read. A CLI that ships
+					# none says nothing about its ids, and silence is not evidence
+					# that a registered id is gone.
+					case " $catalogued " in
+					*" $a "*)
+						for m in $c; do
+							prop_model "$a" "$m" ||
+								drift="$drift  $a registers $m and this host's own catalogue does not carry it — a raise on that model refuses
+"
+						done
+						;;
+					esac
+				fi
+				;;
+			D)
+				if [ -n "$b" ] && ! prop_has "$b"; then
+					drift="$drift  defaults.$a seats $b, which this host does not have — that role cannot be raised at all
+"
+				fi
+				;;
+			esac
+		done <"$cur"
+		for h in $present; do
+			awk -F"$TAB" -v hh="$h" '$1 == "H" && $2 == hh { f = 1 } END { exit f ? 0 : 1 }' "$cur" ||
+				drift="$drift  $h is on this host and the registry does not carry it — nothing is raised on it, which may be exactly what was meant
+"
+		done
+		note ''
+		if [ -n "$drift" ]; then
+			note "drift between $SETTINGSFILE and this host"
+			note "$(printf '%s' "$drift")"
+		else
+			note "no drift: $SETTINGSFILE and this host agree."
+		fi
+	fi
+
+	# --- the proposal ---------------------------------------------------------
+	#
+	# Built into a file FIRST, never onto a stream the caller aimed somewhere.
+	# `setup` reads the registry that is already there, and a caller who saved it
+	# with `setup > .remit/settings.json` truncated that file before this script
+	# ever opened it — so the re-run carried nothing forward and could report no
+	# drift, while reporting neither. The save is this script's, on `--write`,
+	# and there is no form of it that depends on where a shell pointed stdout.
+	proposal="$WORK/proposal.json"
+	jq -R -s '
+		(split("\n") | map(select(length > 0) | split("\t"))) as $rows
+		| {
+			harnesses: ( [ $rows[] | select(.[0] == "H")
+			               | { key: .[1], value: { cli: .[2],
+			                   models: ( if ((.[3] // "") | length) == 0 then [] else (.[3] | split(" ")) end ) } } ]
+			             | from_entries ),
+			defaults:  ( [ $rows[] | select(.[0] == "D")
+			               | { key: .[1], value: { harness: (.[2] // ""), model: (.[3] // "") } } ]
+			             | from_entries )
+		  }
+	' <"$prop" >"$proposal" ||
+		die "the proposal could not be built. NOTHING was written: a registry half-built is worse than the one that is there"
+
+	if [ "$want_write" = no ]; then
+		cat "$proposal"
+	fi
+
+	err ''
+	if [ "$want_write" = no ]; then
+		err "$ME: a registry PROPOSED for $root — NOTHING was written."
+	else
+		err "$ME: a registry proposed for $root, and about to be SAVED to $SETTINGS_REL."
+	fi
+	err ''
+	err 'what is on this host'
+	printf '%s' "$REPORT" >&2
+	err ''
+	if [ "$incomplete" = yes ]; then
+		err 'This proposal is NOT yet a registry. An empty `models` list and an empty seat'
+		err 'are both refused on read, and refused loudly, so that nothing is ever raised on'
+		err 'a seat nobody named. Fill them in.'
+		err ''
+	fi
+
+	if [ "$want_write" = no ]; then
+		err 'To take it: read it here, then have this script save it — and edit the saved'
+		err 'file for anything the report above says it left empty:'
+		err ''
+		err "    sh bin/remit setup --write"
+		err ''
+		err 'Never by redirecting this command over the registry. `setup` READS'
+		err "$SETTINGS_REL to carry forward what only you could have known, and a"
+		err 'shell redirection empties that file before this script starts — so the'
+		err 'seats you registered are gone before they can be read, and no drift can'
+		err 'be reported against them.'
+		err ''
+		err 'This script proposes. Only the practitioner registers a seat.'
+		exit 0
+	fi
+
+	# --- the save, on his word, and atomic -----------------------------------
+	#
+	# tmp + rename in the SAME directory, so the registry is either the file that
+	# was there or the whole of the new one, and never a truncated half of either
+	# — including when this script is interrupted mid-save.
+	mkdir -p "$(dirname "$SETTINGSFILE")" ||
+		die "could not create $(dirname "$SETTINGS_REL")"
+	SAVETMP="$SETTINGSFILE.remit-setup.$$"
+	cat "$proposal" >"$SAVETMP" || die "could not write beside $SETTINGS_REL — nothing was changed"
+	mv -f "$SAVETMP" "$SETTINGSFILE" || die "could not put $SETTINGS_REL in place — nothing was changed"
+	SAVETMP=''
+
+	if [ "$had_registry" = yes ]; then
+		err "REPLACED $SETTINGS_REL. What it registered was read first and carried forward"
+		err 'where this host still has it; what was dropped is in the drift above, and the'
+		err 'file it replaced is in this repository'"'"'s history.'
+	else
+		err "WROTE $SETTINGS_REL, where there was none."
+	fi
+	err ''
+	if [ "$incomplete" = yes ]; then
+		err 'It is on disk and it is not yet a registry: `bin/remit-invoke` refuses every'
+		err 'raise that needs an empty entry, and names it. Fill them in.'
+		err ''
+	fi
+	err 'Nothing was committed. The registry is yours to read before it is history —'
+	err "review $SETTINGS_REL and commit it yourself."
+	exit 0
 	;;
 
 rules)
@@ -1716,6 +2294,66 @@ migrate)
 
 	rubrics_seed
 	[ -n "$SEEDED" ] && say "laid down .remit/rules/ —$SEEDED"
+
+	# `roles.md` retired into `.remit/settings.json` on 2026-08-23. A repository
+	# old enough to need migrating may still carry one, and its lines are the
+	# practitioner's own: they are CARRIED into a registry here rather than
+	# dropped on the floor, and the file itself goes. Every id it names is
+	# registered for the harness it named it on, because a seat this migration
+	# wrote and the registry then refused would be worse than no migration at all.
+	# What this cannot know — every OTHER model that harness may use — is not
+	# guessed at; `remit setup` reads the host, and this does not.
+	if [ -f "$ROLESFILE" ] && [ ! -e "$SETTINGSFILE" ]; then
+		if ! command -v jq >/dev/null 2>&1; then
+			say "note: .remit/rules/roles.md is here and jq is not, so its lines were NOT carried into .remit/settings.json and roles.md was left where it is. Run \`$ME setup\` with jq installed."
+		else
+			carried="$WORK/carried"
+			nocr "$ROLESFILE" | awk '
+				/^##[[:space:]]/ { sec = tolower($2); next }
+				sec != "roles" { next }
+				/^-[[:space:]]/ {
+					line = $0
+					sub(/^-[[:space:]]*/, "", line)
+					i = index(line, ":")
+					if (i == 0) next
+					r = substr(line, 1, i - 1)
+					gsub(/^[[:space:]]+|[[:space:]]+$/, "", r)
+					if (r != "research" && r != "build" && r != "evaluate" && r != "repair-brief") next
+					v = substr(line, i + 1)
+					gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+					if (split(v, w, /[[:space:]]+/) != 2) next
+					print r "\t" w[1] "\t" w[2]
+				}
+			' >"$carried"
+			if [ -s "$carried" ]; then
+				mkdir -p "$(dirname "$SETTINGSFILE")"
+				jq -R -s '
+					(split("\n") | map(select(length > 0) | split("\t"))) as $rows
+					| {
+						harnesses: ( [ $rows[] | { key: .[1], value: .[2] } ]
+						              | group_by(.key)
+						              | map({ key: .[0].key,
+						                      value: { cli: .[0].key, models: (map(.value) | unique) } })
+						              | from_entries ),
+						defaults:  ( ["research","build","evaluate","repair-brief"]
+						              | map( . as $r
+						                     | ($rows | map(select(.[0] == $r)) | first) as $hit
+						                     | { key: $r,
+						                         value: { harness: ($hit[1] // ""), model: ($hit[2] // "") } } )
+						              | from_entries )
+					  }
+				' <"$carried" >"$SETTINGSFILE"
+				say "carried .remit/rules/roles.md into .remit/settings.json — $(awk 'END { print NR }' "$carried") seat(s). Read it: it registers only what roles.md named, so a harness or model you also use is NOT in it yet, and \`$ME setup\` proposes one from what this host actually has."
+			else
+				say "note: .remit/rules/roles.md carried no readable role line, so .remit/settings.json was not written from it. \`$ME setup\` proposes one from what this host has."
+			fi
+		fi
+	fi
+	if [ -f "$ROLESFILE" ] && [ -e "$SETTINGSFILE" ]; then
+		rm -f "$ROLESFILE"
+		say "removed .remit/rules/roles.md — the seats live in .remit/settings.json now, and nothing reads that file any more."
+	fi
+
 	printf 'migrated %s item(s) into .remit/work-items/.\n' "$moved"
 	say "the law documents stay at .remit/ root; the rubrics sit beside the work, in .remit/rules/."
 	# shellcheck disable=SC2086
@@ -1799,6 +2437,7 @@ resume)
 			if nocr "$AUTHORITY" | grep -q '^\*\*Research:\*\*' && [ ! -f "$item/research.md" ]; then
 				ROUND=1
 				GATE=''
+				STANDARDS_GATE=refined
 				invoke research "$WORK/research" "$root" || escalate "cannot act: remit-invoke"
 				cat "$WORK/research" >"$item/research.md"
 				commit_step "remit: $slug research" ".remit/work-items/$slug"
@@ -1806,7 +2445,18 @@ resume)
 					log_append "research — $(git -C "$root" rev-parse --short HEAD) — $(now)"
 				commit_step "remit: $slug record the research" ".remit/work-items/$slug"
 			fi
-			run_gate refined draft yes || escalate "$LOOP_STOP"
+			run_gate refined none no
+			_grc=$?
+			if [ "$_grc" = 2 ]; then
+				# The brief did not pass, and nothing here may rewrite it.
+				STOP=$LOOP_STOP
+				STOP_NOTE="The gate into \`refined\` returned a must-fix: $LOOP_STOP
+Nothing in this mechanism may change a brief — that is the practitioner's, and
+his alone — so the item waits at \`new\` with the must-fix on the record above,
+and no second round was run."
+				break
+			fi
+			[ "$_grc" = 0 ] || escalate "$LOOP_STOP"
 			;;
 		refined)
 			run_gate accepted build yes || escalate "$LOOP_STOP"
