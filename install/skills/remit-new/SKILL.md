@@ -10,12 +10,32 @@ printed, and stop.
 
 ## Ask him first, in the conversation — a brief has two sides
 
+**Every brief is asked what it depends on, whichever side it is.** Ask him once — **does
+this depend on any other work item finishing first?** — and write his answer into the brief
+as a `**Depends on:**` line, naming those items **by their slugs**, comma-separated. If he
+says it depends on nothing, write `**Depends on:** none`; write that only because he said
+so, never to fill the gap yourself, and never answer the question for him.
+
+Two things to say back to him when the answer is not a plain slug:
+
+- **A pull request is not an answer.** He may reach for one — "it needs #35". A PR is a
+  partial delivery vehicle; the work item behind it is what has to finish. Ask which item
+  that is and write the slug.
+- **Depending on PART of an item is the smell.** If what he needs is one piece of another
+  item rather than the whole of it, that piece belongs inside a work item as a phase — his
+  own words, "i'd add it as a phase inside a work item". Say so and take his answer.
+
+`bin/remit` reads that line again before every build and stops the item where it is until
+every item it names has closed; what satisfies a name, and what it refuses, are that
+script's header to state and are not restated here.
+
 **"File it", "park it", "an idea", "for the backlog"** — file what he wrote, verbatim, with
-`--park`. The only thing you may ask is the universal one, **is there enough here to evaluate —
-an outcome a stranger could judge delivered or not?**, and you ask it once: if he sharpens it,
-use what he gave you; if he leaves it as it is, that is his answer and it stands. Nothing else is
-asked. A parked item moves for nothing, and an idea nobody could yet judge delivered is allowed
-to sit at `new`; that is the design working, not a gap to close.
+`--park`. Besides the line above, the only thing you may ask is the universal one, **is there
+enough here to evaluate — an outcome a stranger could judge delivered or not?**, and you ask
+it once: if he sharpens it, use what he gave you; if he leaves it as it is, that is his answer
+and it stands. Nothing else is asked. A parked item moves for nothing, and an idea nobody
+could yet judge delivered is allowed to sit at `new`; that is the design working, not a gap
+to close.
 
 **"Create a brief", "take it to refined", "with research"** — that side requires him. Read this
 repository's own bar before asking anything:
@@ -48,6 +68,8 @@ Pick a slug from the title: lower-case, hyphenated, a few words.
 ```sh
 sh "$(git rev-parse --show-toplevel)/bin/remit" new <slug> [--until refined|accepted|closed] [--park] <<'BRIEF'
 # <Title>
+
+**Depends on:** <the slugs he named, comma-separated, or none>
 
 <the brief, in his words>
 BRIEF

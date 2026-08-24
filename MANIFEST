@@ -1,13 +1,13 @@
 remit dist manifest v1
-version 0.2.0
+version 0.2.1
 100644 c23c1d1c810eea733d6b21adda0c00ccffc41684 LICENSE
 100644 afd061a39ee0052f85ee91c58dee153a569e076b MANIFESTO.md
-100644 09f3c1493e9c560c5c238506be9256a11f2dd3ff README.md
-100644 0ea3a944b399d25f7e1b8fe684d754eb8da9fe7f VERSION
-100755 0ff8f882c0686a82b88cedfeefbfcfbe4fa2fd97 bin/remit
+100644 3cc7b54bbc02ca0898689fbdadd06b7f0306ec8b README.md
+100644 0c62199f16ac1e2d7f7ae75b420c1231325dff4e VERSION
+100755 ba90b605ff24ec32c0e5f7bc0c506300f9d5a56d bin/remit
 100644 0efaff21ff3ad2a15b71beedf27002c9d7870af2 bin/remit-invoke
-100644 bc5eea0091e818a141938f23d31f92f9fa722a73 docs/index.html
-100755 a8a936476408c4e6bc407bc4c37dcdffaeb124ca get-remit.sh
+100644 fe76ac483d4e2407f3c7280e423a897367a4c3c7 docs/index.html
+100755 1d8a18185a9108c7d6b868d9be6ea0c7081c25be get-remit.sh
 100644 45b2244af531ac49b6cde0670a99b7a1bf8bae73 install.sh
 100644 6730d27a36d9b81c3445fa309fb93b547f61181f install/AGENTS-remit.md
 100644 9622fbf1dd5bbd5b20206341410f01f56a63d919 install/hooks/claude-settings.json
@@ -15,7 +15,7 @@ version 0.2.0
 100644 38c52e0c5bdcd6bc8053122a2a56ecb97996d766 install/hooks/no-agent-tool.sh
 100644 4dc391b362fd29a9bde98e926b610a2600c4d122 install/hooks/pre-push
 100644 5a7d270ca9d9a25fbacdf3e8ed78eb6e365e96d7 install/skills/remit-close/SKILL.md
-100644 bfd651f3a8ab0b455c8a1b8f5fde3cb9db5e888e install/skills/remit-new/SKILL.md
+100644 d52812629686bb56ed02b4601c6dd165889b9ad6 install/skills/remit-new/SKILL.md
 100644 7e2dd93405ff095a7a197b1c223d6e5010e792c5 install/skills/remit-resume/SKILL.md
 100644 51c996d2342d4911beaea6da90ca485fbd180cca install/skills/remit-retro/SKILL.md
 100644 a56aeb25b76e460a62c3bd4641624d4b6a2cc45c install/skills/remit-status/SKILL.md

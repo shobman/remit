@@ -26,6 +26,12 @@
 #
 #              plus **Migrated:** — written only by `remit migrate`, recording
 #              what that one-time move had to infer.
+#
+#              and **Depends on:** — HIS line, not this script's. It is optional,
+#              read before every build, and written by nobody here: `put_header`
+#              neither adds it nor moves it, exactly as it leaves `**Research:**`
+#              and `**Current phase:**` alone. See WHAT A BRIEF DEPENDS ON
+#              below, which is the whole of its law.
 #   log.md     append-only. Every verdict as it was returned, every finding with
 #              its disposition, every delivery, every escalation, every ruling.
 #
@@ -56,7 +62,10 @@
 # ==============================================================================
 #
 #   remit new <slug> [--until refined|accepted|closed] [--park]
-#       Create the item from the brief on stdin. It is born ACTIVE at `new`.
+#       Create the item from the brief on stdin, which must carry a title. A
+#       `**Depends on:**` line is optional — omitted is `none` — and one that is
+#       there is REFUSED unless every name on it can be read. Born ACTIVE at
+#       `new`.
 #       `--park` files it instead: parked, and it moves for nothing.
 #       `--until X --park` is born parked too, with X and the park recorded as
 #       one value: a `resume` then runs it to X and PARKS IT THERE.
@@ -65,8 +74,9 @@
 #       The whole chain. Activates a parked or escalated item, records a new
 #       `until` if one is given, then moves the item ONE GATE AT A TIME as far as
 #       that `until` reaches, or as far as a `promote` rubric a gate's evaluator
-#       cited carries it, and never past a `hold` one cited or a must-fix that
-#       still stands — then prints the row `list` would show, and why it stopped.
+#       cited carries it, and never past a `hold` one cited, a must-fix that
+#       still stands, or a `**Depends on:**` work item that has not closed —
+#       then prints the row `list` would show, and why it stopped.
 #       `--park` here attaches to the `--until` beside it, and means exactly what
 #       it means at `new`: run to that stop and rest there. It is refused on its
 #       own, because a `resume` whose only word is "do not move" is two commands
@@ -75,9 +85,10 @@
 #   remit park <slug>            attention -> parked; the stage does not move
 #   remit close <slug>           final. Seals every finding that has no
 #                                disposition as `pre-authorised`, records the
-#                                delivery links on stdin, sets the stage to
-#                                closed and archives the whole folder to
-#                                `.remit/work-items/.archive/<slug>/`
+#                                delivery links on stdin and archives the whole
+#                                folder to `.remit/work-items/.archive/<slug>/`
+#                                AT THE STAGE IT HAD REACHED — the verb stamps
+#                                no stage (see WHAT A BRIEF DEPENDS ON)
 #   remit list [--parked]        the projection (below)
 #   remit report new <name>      file a field report from stdin
 #   remit report close <name>    archive it to `field-reports/.archive/`
@@ -125,12 +136,97 @@
 # carried it past what the practitioner said, and it rests here), `hold: <id>`
 # (a rubric the gate's evaluator cited stopped it here for his eyes), `fix:
 # <id>` (a rubric the gate's evaluator cited is the must-fix still standing),
-# `4 fails`, `same must-fix twice`, `cannot act: <what>`, `parked`, `parked at
-# until`. An item with nothing recorded shows `-`.
+# `depends on: <the work item the line names that has not closed, or what it
+# left unreadable>`, `4 fails`, `same must-fix twice`, `cannot act: <what>`, `parked`,
+# `parked at until`. An item with nothing recorded shows `-`.
 #
 # The working marker IS the lock: `.remit/work-items/<slug>/.working`, created by
 # `resume` after its preconditions pass and removed however it exits. A second
 # `resume` of the same item refuses while it is there. It is not a stage.
+#
+# ==============================================================================
+# WHAT A BRIEF DEPENDS ON
+# ==============================================================================
+#
+# Admitted by the practitioner, 2026-08-23/24, after a delivery was built on a
+# tree a pending pull request was about to replace: "we failed to check that the
+# thing we need was already built … we had an incident which is the rebuild we're
+# talking about here, because we didn't have dependencies in work items."
+#
+#   **Depends on:** none
+#   **Depends on:** raised-contexts-are-visible
+#   **Depends on:** raised-contexts-are-visible, every-pr-names-its-item — both
+#                   from the retro
+#
+# ONE LINE, HIS WORDS, and it names WORK ITEMS BY SLUG. Nothing else: not a pull
+# request, not a branch, not a URL. Ruled by him, 2026-08-24: "PRs are the
+# partial delivery vehicles for work items; the work item itself is not done
+# until i say. New or refined work doesn't even get a PR yet." A line naming a
+# `#<n>`, a `.../pull/<n>` or a `<a>/<b>` branch is REFUSED at `new` and HOLDS
+# before a build, saying so — the form is gone, and reading one as a slug would
+# resolve a name nothing here has.
+#
+# WHAT SATISFIES ONE: the named item's **Stage:** reads `closed`, and nothing
+# else does. Its stage is read from its own brief, wherever that brief now sits —
+# in `.remit/work-items/<slug>/` while it is in flight, in
+# `.remit/work-items/.archive/<slug>/` once it is archived. ARCHIVING PRESERVES
+# THE STAGE and never stamps one: ruled by him the same day, "close it early,
+# abandon it, kill it, remove it — anything like that means archive it, leave
+# state as is", so an item archived at `new`, `refined` or `accepted` satisfies
+# NOTHING, and being in the archive is not being done. Only the closing gate
+# stamps `closed`, and it stamps it because the work went through the gate.
+#
+# EVERY NAME ON THE LINE IS OBSERVED. A line naming three items lets a build
+# start only when all three have closed, and the first that has not is the one
+# the reason names.
+#
+# OMITTED MEANS NONE. Ruled by him, 2026-08-24: "it should be ok to be null or
+# blank or omitted, or simply 'none'." An absent line, a blank one, `none` and
+# `nothing` are one answer — this brief depends on nothing, nothing is checked
+# and nothing holds. `remit new` REFUSES NO BRIEF for the line's absence. What
+# still always asks him is the `remit-new` convention, at filing, in the
+# conversation, and it writes `Depends on: none` when that is what he said; that
+# is the convention's sentence and is not restated here.
+#
+# A LINE THAT IS THERE IS READ WHOLE OR NOT AT ALL. Ruled by him the same day:
+# a named line that cannot be fully read refuses, never truncates. So `remit new`
+# REFUSES such a brief, and a build HOLDS on it. THE VALUE is a comma-separated
+# list of slugs, and HIS PROSE COMES LAST, beginning at the first ` — `: in
+# `raised-contexts-are-visible — the seam half, and nothing else` the comma in
+# that sentence is a comma. Before that point every comma-field must reduce to
+# exactly ONE word once the punctuation he writes sentences with is taken off
+# either end — a bracket, a backtick, a bold marker, the full stop he ended the
+# line with. A field carrying two words does NOT name the first and drop the
+# second: `showcase and raised-contexts-are-visible` is unreadable and is said to
+# be, because silently naming one of two is how a build starts on a tree that
+# lacks the other. A field that strips away to nothing is unreadable the same
+# way. Empty fields between commas are nothing at all and are skipped.
+#
+# DEPENDING ON PART OF AN ITEM IS THE SMELL. Ruled by him, 2026-08-24: "if it's
+# the former, i'd add it as a phase inside a work item." There is no way to name
+# half of an item here and there is not meant to be — a part that has to land
+# first is a phase inside one item, ordered by that item's `**Current phase:**`
+# pointer, not a dependency between two. The `remit-new` convention says so when
+# it asks.
+#
+# WHERE IT IS READ FROM: the item's AUTHORITY — the current phase file where the
+# brief names one — and from the brief where that phase file carries no line of
+# its own. A part may depend on something the item as a whole did not, and where
+# it says nothing the item's own line still binds.
+#
+# THE SUPERSEDED NAME IS NOT SILENTLY IGNORED. A brief carrying `**Builds on:**`
+# and no `**Depends on:**` is a brief written to the form this section replaced.
+# It is refused at `new` and holds before a build, naming the rename — because
+# the one failure this whole section exists to prevent is a dependency nobody
+# read.
+#
+# WHAT THIS COSTS, said plainly. Slugs are resolved against THIS repository's own
+# work location, so an item that was never admitted here cannot be named and a
+# line naming one holds until it is admitted or he changes the line. And an item
+# abandoned — archived at an earlier stage on his word — satisfies nothing
+# forever: work that depends on it waits until he rules, which is the answer he
+# gave, not an oversight. Nothing here resolves a dependency, orders two items or
+# closes one so that another may start.
 #
 # ==============================================================================
 # THE AI SEAM — ONE COMMAND
@@ -427,7 +523,14 @@ usage() {
 usage:
   remit new <slug> [--until refined|accepted|closed] [--park]
                          create .remit/work-items/<slug>/ from the brief on
-                         stdin; born ACTIVE at stage `new`. With --until it then
+                         stdin, which must begin with a `# Title`. A
+                         `**Depends on:**` line — the work items it depends on,
+                         by slug, or `none` — is optional, and omitting it means
+                         none; one that is THERE and cannot be read whole is
+                         REFUSED, and nothing is written in its place. Never
+                         truncated: naming one dependency and dropping another is
+                         what it exists to prevent.
+                         Born ACTIVE at stage `new`. With --until it then
                          RUNS THE CHAIN, here, in this same command, exactly as
                          `resume` would, and prints the row where it stopped.
                          With nothing said it runs the chain only if refined.md
@@ -441,14 +544,20 @@ usage:
                          one gate at a time as far as the until says, or as far
                          as a promote rubric a gate's evaluator cited carries it,
                          and never past a hold it cited. Prints the row and why
-                         it stopped.
+                         it stopped. Before every build it reads the brief's
+                         `**Depends on:**` line and stops the item where it is,
+                         naming the dependency, when a work item it names has
+                         not closed.
                          --park attaches to the --until beside it; on its own it
                          is refused — `remit park <slug>` is that instruction.
   remit park <slug>      attention -> parked. The stage does not move.
   remit close <slug>     FINAL. Seals every finding with no disposition as
                          `pre-authorised`, keeps anything on stdin as the
                          delivery links, and archives the whole folder to
-                         .remit/work-items/.archive/<slug>/
+                         .remit/work-items/.archive/<slug>/ AT THE STAGE IT HAD
+                         REACHED. This verb stamps NO stage: work abandoned at
+                         `refined` is archived at `refined`, and a brief that
+                         depends on it is not let through by its archiving.
   remit list [--parked]  escalated first, then active by stage; --parked instead
   remit report new <name>    file .remit/field-reports/<name>.md from stdin
   remit report close <name>  archive it to field-reports/.archive/
@@ -1327,6 +1436,188 @@ build_worktree() {
 	return 0
 }
 
+# ==============================================================================
+# what this brief depends on, and whether that work item has closed
+# ==============================================================================
+#
+# The law is WHAT A BRIEF DEPENDS ON in this script's header; this is only its
+# code. Nothing below writes a brief, and nothing below guesses: a line it cannot
+# read whole stops the item, and so does a name that has not closed.
+
+# THE LINE, REDUCED TO THE WORK ITEMS IT NAMES.
+#   0, DEPENDS_ON_LIST empty   it names none — absent, blank, `none` or `nothing`
+#   0, DEPENDS_ON_LIST set     the slugs it names, one per line
+#   1, DEPENDS_ON_BAD set      it is there and cannot be read whole, saying why
+DEPENDS_ON_LIST=''
+DEPENDS_ON_BAD=''
+depends_on_names() { # $1 the file to read the line from
+	DEPENDS_ON_LIST=''
+	DEPENDS_ON_BAD=''
+	if ! nocr "$1" | grep -q '^\*\*Depends on:\*\*'; then
+		# THE SUPERSEDED NAME, never silently ignored: a brief written to the
+		# form the ruling of 2026-08-24 replaced would otherwise read as `none`,
+		# and a dependency nobody read is the whole incident.
+		if nocr "$1" | grep -q '^\*\*Builds on:\*\*'; then
+			DEPENDS_ON_BAD="it carries a \`**Builds on:**\` line and no \`**Depends on:**\` line — that line was renamed by the practitioner's ruling of 2026-08-24, it names work items by slug now, and nothing here reads the old one"
+			return 1
+		fi
+		return 0
+	fi
+
+	# HIS PROSE COMES LAST and starts at the first ` — `; everything after it is
+	# his and is not resolved, so a comma inside a sentence he wrote is a comma.
+	_val=$(hdr "$1" 'Depends on')
+	_emdash=' — '
+	case "$_val" in
+	*"$_emdash"*) _val=${_val%%"$_emdash"*} ;;
+	esac
+
+	_names=''
+	_oifs=$IFS
+	set -f
+	IFS=,
+	for _field in $_val; do
+		IFS=$_oifs
+		set +f
+		_w=$(printf '%s\n' "$_field" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+		if [ -n "$_w" ]; then
+			# HIS PUNCTUATION IS NOT PART OF THE NAME — a bracket he put round
+			# it, a backtick he set it in, a bold marker, the full stop he ended
+			# the line with. A slug is word characters and hyphens throughout, so
+			# nothing a name can legitimately carry is stripped.
+			_w=$(printf '%s\n' "$_w" | sed 's/^[`*_([{"]*//; s/[].,;:!?)}`*_"]*$//')
+			case "$_w" in
+			'')
+				DEPENDS_ON_BAD="one of its comma-separated fields carries no word a work item could be named by — punctuation and nothing else"
+				;;
+			*[[:space:]]*)
+				DEPENDS_ON_BAD="the field \`$_w\` carries more than one word, and naming the first of them and dropping the rest is exactly what this line exists to prevent — separate work items with a comma"
+				;;
+			'#'*)
+				DEPENDS_ON_BAD="\`$_w\` names a pull request, and this line names work items by slug: \"PRs are the partial delivery vehicles for work items; the work item itself is not done until i say\" (2026-08-24)"
+				;;
+			*/*)
+				DEPENDS_ON_BAD="\`$_w\` names a branch or a URL, and this line names work items by slug: \"PRs are the partial delivery vehicles for work items; the work item itself is not done until i say\" (2026-08-24)"
+				;;
+			*)
+				_names="$_names$_w
+"
+				;;
+			esac
+			[ -n "$DEPENDS_ON_BAD" ] && break
+		fi
+		set -f
+		IFS=,
+	done
+	IFS=$_oifs
+	set +f
+	[ -n "$DEPENDS_ON_BAD" ] && return 1
+
+	# `none` and `nothing` are the same answer as an absent line, and they are
+	# the WHOLE answer: beside another name they contradict it, and nothing here
+	# decides which half he meant. The probe carries a newline at BOTH ends of
+	# every name, so a slug that merely ends in `none` is not one.
+	_probe="
+$_names"
+	case "$_probe" in
+	*'
+none
+'* | *'
+nothing
+'*)
+		case "$_probe" in
+		'
+none
+' | '
+nothing
+') return 0 ;;
+		esac
+		DEPENDS_ON_BAD="it names \`none\` beside a work item, and those are two different answers — nothing here picks one"
+		return 1
+		;;
+	esac
+	[ -n "$_names" ] || return 0
+	DEPENDS_ON_LIST=$_names
+	return 0
+}
+
+# ONE WORK ITEM: has it closed? Its stage is read from its own brief, wherever
+# that brief now sits — ARCHIVING PRESERVES THE STAGE and never stamps one, so
+# being in the archive is not being done.
+DEPENDS_ON_WHY=''
+depends_on_one() { # $1 one slug -> 0 it has closed, 1 it has not, with the why
+	DEPENDS_ON_WHY=''
+	if [ -f "$ITEMS/$1/brief.md" ]; then
+		_st=$(hdr "$ITEMS/$1/brief.md" Stage)
+		[ "$_st" = closed ] && return 0
+		DEPENDS_ON_WHY="work item $1 is at ${_st:-no readable stage}, not closed"
+		return 1
+	fi
+	if [ -f "$ITEMARCH/$1/brief.md" ]; then
+		_st=$(hdr "$ITEMARCH/$1/brief.md" Stage)
+		[ "$_st" = closed ] && return 0
+		DEPENDS_ON_WHY="work item $1 was archived at ${_st:-no readable stage}, not closed — archiving leaves the stage as it was"
+		return 1
+	fi
+	DEPENDS_ON_WHY="$1 is not a work item here — neither .remit/work-items/$1 nor its archive is there"
+	return 1
+}
+
+# THE WHOLE LINE, BEFORE A BUILD. 0 = every work item it names has closed, or it
+# names none; 1 = it has not, with DEPENDS_ON_STOP the reason a row will show and
+# DEPENDS_ON_NOTE the prose the record will carry.
+#
+# The line is read from the item's AUTHORITY, and from the brief where a phase
+# file carries no line of its own: a part may depend on something the item as a
+# whole did not, and where it says nothing the item's own line still binds.
+DEPENDS_ON_STOP=''
+DEPENDS_ON_NOTE=''
+depends_on_ok() {
+	DEPENDS_ON_STOP=''
+	DEPENDS_ON_NOTE=''
+	DEPENDS_ON_WHY=''
+
+	_src=$AUTHORITY
+	nocr "$_src" | grep -q -e '^\*\*Depends on:\*\*' -e '^\*\*Builds on:\*\*' || _src=$brief
+
+	if ! depends_on_names "$_src"; then
+		DEPENDS_ON_STOP='depends on: the line cannot be read whole'
+		DEPENDS_ON_NOTE="This brief's \`**Depends on:**\` line cannot be read whole: $DEPENDS_ON_BAD.
+The build did not start. Nothing here reads part of a line and starts on the rest —
+naming one dependency and dropping the other is the incident this check exists for.
+One line from the practitioner, naming the work items by slug or the word \`none\`,
+lifts this."
+		return 1
+	fi
+	[ -n "$DEPENDS_ON_LIST" ] || return 0
+
+	# EVERY NAME IS OBSERVED, and the first that has not closed is the one the
+	# reason names.
+	_held=''
+	_oifs=$IFS
+	IFS='
+'
+	for _n in $DEPENDS_ON_LIST; do
+		IFS=$_oifs
+		if ! depends_on_one "$_n"; then
+			_held=$_n
+			break
+		fi
+		IFS='
+'
+	done
+	IFS=$_oifs
+	[ -n "$_held" ] || return 0
+
+	DEPENDS_ON_STOP="depends on: $DEPENDS_ON_WHY"
+	DEPENDS_ON_NOTE="The brief's \`**Depends on:**\` line names a work item that has not closed:
+$DEPENDS_ON_WHY.
+The build did not start — a delivery authored on a tree that lacks what it depends
+on is the incident this check exists for. The item waits here until that one closes
+through its gate, or until the practitioner rules that the line has changed."
+	return 1
+}
+
 # NOTHING HERE WRITES A BRIEF'S BODY. A `put_body` lived here until the
 # practitioner's ruling of 2026-08-23 — "nothing should update my brief" — took
 # the `draft` role out of the chain. The header block above the body is still
@@ -1365,6 +1656,7 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 	GATE_PROMOTE=''
 	GATE_HOLD=''
 	LOOP_STOP_DETAIL=''
+	LOOP_STOP_NOTE=''
 	ROUND=1
 	_prev=''
 	: >"$WORK/mustfix"
@@ -1374,6 +1666,16 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 			# what it judges is already on disk from an earlier step.
 			_authornow=yes
 		else
+			# BEFORE THE BUILD, and before any worktree exists: what work items
+			# does this brief depend on, and have they closed? One that has not
+			# stops the item where it is, for the practitioner — nothing failed,
+			# so nothing escalates. Nothing outside this repository is asked, so
+			# there is no capability here that can be absent.
+			if ! depends_on_ok; then
+				LOOP_STOP=$DEPENDS_ON_STOP
+				LOOP_STOP_NOTE=$DEPENDS_ON_NOTE
+				return 2
+			fi
 			if ! build_worktree; then
 				LOOP_STOP="cannot act: could not prepare the build worktree"
 				return 1
@@ -1564,9 +1866,17 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 # ==============================================================================
 #
 # Seals every finding with no disposition as `pre-authorised`, records the
-# delivery links, sets the stage to closed and archives the whole folder.
-do_close() { # $1 the authority for this closure, in words  $2 delivery text
-	_auth=$1 _delivery=$2
+# delivery links and archives the whole folder.
+#
+# WHETHER IT STAMPS `closed` IS THE CALLER'S TO SAY, and only the closing gate
+# says yes. Ruled by the practitioner, 2026-08-24: "close it early, abandon it,
+# kill it, remove it — anything like that means archive it, leave state as is."
+# So `remit close` — his word that the work is over, whatever it shipped — moves
+# the folder and leaves the stage exactly as it was, and a brief that depends on
+# that item is NOT let through by its archiving. Only work that went through the
+# gate reads `closed`.
+do_close() { # $1 authority for this closure, in words  $2 delivery text  $3 `closed` to stamp it
+	_auth=$1 _delivery=$2 _stamp=${3:-}
 	log_ensure
 	nocr "$log" | awk '
 		/^- finding [0-9]+: / {
@@ -1596,8 +1906,19 @@ do_close() { # $1 the authority for this closure, in words  $2 delivery text
 		else
 			printf 'No finding was without a disposition.\n'
 		fi
+		if [ "$_stamp" = closed ]; then
+			printf '\nStage: closed — this closure came through the closing gate and stamped it.\n'
+		else
+			printf '\nStage: %s — ARCHIVED AS IT STOOD. This closure stamped no stage: the\n' "$(hdr "$brief" Stage)"
+			printf 'practitioner ended the work, and ending it is not taking it through the\n'
+			printf 'gate. A brief that depends on this item still waits.\n'
+		fi
 	} | log_append "closed — $(now)"
-	put_header "$brief" '' closed "$(hdr "$brief" Until)" KEEP
+	if [ "$_stamp" = closed ]; then
+		put_header "$brief" '' closed "$(hdr "$brief" Until)" KEEP
+	else
+		put_header "$brief" '' "$(hdr "$brief" Stage)" "$(hdr "$brief" Until)" KEEP
+	fi
 	mkdir -p "$ITEMARCH"
 	mv "$item" "$itemarchive" || die "could not archive $slug"
 }
@@ -1677,6 +1998,9 @@ GATE_PROMOTE=''
 GATE_HOLD=''
 LOOP_STOP=''
 LOOP_STOP_DETAIL=''
+# The prose a stop-for-the-practitioner puts on the record, set where the stop is
+# decided so that the reason and its explanation are written in one place.
+LOOP_STOP_NOTE=''
 
 # ==============================================================================
 # the verbs
@@ -1717,6 +2041,16 @@ create_item() {
 	'# '*) ;;
 	*) rm -rf "$item"; die "the brief must begin with a '# Title' heading" ;;
 	esac
+	# WHAT IT DEPENDS ON is his, and it is OPTIONAL: an omitted line is `none`
+	# (the section in this script's header is the whole of the law). What is
+	# refused is a line that is THERE and cannot be read whole — naming one
+	# dependency and dropping the other is the incident this exists to prevent.
+	# Nothing here writes the line, and the `remit-new` convention is what asks
+	# him for it at filing.
+	if ! depends_on_names "$brief"; then
+		rm -rf "$item"
+		die "the brief's '**Depends on:**' line cannot be read whole — $DEPENDS_ON_BAD. That line names work items by slug, comma-separated, or the word 'none'; omitting it altogether means none. Ask him; nothing here may answer it for him."
+	fi
 	if [ "$want_park" = yes ]; then
 		att=parked
 	else
@@ -1804,8 +2138,10 @@ close)
 	delivery=''
 	[ -t 0 ] || delivery=$(tr -d '\015')
 	printf 'Closed on the practitioner'"'"'s word.\n' | log_append "ruling — close — $(now)"
-	do_close "the practitioner's word" "$delivery"
-	say "closed .remit/work-items/$slug — archived whole to .remit/work-items/.archive/$slug."
+	# NO STAMP. His word ends the work; it does not take it through the gate.
+	closing_stage=$(hdr "$brief" Stage)
+	do_close "the practitioner's word" "$delivery" ''
+	say "closed .remit/work-items/$slug — archived whole to .remit/work-items/.archive/$slug, at stage $closing_stage."
 	commit_and_push "remit: close $slug" ".remit/work-items/$slug" ".remit/work-items/.archive/$slug"
 	exit $?
 	;;
@@ -2459,14 +2795,28 @@ and no second round was run."
 			[ "$_grc" = 0 ] || escalate "$LOOP_STOP"
 			;;
 		refined)
-			run_gate accepted build yes || escalate "$LOOP_STOP"
+			run_gate accepted build yes
+			_grc=$?
+			if [ "$_grc" = 2 ]; then
+				STOP=$LOOP_STOP
+				STOP_NOTE=$LOOP_STOP_NOTE
+				break
+			fi
+			[ "$_grc" = 0 ] || escalate "$LOOP_STOP"
 			;;
 		accepted)
 			# THE CLOSING GATE. It judges the folder that is already there —
 			# `log.md` and every evaluator's note in it — so nothing is built in
 			# front of it, and it runs BEFORE any merge. A must-fix raised here
 			# goes back to a builder like any other.
-			run_gate closed build no || escalate "$LOOP_STOP"
+			run_gate closed build no
+			_grc=$?
+			if [ "$_grc" = 2 ]; then
+				STOP=$LOOP_STOP
+				STOP_NOTE=$LOOP_STOP_NOTE
+				break
+			fi
+			[ "$_grc" = 0 ] || escalate "$LOOP_STOP"
 			;;
 		esac
 
@@ -2537,7 +2887,7 @@ in the stage it is in, for the practitioner, whatever else was cited there."
 				_licshort="until closed"
 			fi
 			do_close "$_lic. Every finding nobody ruled on is sealed by this closure as pre-authorised, and never as a ruling made on each one" \
-				"Merged as pull request #$PR_NUM${PR_URL:+ ($PR_URL)}."
+				"Merged as pull request #$PR_NUM${PR_URL:+ ($PR_URL)}." closed
 			say "closed .remit/work-items/$slug — archived whole to .remit/work-items/.archive/$slug."
 			commit_step "remit: close $slug ($_licshort)" \
 				".remit/work-items/$slug" ".remit/work-items/.archive/$slug"
