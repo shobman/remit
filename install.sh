@@ -25,6 +25,10 @@
 #                                  Devin and Copilot CLI all read the repo-root
 #                                  AGENTS.md; an existing AGENTS.md is appended
 #                                  to, never replaced
+#   CONTRIBUTING.md                how the repository takes a contribution. The
+#                                  file itself is where that is stated; nothing
+#                                  here repeats it. It is MANAGED — see the
+#                                  outcome `restored` below
 #   <git>/hooks/pre-push           the push guards, in the shared hooks dir so
 #                                  every linked worktree inherits them
 #   .remit/hooks/no-agent-tool.sh  the agent-tool guard: ONE script, registered
@@ -98,6 +102,12 @@
 #              remit does not overwrite it, and does not delete it
 #   removed    remit installed it, remit no longer ships it, and it is still
 #              exactly what remit put there
+# ONE FILE IS THE EXCEPTION, and it is deliberate: CONTRIBUTING.md is MANAGED.
+# A local edit to it is reported `restored` and put back to the payload on the
+# next upgrade, because what it describes is remit's own mechanic and a stale
+# copy of it sends a contributor somewhere that no longer works. Which file
+# that reaches — and which it deliberately does not, a CONTRIBUTING.md the
+# target already had when remit arrived — is stated once, at install_file below.
 #
 # The result is committed in the target (only the paths this install touched)
 # and never pushed: pushing a repository you own is your act, not an
@@ -133,6 +143,11 @@ HOOK_SRC="$SRC/install/hooks/pre-push"
 GUARD_SRC="$SRC/install/hooks/no-agent-tool.sh"
 GUARD_COPILOT="$SRC/install/hooks/copilot-no-agent-tool.json"
 GUARD_CLAUDE="$SRC/install/hooks/claude-settings.json"
+# remit's own CONTRIBUTING.md IS the payload — there is no second copy under
+# install/ the way the AGENTS.md section and the skills have one, so the file
+# this repository shows a contributor and the file an adopter is given cannot
+# drift apart.
+CONTRIB_SRC="$SRC/CONTRIBUTING.md"
 
 [ -f "$SRC/bin/remit" ] || die "payload missing: $SRC/bin/remit"
 [ -f "$SRC/bin/remit-invoke" ] || die "payload missing: $SRC/bin/remit-invoke"
@@ -165,12 +180,29 @@ trap 'rm -rf "$SCRATCH"' EXIT INT TERM
 printf 'remit install v%s -> %s\n' "$VERSION" "$TGT"
 
 # --- helpers ------------------------------------------------------------------
-# Hashed THROUGH THE TARGET, which has already been checked to be a git
-# repository's primary worktree. A bare `git hash-object` would be answered by
-# whatever repository the caller happened to be standing in, and an installer
-# has no business caring which directory it was launched from — a linked
-# worktree whose git pointer another operating system cannot read is enough to
-# stop it dead, and that has nothing to do with the target being installed into.
+# Every outcome below is decided by comparing these ids, so where the id is
+# computed FROM decides what the installer does. It is computed from the TARGET,
+# and never from wherever the person happened to be standing when they ran this.
+#
+# Git resolves a repository from the current directory, so a bare
+# `git hash-object` reads whichever repository the caller's shell was in. Two
+# things follow from that, and one of them is silent.
+#
+# THE LOUD ONE: if the caller's repository cannot be opened, the command does
+# not fall back to hashing the file — it dies:
+#
+#   $ cd /a/linked/worktree/whose/gitdir/is/unreachable
+#   $ sh install.sh /some/other/repo
+#   fatal: not a git repository: ...
+#
+# which is an installer failing over a directory it was never asked about.
+#
+# THE SILENT ONE: `hash-object` applies the line-ending conversion of whichever
+# repository it resolved. With the caller's deciding, a target that checks its
+# files out with CRLF has every one of them read as edited, and is told its own
+# untouched files were `kept` from an upgrade — an outcome that is wrong and
+# reads as careful. Anchored to the target, the payload and the file it is
+# compared against are converted by one set of rules: that target's own.
 hash_of() { git -C "$TGT" hash-object -- "$1"; }
 
 # What the manifest says remit installed there last time. Empty if never.
@@ -188,8 +220,28 @@ record() { # $1 type  $2 id  $3 path
 TOUCHED=''    # tracked paths this run changed (to stage and commit)
 report() { printf '  %-10s %s%s\n' "$1" "$2" "${3:+ — $3}"; }
 
-install_file() { # $1 src-abs  $2 dst-rel
-	src=$1 dst=$2
+# One file, one honest outcome:
+#   installed  it was absent; it is now remit's payload
+#   updated    it was exactly what remit last installed; now the new payload
+#   unchanged  it already equals the payload
+#   kept       it is the target's own, or locally edited since install —
+#              remit does not overwrite it
+#   restored   MANAGED FILES ONLY: it was remit's and someone edited it; it is
+#              the payload again. A managed file is one whose content is a
+#              mechanic remit maintains, where a stale local edit misdirects
+#              whoever reads it — so the file is remit's to keep current and
+#              the third argument says so at the call site.
+#
+# `restored` reaches only a file the manifest already records as remit's. A file
+# the target had before remit arrived has no record, is not remit's to manage,
+# and is `kept` whatever the third argument says — and whatever its BYTES say.
+# A target's own file that happens to be identical to the payload is still the
+# target's: adopting it on identity would write a manifest record for a file
+# remit never installed, and the takeover is silent until the upgrade after it,
+# when the payload moves and the file the target owns is `updated` out from
+# under them, or they edit it and get it back `restored`.
+install_file() { # $1 src-abs  $2 dst-rel  [$3 managed]
+	src=$1 dst=$2 managed=${3:-}
 	new_id=$(hash_of "$src")
 	old_id=$(manifest_id file "$dst")
 	if [ ! -e "$TGT/$dst" ]; then
@@ -201,15 +253,28 @@ install_file() { # $1 src-abs  $2 dst-rel
 		return 0
 	fi
 	cur_id=$(hash_of "$TGT/$dst")
-	if [ "$cur_id" = "$new_id" ]; then
+	# No manifest record means the file is the target's own, and this is where
+	# that is decided — BEFORE the bytes are compared, because for a managed
+	# file the comparison is a trap. An unmanaged file may be adopted on
+	# identity: the worst that follows is that remit keeps current a file the
+	# target could not tell from remit's own, and a later local edit is still
+	# `kept`. A managed file may not, because `restored` follows the record: one
+	# adoption and every edit the target makes afterwards is overwritten by an
+	# installer that was never given the file.
+	if [ -z "$old_id" ] && { [ -n "$managed" ] || [ "$cur_id" != "$new_id" ]; }; then
+		report kept "$dst" "already present and not remit's; left alone"
+	elif [ "$cur_id" = "$new_id" ]; then
 		record file "$new_id" "$dst"
 		report unchanged "$dst"
-	elif [ -z "$old_id" ]; then
-		report kept "$dst" "already present and not remit's; left alone"
 	elif [ "$cur_id" = "$old_id" ]; then
 		cp "$src" "$TGT/$dst"
 		record file "$new_id" "$dst"
 		report updated "$dst"
+		TOUCHED="$TOUCHED $dst"
+	elif [ -n "$managed" ]; then
+		cp "$src" "$TGT/$dst"
+		record file "$new_id" "$dst"
+		report restored "$dst" "edited since install; this file is remit's and is put back"
 		TOUCHED="$TOUCHED $dst"
 	else
 		record file "$old_id" "$dst"
@@ -295,6 +360,9 @@ for s in $RETIRED_SKILLS; do
 		retire_file "$loc/skills/$s/SKILL.md" "replaced by the five remit-* conventions"
 	done
 done
+
+# --- CONTRIBUTING.md: the one managed file ------------------------------------
+install_file "$CONTRIB_SRC" "CONTRIBUTING.md" managed
 
 # --- AGENTS.md: a managed, marker-delimited section — additive, never a clobber
 AGENTS="$TGT/AGENTS.md"

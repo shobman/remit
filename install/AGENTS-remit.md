@@ -37,6 +37,11 @@ context the script raises through the other mechanic, `bin/remit-invoke`: one pr
 one briefing, one worktree, its text back on stdout. That is the only place in remit a model is
 started, and no step of an item's work ever happens in the conversation you are in.
 
+`report new` is the intake for an observation from outside this repository. What a contributor
+sends, and what a maintainer does with it, is stated once — in `CONTRIBUTING.md` at the repository
+root, which the installer lays down and keeps current. Point a contributor there, and point there
+yourself: do not restate it here or anywhere else, and leave the file to the installer.
+
 Run both through a POSIX shell — on Windows that is Git Bash's `sh`, not PowerShell. `bin/remit`
 runs only from the repository's primary worktree and refuses anywhere else. Never edit the
 `**Attention:**`, `**Stage:**` or `**Until:**` lines of a brief by hand, nor its `## Phases`

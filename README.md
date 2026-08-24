@@ -9,7 +9,7 @@ stay with the person who owns their consequences. It is two POSIX scripts and fi
 no service, no database, no daemon. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.2.3. Early, and in use.**
+**Version 0.2.4. Early, and in use.**
 
 ## One piece of work, start to finish
 
@@ -112,11 +112,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.2.3` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.2.4` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.2.3 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.2.4 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:
@@ -129,7 +129,8 @@ The target argument must point inside your repository's primary worktree; the in
 linked worktree. Do not hand-install remit: the installer is the fixed, inspectable operation, and
 it requires only Git and a POSIX shell. On Windows, use Git Bash's `sh`, not PowerShell. Re-run
 `install.sh` to upgrade — it updates content that still matches the prior install, preserves local
-edits, reports each result, commits touched paths in the target repository, and never pushes them.
+edits save in the one file it manages below, reports each result, commits touched paths in the
+target repository, and never pushes them.
 
 The installer adds:
 
@@ -139,6 +140,7 @@ The installer adds:
 | `bin/remit-invoke` | Raises a fresh context in a named harness and returns its text. |
 | `.claude/skills/`, `.agents/skills/`, `.pi/skills/` | The five conventions, in the discovery path each harness reads — see [Use your harness](#use-your-harness). |
 | `AGENTS.md` | One marker-delimited, shared section, without replacing existing content. |
+| `CONTRIBUTING.md` | How this repository takes a contribution — the file states that, and nothing here repeats it. The one file remit manages: a local edit to it is restored on the next upgrade, while a `CONTRIBUTING.md` the repository already had is not remit's and is kept. |
 | `<git>/hooks/pre-push` | The guard, when no hook exists; on re-run remit's own hook is updated or reported unchanged, and any other hook or custom hooks path is kept and reported. |
 | `.remit/hooks/no-agent-tool.sh` | The agent-tool guard: one script, registered by every harness here that has a pre-tool hook. |
 | `.github/hooks/remit-no-agent-tool.json` | Copilot CLI's registration of that guard. |
@@ -227,6 +229,15 @@ config` lists the 27 ids its configuration accepts: `claude-sonnet-5`, `claude-f
 Those lists were read on 21 August 2026. What is available to you depends on your subscription, and
 vendors change their offerings often. remit maintains no compatibility matrix, so check the sources
 above for what your subscription includes today.
+
+## Take a contribution
+
+A repository running remit accepts contributions the way remit does: the installer lays down
+`CONTRIBUTING.md` and keeps it current, and that file — not this page — is where the route is
+stated, including which of your own gate files it sends a contributor to read.
+
+remit takes its own contributions that way. Read the file it installs:
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Know the boundary
 
