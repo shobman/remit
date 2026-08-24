@@ -204,7 +204,16 @@
 #                            coordinator's.
 #   HOME                     a SCRATCH directory made for this raise and removed
 #                            after it — never the practitioner's home.
-#   TMPDIR, TEMP, TMP        a scratch directory inside this raise's run log.
+#   TMPDIR, TEMP, TMP        THE ONE WRITABLE SCRATCH ROOT this seat gets: a
+#                            directory INSIDE THE RUN'S WORKTREE, made before
+#                            the context starts and removed when it exits. The
+#                            worktree is the one place every sandbox we raise
+#                            into can write; a temp path under the
+#                            coordinator's own profile is not, because a
+#                            sandboxed seat runs as another account and is
+#                            refused there. All three names carry the same
+#                            directory so that a POSIX tool, a Windows one and
+#                            `mktemp` all land in it.
 #   LANG, LC_ALL, LC_CTYPE   locale, where the coordinator has them.
 #   SYSTEMROOT, COMSPEC,     Windows needs these to start a process at all.
 #   PATHEXT
@@ -1010,8 +1019,107 @@ ENVLIST="$RUNDIR/envlist"
 
 REAL_HOME=${HOME:-}
 SCRUB_HOME="$RUNDIR/home"
-SCRUB_TMP="$RUNDIR/tmp"
-mkdir -p "$SCRUB_HOME" "$SCRUB_TMP" || die "cannot create the scratch home under $RUNDIR"
+mkdir -p "$SCRUB_HOME" || die "cannot create the scratch home under $RUNDIR"
+
+# THE ONE WRITABLE SCRATCH ROOT, and why it is in the worktree rather than beside
+# the run log. A sandboxed seat — codex on Windows runs as a dedicated local
+# account under a restricted token — can write to its WORKSPACE and to its OWN
+# temp, and to nothing else. The run log lives under the COORDINATOR's temp,
+# which on this host is a directory inside the practitioner's user profile: the
+# seat's account is refused there, so every fixture that tried to land in it
+# failed on write before it tested anything. The worktree is the one directory
+# that is writable for every seat on every harness, so that is where the scratch
+# goes, and `TMPDIR`, `TEMP` and `TMP` all name it.
+#
+# It is APPARATUS, not delivery. It is emptied before the context starts, so a
+# crashed earlier run leaves nothing for this one to trip on, and `remove_scratch`
+# below takes it away before the tree is handed back — a tree the seam is about
+# to stage must carry what the context AUTHORED and nothing it merely scribbled.
+#
+# The NAME is short on purpose. A worktree path is already long, Windows still
+# refuses a path over 260 characters in most tools, and everything a seat writes
+# now hangs off this one — a clone of the repository, a throwaway repository with
+# a `.git/objects/…` under it. Every character spent here is spent again on every
+# file below it.
+SCRUB_TMP="$WT/.remit-tmp"
+rm -rf "$SCRUB_TMP"
+mkdir -p "$SCRUB_TMP" ||
+	die "cannot create the scratch root at $SCRUB_TMP — a seat with nowhere to write cannot run anything, and this script will not raise one that cannot"
+
+# AND IT IGNORES ITSELF, for the run that never reaches the removal below.
+#
+# `remove_scratch` takes this directory away on every path this script controls,
+# and the trap takes it on an interrupt or a terminate. NEITHER reaches a run
+# that is KILLED — a signal no shell can trap, a harness reaping a long job, a
+# machine going down mid-raise. What is left then is a directory of the seat's
+# scratch sitting at the top of a worktree the seam stages wholesale, and what
+# it holds is a clone of the repository and throwaway repositories: a delivery
+# carrying that is the residue this work exists to end, arriving by the one door
+# the cleanup cannot close.
+#
+# So the directory ignores itself. A `.gitignore` whose single pattern is `*`
+# matches every entry beneath it INCLUDING that file, so git reports nothing
+# here in `status`, counts nothing here in `ls-files --others`, and stages
+# nothing here on `add -A` — while a repository CLONED into this directory is
+# untouched by it, because a `.gitignore` above a repository's own top level is
+# not one of the files that repository reads.
+#
+# It is written here rather than checked in anywhere because the worktree is the
+# TARGET repository's, not remit's: a line in remit's own `.gitignore` would
+# protect remit's repository and no other, and this mechanism is installed into
+# repositories whose ignore file remit does not write. The one that travels is
+# the one the script makes at the moment it makes the directory.
+printf '*\n' >"$SCRUB_TMP/.gitignore" ||
+	die "cannot write $SCRUB_TMP/.gitignore — without it a run killed before its cleanup leaves the seat's scratch where the seam would stage it, and this script will not raise a seat it cannot keep out of a delivery"
+
+# The apparatus this raise put on disk, taken away in one place because it is
+# taken away from more than one. Returns non-zero if the scratch root survived.
+remove_scratch() {
+	rm -rf "$SCRUB_HOME"
+	rm -rf "$SCRUB_TMP"
+	[ ! -e "$SCRUB_TMP" ]
+} # end remove_scratch
+
+# WHAT A SCRATCH ROOT THAT WILL NOT GO MEANS, in the two places it can happen.
+# The condition is the same one — `remove_scratch` reporting the directory
+# survived — and what it COSTS is not, so the answer is not either. Both are
+# written here, next to each other and to the removal itself, because a reader
+# deciding whether a difference is deliberate should not have to hold two ends of
+# a two-thousand-line script in mind to see that it is.
+#
+# Neither can be produced by this suite on both of its platforms — it needs a
+# directory writable when a run starts and unwritable when it ends, and Git Bash
+# hands the owner the write back through the ACL a POSIX `chmod` maps to. So each
+# is a FUNCTION, ending in the marker `t/unit/remit-invoke.sh` lifts it out on,
+# and what is tested there is the decision each makes when it is told the root
+# survived — which is the whole of what this script contributes to that outcome.
+
+# AT THE END OF A RUN THAT FINISHED, it is a REFUSAL and not a warning. The
+# directory sits inside the worktree the seam is about to stage, and a delivery
+# carrying a context's fixtures is worse than a raise that reports it could not
+# finish. What survived is named, so it can be removed by hand.
+scratch_gone_or_refuse() { # -> 0 when the root went; does not return when it did not
+	remove_scratch && return 0
+	die "could not remove the scratch root at $SCRUB_TMP — refusing to hand back a tree that still carries what the context scribbled rather than what it authored. The run itself finished and what it said is in $RUNDIR"
+} # end scratch_gone_or_refuse
+
+# ON A PATH THAT IS ALREADY REFUSING, it is REPORTED and the refusal already in
+# flight is what the caller exits with. Turning it into a `die` there would swap
+# a raise's own exit code — the one that says WHY the raise was refused — for
+# this script's generic 2, and the reason the seat was never raised would be lost
+# behind the housekeeping that followed it. So it is said, loudly, and the caller
+# goes on to exit with what it came to exit with.
+scratch_gone_or_warn() { # -> always 0; says so when the root survived
+	remove_scratch && return 0
+	say "the scratch root at $SCRUB_TMP could not be removed — remove it before this tree is staged"
+	return 0
+} # end scratch_gone_or_warn
+
+# And on any path out that never reaches it — a refusal composing the briefing,
+# an interrupt, a signal. The run log stays, because it IS the record; the
+# scratch home and the scratch root go, because they are apparatus, and the
+# scratch root sits in a tree somebody is about to read.
+trap 'rm -rf "$SCRUB_HOME" "$SCRUB_TMP"' EXIT INT TERM
 
 # The allow-list, written down before anything runs. This file IS the record of
 # what crossed into the context, and it is what the provenance quotes: a scrub
@@ -1081,12 +1189,37 @@ role_limits() {
 		printf '  expectation formed after reading is not an expectation.\n'
 		printf -- '- You NEVER repair, amend, accept, merge or close. A must-fix goes back to a\n'
 		printf '  fresh builder; that is the mechanism'\''s, not yours.\n'
-		printf -- '- You NEVER run `git` or `gh`, and you NEVER run `bin/remit` or\n'
-		printf '  `bin/remit-invoke`. Read-only git — `git show`, `git diff`, `git log` — is\n'
-		printf '  reading, and is fine.\n'
+		printf -- '- You NEVER run `bin/remit` or `bin/remit-invoke`, and you never run `git`\n'
+		printf '  or `gh` to CHANGE anything — nothing that writes, stages, pushes,\n'
+		printf '  comments, merges or closes. READING is not that and is fine: `git show`,\n'
+		printf '  `git diff`, `git log`, and `gh pr checks` and `gh run view` for the checks\n'
+		printf '  the rubrics below make you rest on. A judgement cannot rest on a check\n'
+		printf '  nobody is allowed to read.\n'
 		printf -- '- A finding is a FACT with its evidence, never a task. You do not classify\n'
 		printf '  findings by consequence: only a rubric below can accept a finding or make\n'
 		printf '  one a must-fix, and every such use cites the rubric and the evidence.\n'
+		printf -- '- HOW YOU JUDGE — what you may re-execute and what stands as the executing\n'
+		printf '  proof — IS THE RUBRICS BELOW, and this briefing does not say it a second\n'
+		printf '  time. There is one copy of that law and the rubric file is it; a copy\n'
+		printf '  here would be one more thing to keep true and the first to go stale.\n'
+		printf '  Read it there and judge by it.\n'
+		printf -- '- FINDING THE CHECK a rubric points you at: `.github/workflows/` is where\n'
+		printf '  the checks are defined and where each job is named for the shell and the\n'
+		printf '  platform it runs — including the platform your sandbox cannot reach,\n'
+		printf '  which from a Windows host is dash on Linux. Find the job for the platform\n'
+		printf '  in question, read its result, and cite it by the name it reports. A proof\n'
+		printf '  you can neither read a finished check for nor find kept output of is\n'
+		printf '  reported as UNRUN — not as passed, and not as somebody else'\''s word\n'
+		printf '  that it passed.\n'
+		printf -- '- EVERYTHING YOU WRITE GOES IN ONE PLACE: `%s`, which is what `TMPDIR`,\n' "$SCRUB_TMP"
+		printf '  `TEMP` and `TMP` name in your environment. Your clone of this repository,\n'
+		printf '  any fixture, any scratch file. It is inside the worktree because that is\n'
+		printf '  the one directory your sandbox can write to, and it is removed when this\n'
+		printf '  run ends, so nothing you make is left behind. If you ever find you cannot\n'
+		printf '  write there, say so in your answer and stop — do NOT make a directory of\n'
+		printf '  your own beside the repository to get past it. A judgement that had to\n'
+		printf '  litter the practitioner'\''s checkout to reach itself is a finding about\n'
+		printf '  this mechanism, and reporting it is worth more than the judgement.\n'
 		;;
 	research)
 		printf 'You are a RESEARCHER. You establish what is true and you change nothing.\n\n'
@@ -1218,6 +1351,7 @@ say "  worktree     : $WT"
 say "  briefing     : $BRIEF"
 say "  run log      : $RUNDIR"
 say "  environment  : env -i with $(awk 'END { print NR }' "$ENVLIST") allow-listed variables and nothing else; HOME is the scratch directory $SCRUB_HOME"
+say "  scratch      : $SCRUB_TMP (TMPDIR, TEMP and TMP) — the seat's one writable scratch root, removed with the run"
 say "  registry     : $SETTINGS ($REGISTRY_HASH), seat $SEAT_KIND"
 if [ "$HARNESS" = devin ]; then
 	say "  devin binary : $DEVIN"
@@ -1445,6 +1579,23 @@ copilot_remove_containment() { # $1 the context's tree
 	[ "$COPILOT_GITHUBDIR_MADE" = yes ] && rmdir "$1/.github" 2>/dev/null
 	return 0
 } # end copilot_remove_containment
+
+# THE ONE WAY OUT WHEN THE CANARY REFUSES THE RAISE. No context ran, so there is
+# nothing to capture and nothing to report about one; what is left is a tree
+# carrying this script's own apparatus — the containment it wrote, and the
+# scratch root it made — and neither may outlive the raise that made it. Exit 7
+# is the canary's own code and is why the caller stops here: the reason the seat
+# was never raised is in it, and `copilot_canary` has already said the rest.
+#
+# It is a function so that the whole path can be run in one piece by
+# `t/unit/copilot-containment.sh`, which cannot reach it through the CLI: making
+# a real canary fail needs the copilot CLI, an account and a billed run, and the
+# offline tier may have none of the three.
+copilot_canary_refused() { # $1 the context's tree — does not return
+	copilot_remove_containment "$1"
+	scratch_gone_or_warn
+	exit 7
+} # end copilot_canary_refused
 
 # Reading a copilot run out of its JSONL envelope. `final` is the reason this is
 # read at all: text-mode stdout glues the tool renderings to the answer with no
@@ -1786,9 +1937,7 @@ copilot)
 	cp "$COPILOT_HOOK_JSON" "$RUNDIR/copilot-remit-no-git.json"
 	cp "$COPILOT_HOOK_SH" "$RUNDIR/copilot-remit-no-git.sh"
 	if ! copilot_canary "$WT"; then
-		copilot_remove_containment "$WT"
-		rm -rf "$SCRUB_HOME"
-		exit 7
+		copilot_canary_refused "$WT"
 	fi
 	set -- "$@" timeout "$COPILOT_TIMEOUT" "$COPILOT" \
 		--output-format json --allow-all-tools --no-ask-user --disable-builtin-mcps \
@@ -1827,8 +1976,10 @@ native)
 	;;
 esac
 
-# The scratch home is apparatus for the run and is gone the moment the run is.
-rm -rf "$SCRUB_HOME"
+# The scratch home and the scratch root are apparatus for the run and are gone
+# the moment the run is. This run FINISHED, so a root that will not go is a
+# refusal — stated once, where the two answers to that condition sit together.
+scratch_gone_or_refuse
 
 if [ "$HARNESS" != native ]; then
 	say "the harness process exited with code $HARNESS_EXIT — that is completion, not success."
