@@ -95,10 +95,12 @@ returns at once.
 ## When he opens a further part of an item already admitted
 
 An admitted outcome may turn out to take more than one part. Opening one is his, exactly as
-admitting the item was. Write the phase file beside the brief — `<phase>.md`, carrying that
-part's own outcome, boundary, constraints and proof inside the item's — and point the brief's
-`**Current phase:**` line at it. Never touch the `**Attention:**`, `**Stage:**` or `**Until:**`
-lines: those are `bin/remit`'s. Commit both together.
+admitting the item was. A phase is a file beside the brief and nothing else — `phase-<n>.md`, the
+next number the item does not already have, carrying that part's own outcome, boundary,
+constraints and proof inside the item's. Write it and commit it; the script does the rest, and it
+does the rest whether or not something is running on that item. Never write in the brief
+yourself: the `**Attention:**`, `**Stage:**` and `**Until:**` lines and the `## Phases`
+section are all `bin/remit`'s.
 
 A part that changes the item's own outcome or boundary is not a part; take his word on whether
 that is an amendment to the brief or a separate item.

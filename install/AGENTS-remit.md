@@ -17,6 +17,7 @@ you do not reimplement it:
 sh "$(git rev-parse --show-toplevel)/bin/remit" new <slug> [--until <stop>] [--park]
 sh "$(git rev-parse --show-toplevel)/bin/remit" resume <slug> [--until <stop> [--park]]
 sh "$(git rev-parse --show-toplevel)/bin/remit" park <slug>
+sh "$(git rev-parse --show-toplevel)/bin/remit" kill <slug>       # end the chain running on this item
 sh "$(git rev-parse --show-toplevel)/bin/remit" close <slug>      # delivery links on stdin, or empty
 sh "$(git rev-parse --show-toplevel)/bin/remit" list [--parked]
 sh "$(git rev-parse --show-toplevel)/bin/remit" report new|close <name>
@@ -38,7 +39,8 @@ started, and no step of an item's work ever happens in the conversation you are 
 
 Run both through a POSIX shell — on Windows that is Git Bash's `sh`, not PowerShell. `bin/remit`
 runs only from the repository's primary worktree and refuses anywhere else. Never edit the
-`**Attention:**`, `**Stage:**` or `**Until:**` lines of a brief by hand, never write in
+`**Attention:**`, `**Stage:**` or `**Until:**` lines of a brief by hand, nor its `## Phases`
+section — every one of those is the script's — never write in
 `.remit/rules/` outside a retro, and never move or delete an item's folder yourself: `bin/remit`
 commits each change and pushes when a remote is configured, and its printed result is the truth
 of what happened. **Report that result verbatim in substance.** Exit 3 means committed locally

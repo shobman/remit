@@ -34,7 +34,7 @@ word. An unreadable item is something he needs to know about, not something to q
 Rehydration is reading, not reconstruction. Read these and nothing else:
 
 1. the item — `.remit/work-items/<slug>/brief.md` with its header, `log.md` whole, and the phase
-   file its `**Current phase:**` line names where it has one;
+   file its `**Current phase:**` pointer names where it has one;
 2. the authoritative content the brief links to — the linked files, or a URL if this harness can
    actually reach one;
 3. the current code, and the history and pull requests that put it there.

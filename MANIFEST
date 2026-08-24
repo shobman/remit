@@ -1,21 +1,21 @@
 remit dist manifest v1
-version 0.2.2
+version 0.2.3
 100644 c23c1d1c810eea733d6b21adda0c00ccffc41684 LICENSE
 100644 afd061a39ee0052f85ee91c58dee153a569e076b MANIFESTO.md
-100644 dce1e604fa88888f5f23c10f62834e7a96bf8ad0 README.md
-100644 ee1372d33a29e27945406f0527f8af8e6ee119c9 VERSION
-100755 ba90b605ff24ec32c0e5f7bc0c506300f9d5a56d bin/remit
+100644 6cef7ef459652fa49c9a23c559412cb2f4f41e32 README.md
+100644 7179039691ce07a214e7a815893fee97a97b1422 VERSION
+100755 2413471f0f47bcecb73de5d2536ce3c71d8cdbf0 bin/remit
 100644 4efcb447791dc91255a28871abf11b5cb536c707 bin/remit-invoke
-100644 0857d7d7fadd5d0620d068d31d1d006618aa5164 docs/index.html
-100755 b2a4b32d85c1065db429ef5bc9c3c6d5c107f6bf get-remit.sh
+100644 6292a4b4103be9e636370a84980f42d8f574b380 docs/index.html
+100755 bc9e21d88ee100557c1d18f7c119d101e96d260e get-remit.sh
 100644 45b2244af531ac49b6cde0670a99b7a1bf8bae73 install.sh
-100644 6730d27a36d9b81c3445fa309fb93b547f61181f install/AGENTS-remit.md
+100644 63f697bf112f8d22ecae0949fed44d3be87cb7b6 install/AGENTS-remit.md
 100644 9622fbf1dd5bbd5b20206341410f01f56a63d919 install/hooks/claude-settings.json
 100644 36cea88b10ec46a8553e40718cb7e5fb24525a3a install/hooks/copilot-no-agent-tool.json
 100644 38c52e0c5bdcd6bc8053122a2a56ecb97996d766 install/hooks/no-agent-tool.sh
 100644 4dc391b362fd29a9bde98e926b610a2600c4d122 install/hooks/pre-push
 100644 5a7d270ca9d9a25fbacdf3e8ed78eb6e365e96d7 install/skills/remit-close/SKILL.md
-100644 d52812629686bb56ed02b4601c6dd165889b9ad6 install/skills/remit-new/SKILL.md
-100644 7e2dd93405ff095a7a197b1c223d6e5010e792c5 install/skills/remit-resume/SKILL.md
+100644 d11b54834de20c0a3597d97d6847457fb08f37f6 install/skills/remit-new/SKILL.md
+100644 da577c68e143816f2d1607293988674d5f2750a9 install/skills/remit-resume/SKILL.md
 100644 51c996d2342d4911beaea6da90ca485fbd180cca install/skills/remit-retro/SKILL.md
-100644 a56aeb25b76e460a62c3bd4641624d4b6a2cc45c install/skills/remit-status/SKILL.md
+100644 371fc7e562537d2e1439d28efc5f9fcd7a1a1ad1 install/skills/remit-status/SKILL.md
