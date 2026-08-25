@@ -1,0 +1,22 @@
+remit dist manifest v1
+version 0.2.11
+100644 dba65a5df3bb3f082561af32324cc03b4d0126d5 CONTRIBUTING.md
+100644 c23c1d1c810eea733d6b21adda0c00ccffc41684 LICENSE
+100644 afd061a39ee0052f85ee91c58dee153a569e076b MANIFESTO.md
+100644 4807537765df1f78870498e855f365ea2f2e824c README.md
+100644 d3b5ba4bfc3a30c1777e71f0f7cc4be5bc4bd24c VERSION
+100755 b512fb319a7a37e75d66b60e76ae8ebfa0346492 bin/remit
+100755 c4bfaff4cc4eb36d0b169e6ef2ff89d91e3da74c bin/remit-invoke
+100644 f3e9845a47419bacc43b46e0a78a491131d69a7b docs/index.html
+100755 19edde6e60d7d68f68d45672a4dae1a2edc680fe get-remit.sh
+100755 8fc7ce69a2a3f87ce45d4ce35ab5893ca753b8fc install.sh
+100644 7502c22e675560197138842a9cce6c3a715d8c9a install/AGENTS-remit.md
+100644 a221767792212f2b7851b62032823a0b10bb077e install/hooks/claude-settings.json
+100644 36cea88b10ec46a8553e40718cb7e5fb24525a3a install/hooks/copilot-no-agent-tool.json
+100644 38c52e0c5bdcd6bc8053122a2a56ecb97996d766 install/hooks/no-agent-tool.sh
+100755 4dc391b362fd29a9bde98e926b610a2600c4d122 install/hooks/pre-push
+100644 5a7d270ca9d9a25fbacdf3e8ed78eb6e365e96d7 install/skills/remit-close/SKILL.md
+100644 d11b54834de20c0a3597d97d6847457fb08f37f6 install/skills/remit-new/SKILL.md
+100644 36022fe72063f58966e3be3026c26fc0843fe767 install/skills/remit-resume/SKILL.md
+100644 51c996d2342d4911beaea6da90ca485fbd180cca install/skills/remit-retro/SKILL.md
+100644 b98e3e2a902d170b083f4793eeb8560bdb30b7cb install/skills/remit-status/SKILL.md

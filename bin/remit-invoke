@@ -1,0 +1,2375 @@
+#!/bin/sh
+# remit-invoke — the one AI seam: a fresh context, in a named harness, with a
+# brief, in a worktree, returning its text.
+#
+#   sh bin/remit-invoke <role> <slug> <worktree>
+#       [--harness <claude|codex|pi|devin|copilot|native>] [--model <id>]
+#       [--effort <level>] [--provider <name>] [--sandbox <mode>]
+#       [--allowed-tools <spec>] [--exclude-tools <spec>]
+#       [--final-message <file>]
+#
+#       role in research | build | evaluate | repair-brief
+#
+#   sh bin/remit-invoke --probe-host
+#       reads this host and prints what is on it; raises nothing
+#
+# This is the primitive `bin/remit` calls at every arrow of the chain that needs
+# a model, and it is the only place in remit that starts one. The harness
+# adapters, the model verification and the containment here came from the
+# dispatch wrapper remit used to ship, which bundled invocation with delivery;
+# the invocation half is here, the delivery half is `bin/remit`'s, and the
+# wrapper itself is gone.
+#
+# ==============================================================================
+# THE CONTRACT — the seam's other end is `bin/remit`'s header, which states the
+# environment it hands in and the text it reads back. It is stated there and NOT
+# restated here; what follows is what THIS end owes.
+# ==============================================================================
+#
+#   stdout      the context's final text, and NOTHING else. Every word this
+#               script says about what it did goes to stderr, because stdout is
+#               the seam's payload and `bin/remit` writes it into the record.
+#   stderr      this script's own narration and whatever the harness said —
+#               including the HEARTBEAT below, which is the only thing this
+#               script says while the CLI is running.
+#   provenance  `key: value` lines written to the file named by
+#               `REMIT_PROVENANCE`. The keys are below.
+#   progress    the run directory's path, written to the file named by
+#               `REMIT_PROGRESS` the moment that directory exists — before
+#               anything is raised. See THE RUN IS VISIBLE WHILE IT RUNS below.
+#   exit 0      the context ran. Exit is COMPLETION, not success.
+#   exit 2      usage; a registry that is absent, malformed, or does not carry
+#               the seat asked for; a registered seat that is not available on
+#               this host; an authority that could not be read. NOTHING was
+#               invoked and NOTHING was billed.
+#   exit 5      the harness CLI itself exited non-zero.
+#   exit 6      the run's own precondition failed — a confirmed downgrade of the
+#               containment asked for (codex's sandbox, devin's permission mode).
+#   exit 7      the containment canary failed: copilot's containment did not
+#               demonstrably hold, so no context was raised.
+#
+# ==============================================================================
+# THE REGISTRY — `.remit/settings.json`, AND WHAT IT DECIDES
+# ==============================================================================
+#
+# Every seat this script raises comes from a registry the practitioner wrote.
+# Ruled 2026-08-23: "the specific sub-agents being reached for must match what
+# are registered and available … if codex is uninstalled and my default
+# evaluator is codex, the bin/sh should fail — end of story." There is no
+# standing default here any more, and there is no fallback: `roles.md` and the
+# Sonnet substitution both retired with that ruling.
+#
+# THE FILE. `REMIT_SETTINGS`, or `<repo root of the current directory>/.remit/
+# settings.json` when that is unset. Absent, unreadable or empty REFUSES every
+# raise (exit 2). It is JSON and it is read with `jq`; without `jq` this script
+# refuses rather than guessing at a parse.
+#
+#   {
+#     "harnesses": {
+#       "<claude|codex|pi|devin|copilot>": {
+#         "cli":    "<the command on the host>",
+#         "models": ["<id>", …]                one or more, exact ids
+#       }, …
+#     },
+#     "defaults": {
+#       "<research|build|evaluate|repair-brief>": {
+#         "harness": "<a key of harnesses>",
+#         "model":   "<one of that harness's models>"
+#       }                                       all four roles, every one of them
+#     }
+#   }
+#
+# Nothing else is allowed at either level. A harness not listed is UNREGISTERED;
+# a model not listed for its harness is UNREGISTERED; a role with no `defaults`
+# entry has no seat. THE SHAPE IS CHECKED ON READ and a malformed file refuses
+# EVERYTHING rather than half-applying: a JSON syntax error is reported with
+# `jq`'s own message, which names the line; a shape error names the key. This is
+# `rubrics_check`'s rule in `bin/remit`, applied to the registry.
+#
+# `defaults.draft` is refused BY NAME. The role retired on 2026-08-23 and a
+# registry that still seats it is told why rather than left guessing.
+#
+# RESOLUTION, STRICT. Flags override the defaults, and an override is checked
+# against the registry exactly as a default is:
+#
+#   --harness H --model M    H must be registered and M registered for H.
+#   --harness H              H must be registered; the model is that role's
+#                            default when its default sits on H, and otherwise
+#                            there is nothing registered saying which model this
+#                            role takes on H, so the raise is refused.
+#   --model M                the harness is the role's default when that default
+#                            registers M; failing that, the one registered
+#                            harness that carries M. Registered by none refuses
+#                            as unregistered, by more than one refuses as
+#                            ambiguous and names them. This is the practitioner's
+#                            "use sol" case: it resolves when sol is registered
+#                            and fails loudly when it is not.
+#   neither                  the role's `defaults` entry, whole.
+#
+# Anything unregistered is exit 2, `not registered in .remit/settings.json`.
+#
+# THEN AVAILABILITY, and it is a separate question with a separate answer. A
+# registered seat whose CLI is not on this host, whose CLI is not authenticated
+# where the CLI reports authentication, or whose model id the CLI rejects where
+# the CLI carries a catalogue, is exit 2, `registered but not available: <why>`.
+# NEVER A FALLBACK, NEVER A SUBSTITUTE — including for the evaluator, whose seat
+# being absent now means the evaluation does not run at all.
+#
+# `--harness native` is the one raise that resolves no seat, because it raises
+# nothing: it records a context the CALLING harness already had, whose text is on
+# disk, and whose model the caller names. It still needs a registry it can read —
+# "a malformed registry refuses everything" has no exception for the raise that
+# raises nothing — and its `seat:` is `override`.
+#
+# MODEL VERIFICATION is done through the channel each CLI actually has, and
+# where a CLI has none this script says so rather than claiming a check it did
+# not make:
+#
+#   pi       `pi --list-models` is read and the exact id must be in it. Pi
+#            accepts an unknown id SILENTLY and answers with something else, so
+#            an id that is not in the catalogue refuses the raise (exit 2). This
+#            is the check lifted from the wrapper, unchanged.
+#   devin    the CLI validates the id itself, pre-flight, in about a second and
+#            before any ACU is spent, and prints the catalogue when it refuses
+#            (`.remit/.archive/devin-first-class/probe-results.md`, item 11). No
+#            catalogue call is made here; the recorded reason says which.
+#   copilot  an unknown model id and an unsupported effort are each refused
+#            pre-flight by the CLI, in seconds, with nothing billed
+#            (`.remit/copilot-first-class/probe-results.md`).
+#   codex    ships NO model catalogue: `codex --help` has none and `codex doctor`
+#            reports only the model already configured. So a codex id is NOT
+#            verified before the run; what the run header reports afterwards is
+#            the model that actually served it, and that is what the provenance
+#            carries.
+#   claude   ships no model catalogue either, and the same applies.
+#
+# `model-check:` in the provenance says which of those applied, every time. An
+# unverified id is never reported as a verified one.
+#
+# ==============================================================================
+# THE PROVENANCE SIDECAR
+# ==============================================================================
+#
+# Written to `REMIT_PROVENANCE`, one `key: value` per line. `bin/remit` reads
+# `session:`, `model:` and `harness:`; everything else is for the record and for
+# a reader, and an unknown key is ignored rather than being an error.
+#
+#   role:            the role this raise was for
+#   harness:         claude | codex | pi | devin | copilot | native
+#   seat:            `registered` when the registry's own `defaults` entry for
+#                    this role decided it, `override` when a `--harness` or
+#                    `--model` on the command line did. An override is checked
+#                    against the registry too, so both words mean registered —
+#                    they differ only in which line of it was read.
+#   registry:        the digest of `.remit/settings.json` AS READ at raise time,
+#                    with the algorithm that made it, so a record can be held
+#                    against the registry it was raised under
+#   model:           THE MODEL AS SERVED where the run reports it. Where no
+#                    channel reports it, the id that was ASKED FOR, with
+#                    ` (asked)` on the end and a `model-note:` saying which
+#                    channel carried nothing. Never a guess either way.
+#   model-check:     how the id was verified before the run, or why it was not
+#   session:         the run id the harness reports, or absent
+#   boundary:        `<user|container|none> — attested by <header|export|disclosed>`
+#                    as the read-boundary design's R5 fixes it:
+#                      codex     user — attested by header      (its run header's
+#                                sandbox line is read back and must agree)
+#                      devin     none — attested by export      (Windows outside
+#                                WSL: its OS sandbox is unsupported and is never
+#                                passed; the export is read back where present)
+#                      claude    none — attested by disclosed
+#                      pi        none — attested by disclosed
+#                      copilot   none — attested by disclosed
+#                      native    none — attested by disclosed
+#                    THIS PHASE BUILDS NO CANARY AND NO CONTAINER. `container`
+#                    and the boundary canary are the read-boundary item's build;
+#                    nothing here ever writes `attested by canary`.
+#   boundary-note:   what the line above does not establish
+#   effort:          the reasoning effort passed, where the CLI has that control
+#   scrub:           the names on the environment allow-list, and nothing else
+#   run-log:         where the run's own output was kept
+#   cost:            what the harness reported this run cost, where it reports it
+#   harness-version: where the CLI reports one
+#   sandbox:         codex's run-header sandbox line, verbatim
+#   permission-mode: devin's permission mode as the export reports it
+#   note:            anything the run could not be read back for
+#
+# ==============================================================================
+# THE ENVIRONMENT — WHAT IS SCRUBBED, WHAT IS PASSED, AND WHAT THAT CANNOT DO
+# ==============================================================================
+#
+# Every context, for every role, on every harness, is started with `env -i` and
+# an ALLOW-LIST. Nothing else crosses. This is the one rule that holds even
+# where the boundary is `none`, because it is remit's own process doing the
+# launch (the read-boundary design's R3).
+#
+# What crosses, and why:
+#
+#   PATH                     a context needs its tools. Passed as the
+#                            coordinator's.
+#   HOME                     a SCRATCH directory made for this raise and removed
+#                            after it — never the practitioner's home.
+#   TMPDIR, TEMP, TMP        THE ONE WRITABLE SCRATCH ROOT this seat gets: a
+#                            directory INSIDE THE RUN'S WORKTREE, made before
+#                            the context starts and removed when it exits. The
+#                            worktree is the one place every sandbox we raise
+#                            into can write; a temp path under the
+#                            coordinator's own profile is not, because a
+#                            sandboxed seat runs as another account and is
+#                            refused there. All three names carry the same
+#                            directory so that a POSIX tool, a Windows one and
+#                            `mktemp` all land in it.
+#   LANG, LC_ALL, LC_CTYPE   locale, where the coordinator has them.
+#   SYSTEMROOT, COMSPEC,     Windows needs these to start a process at all.
+#   PATHEXT, SYSTEMDRIVE     SYSTEMDRIVE earns its place by an incident rather
+#                            than by theory: without it a raised Windows CLI
+#                            resolved a shell path against an undefined
+#                            variable and created a literal, unexpanded
+#                            `%SystemDrive%/ProgramData/...` tree in the
+#                            worktree's CWD, which the delivery seam then
+#                            staged and committed. It is a drive letter,
+#                            never a credential, and it is the same class
+#                            as SYSTEMROOT.
+#   the harness's own        so that a CLI whose credentials and settings live in
+#   config variable          the practitioner's real home can still find them
+#                            under a scratch HOME. One per harness:
+#                              claude    CLAUDE_CONFIG_DIR  -> <real home>/.claude
+#                              codex     CODEX_HOME         -> <real home>/.codex
+#                              pi        PI_CODING_AGENT_DIR-> <real home>/.pi/agent
+#                              copilot   COPILOT_HOME       -> <real home>/.copilot
+#                              devin     APPDATA, LOCALAPPDATA (Windows) — devin
+#                                        has NO config-directory variable; its
+#                                        only override is `--config`, which
+#                                        REPLACES the user config rather than
+#                                        layering with it and drops a `-p` run
+#                                        into interactive onboarding, so the
+#                                        wrapper never passed it and neither does
+#                                        this. Its state lives under those two.
+#   GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS   copilot only. Without it repo hooks
+#                            do not load in prompt mode at all, and the
+#                            equivalent flag does NOT satisfy the gate.
+#
+# Each of those five variable names is the shipped build's own, read from its own
+# `--help` on 2026-08-23 (`CLAUDE_CONFIG_DIR` from the shipped `claude` binary,
+# which carries it 35 times; the other four are documented by their CLI).
+#
+# A CONFIG DIRECTORY IS A PATH, NOT A CREDENTIAL, and nothing else is passed:
+# no API key, no token, no `GITHUB_TOKEN`, no `ANTHROPIC_API_KEY`, no
+# `COPILOT_GITHUB_TOKEN`, no proxy credential. A context never runs git or gh —
+# the delivery seam does that, as the coordinator — so no token belongs in a
+# context's environment at all.
+#
+# WHAT THE SCRUB CANNOT DO, said rather than implied away:
+#
+#   * It cannot stop a CLI reading the practitioner's own configuration. Claude
+#     Code and Copilot keep credentials in the OS keychain or credential store
+#     and their settings under the real home; pointing their config variable at
+#     that home is exactly what lets them authenticate, and a context raised
+#     there can read whatever those files say. The scrub bounds the ENVIRONMENT.
+#     It is not a read boundary, and no line here should be read as one.
+#   * pi takes its provider credentials from environment variables
+#     (`ANTHROPIC_API_KEY`, `AWS_*`, `PI_KEY` and the rest). Those are tokens and
+#     they are NOT passed. A pi seat whose credentials live only in an exported
+#     variable will find none under this scrub; one whose credentials are stored
+#     under `PI_CODING_AGENT_DIR` will work. That is the rule doing its job
+#     rather than a defect, and which of the two holds on a given host is what
+#     the pi assertion in `t/integration/remit-invoke-live.sh` establishes.
+#   * It says nothing about what the process can READ from the filesystem. That
+#     is the boundary line above, and on this host only codex has one.
+#   * The PLATFORM adds a few names of its own that remit neither passes nor can
+#     prevent. On Git Bash, `env -i /bin/sh -c env` prints `MSYSTEM`, `WINDIR`
+#     and `SYSTEMROOT` on an environment this script emptied — the MSYS runtime
+#     injects them into every process it starts. They are paths and a platform
+#     name, never a credential, and they are named here so that reading the
+#     allow-list against a real raise does not look like a leak.
+#
+# ==============================================================================
+# THE RUN IS VISIBLE WHILE IT RUNS
+# ==============================================================================
+#
+# A raise is minutes long and this script is silent for nearly all of it: the
+# raised harness's output goes to files in the run directory, and every other
+# line here is said before the CLI starts or after it exits. Two channels exist
+# so that a caller is not blind for the duration. Neither changes what the seam
+# RETURNS — stdout is still the context's final text and nothing else, and the
+# raised context's own exploration still never crosses to the caller.
+#
+#   REMIT_PROGRESS=<path>   the run directory's path is written to that file the
+#                           moment the directory exists, before the briefing is
+#                           composed and before anything is raised. The path
+#                           itself carries this process's pid, so a watcher
+#                           cannot guess it and this is the only way to find it
+#                           in time to tail it. Written for a raise that gets as
+#                           far as making a run directory; a refusal before that
+#                           point writes nothing, because nothing ran.
+#   REMIT_HEARTBEAT=<n>     while the CLI is running, one line every <n> seconds
+#                           on this script's own stderr AND appended to
+#                           `<run directory>/progress`. Default 30; `0` silences
+#                           it. It says the role, the harness and the elapsed
+#                           seconds, and nothing about what the context is doing
+#                           — this script does not know, and the raised harness's
+#                           stderr is deliberately NOT teed through: on devin that
+#                           channel carries agent prose, and the caller never
+#                           reads a context's exploration.
+#
+# The heartbeat has two destinations because a caller may be on either of two
+# roads. Running this script directly, its stderr is the caller's; running it
+# through `bin/remit`, that stderr is captured — see that script's header, which
+# owns what it does with it — and `<run directory>/progress` is the channel that
+# survives. `REMIT_PROGRESS` is how anything finds that directory.
+#
+# What the CALLER owes when it raises this script is stated once in `AGENTS.md`,
+# under "A raised context is visible while it runs". Read it there; it is not
+# restated here.
+#
+# ==============================================================================
+# WHAT EACH ROLE IS TOLD
+# ==============================================================================
+#
+# The briefing this script composes carries, in order: what the role may and may
+# not do; what it returns; the authority (`REMIT_AUTHORITY`, reproduced in full);
+# the must-fix, when one is going back; the bar, for the roles that AUTHOR —
+# `REMIT_STANDARDS`, the `fix` section of the gate the work is heading into and
+# nothing else from that file; and — for `evaluate` and no other role — the
+# gate's rubric file from `REMIT_RUBRICS`, reproduced WHOLE, with the four
+# citation shapes. One gate's evaluator is never handed another gate's file, an
+# author is never handed a whole gate file, and a judge is never handed the
+# author's derived half of one. Why the split falls there is `bin/remit`'s header.
+#
+# The limits are the law's, not this script's invention: a builder authors a tree
+# and runs no git or pull-request command (Tech Design rule 5); an evaluator
+# judges and does not repair, accept, merge or close (S12); every role works
+# inside the authority it was given and never widens it (S11).
+#
+# ==============================================================================
+# THE HONESTY RULES, LIFTED WITH THE ADAPTERS
+# ==============================================================================
+#
+# Each of these is a probed failure mode of a shipped CLI, evidenced in this
+# repository's probe records. They arrived with the adapters and none of them is
+# relaxed here.
+#
+#   * Exit signals COMPLETION, not success. A CLI can exit 0 with every task
+#     command denied. Nothing here reads success from an exit code.
+#   * Pi accepts a wrong model id silently and answers anyway, so a pi raise is
+#     refused unless the exact id is in `pi --list-models`. That catalogue is a
+#     COLUMN TABLE — `provider  model  context …` under a header row of those
+#     names — and pi takes `--model` as `provider/id` or as a bare id, so both
+#     forms are read out of it and the registered id must equal one of them
+#     WHOLE. A substring of a line is not a match: a prefix of a real id would
+#     otherwise pass a check whose entire purpose is that pi will not fail on it.
+#   * The sandbox codex was ASKED for is not always the one it ran under. The
+#     run HEADER BLOCK is the truth — the lines between codex's own banner and
+#     the separator closing it, which exist before any builder text does — and it
+#     is read back after exit. A confirmed downgrade is exit 6; a header that
+#     cannot be read is reported UNCONFIRMED and claims no boundary at all.
+#   * Devin's exit code distinguishes only "the CLI refused to start" from "a run
+#     happened". A run whose every tool call was denied exits 0 with no final
+#     message and nothing on stderr, so a devin run is judged from its ATIF
+#     export. Its containment is enforced by TERMINATION, not refusal: a denied
+#     call cancels the batch it was issued in and the run stops there, which is
+#     why the allow list is everything a context reaches for rather than the
+#     minimum that sounds prudent.
+#   * Copilot reports NOTHING about the permissions that actually applied, in any
+#     channel, so there is no read-back to make. What exists instead is a canary:
+#     a cheap throwaway run under the exact configuration the context will get,
+#     which must run an ordinary command, author an ordinary in-tree file of real
+#     source, and be BLOCKED on a wrapped `git`. Anything else refuses the raise
+#     (exit 7). A hook that fails to load fails OPEN, silently, which is the
+#     whole reason the canary exists.
+#   * There is NO enforced read boundary on claude, pi, copilot or devin here.
+#     Every provenance line says so rather than implying one. A worktree path arm
+#     was built into the copilot hook and WITHDRAWN — ruled 2026-08-22 — because
+#     inspecting command text is the wrong mechanism for a read boundary; the
+#     right one is where the context RUNS.
+#   * An absent capability is reported before anything is invoked. Nothing is
+#     ever substituted.
+#
+# The fake harnesses in `t/lib/fake-harness.sh` are SYNTHETIC and say so; the
+# live assertions in `t/integration/remit-invoke-live.sh` are what re-check these
+# shapes against the CLIs that ship.
+
+set -u
+
+ME=remit-invoke
+say() { printf '%s\n' "$1" >&2; }
+die() { printf '%s: %s\n' "$ME" "$1" >&2; exit 2; }
+rule_off() { printf -- '---------------------------------------------------------------------\n' >&2; }
+
+usage() {
+	cat >&2 <<'EOF'
+usage:
+  remit-invoke <role> <slug> <worktree>
+      [--harness <claude|codex|pi|devin|copilot|native>] [--model <id>]
+      [--effort <level>] [--provider <name>] [--sandbox <mode>]
+      [--allowed-tools <spec>] [--exclude-tools <spec>] [--final-message <file>]
+
+      role: research | build | evaluate | repair-brief
+
+  remit-invoke --probe-host
+      Reads THIS HOST — which of the five harness CLIs are here, where, what
+      each says about its account, and what any of them will list as models —
+      and prints one tab-separated record per harness on stdout. It raises
+      nothing, bills nothing and reads no registry. `remit setup` proposes a
+      registry from it; the record's fields are in this script's header.
+
+Raises ONE fresh context in a named harness, with a briefing composed from the
+role's limits and the authority in REMIT_AUTHORITY, in the worktree given, and
+returns that context's final text on stdout and nothing else. Provenance goes to
+the file named by REMIT_PROVENANCE.
+
+EVERY SEAT COMES FROM THE REGISTRY — REMIT_SETTINGS, or .remit/settings.json in
+the current repository. With no --harness/--model the role's `defaults` entry
+decides; with either flag that override is checked against the registry the same
+way. A harness or model the registry does not carry is refused, and so is a
+registered seat whose CLI is absent, unauthenticated or rejects the id. There is
+no standing default and there is no fallback: if the seat is not there, the raise
+does not happen.
+
+`draft` is RETIRED and is refused by name: the practitioner's ruling of
+2026-08-23 took it out of the chain, because nothing but him writes a brief.
+
+--harness native raises nothing: the context was the calling harness's own
+sub-agent and --final-message carries what it returned.
+
+Exit codes: 0 the context ran (completion, not success)
+            2 usage, an unregistered or malformed registry, or a registered
+              capability that is absent; NOTHING was invoked
+            5 the harness CLI itself exited non-zero
+            6 the run's own precondition failed (a confirmed downgrade of the
+              containment asked for: codex's sandbox, devin's permission mode)
+            7 the containment canary failed — copilot's containment did not
+              demonstrably hold, so no context was raised
+EOF
+	exit 2
+}
+
+# ==============================================================================
+# `--probe-host`: WHAT IS ON THIS HOST — the facts `remit setup` proposes from
+# ==============================================================================
+#
+# This lives here, and not in `bin/remit`, because THIS script is the one that
+# has to find each CLI at raise time. Where a binary lives, which of them are not
+# always on PATH, and which of them can be asked for a model catalogue are facts
+# with exactly one home, and a second copy in the proposer would be the copy that
+# drifts.
+#
+# It raises nothing, bills nothing, and reads no registry — a probe that needed
+# the registry could never help write the first one. The command name it looks
+# for is the CONVENTIONAL one, which is what a proposal offers for `cli`; a
+# registry may name a different command and this script uses whatever it names.
+#
+# One tab-separated record per harness, on stdout:
+#
+#   <harness> <cli> <present|absent> <where> <auth> <model ids> <note>
+#
+# `<where>`, `<auth>`, `<model ids>` and `<note>` are empty when there is nothing
+# to say. NOTHING here is invented: a CLI with no catalogue reports no ids and
+# says in `<note>` that it has none, rather than offering ids from memory.
+
+# `pi --list-models` prints a table — `provider  model  context  max-out …` under
+# a header row of those names. Pi takes `--model` as `provider/id` or as a bare
+# id, so both forms are emitted and both are accepted.
+pi_catalogue_ids() { # stdin: the catalogue -> one id per line
+	awk '$1 == "provider" && $2 == "model" { next } NF >= 2 { print $1 "/" $2; print $2 }'
+}
+
+# The two CLIs that are not always on PATH. Their Windows package installers add
+# a directory to the persisted user PATH, which any shell whose process tree
+# predates the install never sees.
+packaged_path() { # $1 devin|copilot -> an executable path, or empty
+	_la=$(printf '%s' "${LOCALAPPDATA:-}" | tr '\\' '/')
+	[ -n "$_la" ] || return 0
+	case "$1" in
+	devin) _p="$_la/Microsoft/WinGet/Packages/CognitionAI.DevinCLI_Microsoft.Winget.Source_8wekyb3d8bbwe/bin/devin.exe" ;;
+	copilot) _p="$_la/Microsoft/WinGet/Packages/GitHub.Copilot_Microsoft.Winget.Source_8wekyb3d8bbwe/copilot.exe" ;;
+	*) return 0 ;;
+	esac
+	[ -x "$_p" ] && printf '%s\n' "$_p"
+	return 0
+}
+
+probe_host() {
+	_t=$(printf '\t')
+	for h in claude codex pi devin copilot; do
+		_cli=$h _where='' _auth='' _ids='' _note=''
+		if command -v "$h" >/dev/null 2>&1; then
+			_where=$(command -v "$h")
+		else
+			case "$h" in devin | copilot) _where=$(packaged_path "$h") ;; esac
+		fi
+		if [ -z "$_where" ]; then
+			printf '%s%s%s%sabsent%s%s%s%s%s\n' "$h" "$_t" "$_cli" "$_t" "$_t" "$_t" "$_t" "$_t" \
+				"neither on PATH nor at a package path this script knows"
+			continue
+		fi
+		case "$h" in
+		claude | codex)
+			_note="this CLI ships no model catalogue this script can read, so no id was probed and none is offered from memory"
+			;;
+		pi)
+			if _cat=$("$_where" --list-models 2>/dev/null) && [ -n "$_cat" ]; then
+				_ids=$(printf '%s\n' "$_cat" | pi_catalogue_ids | tr '\n' ' ' | sed 's/ $//')
+				_note="from \`pi --list-models\` on this host; pi takes provider/id or a bare id, and both forms are listed"
+			else
+				_note="\`pi --list-models\` could not be read, so no id was probed"
+			fi
+			;;
+		devin)
+			if _a=$("$_where" auth status 2>&1); then
+				_auth=$(printf '%s\n' "$_a" | tr '\n' ';' | sed 's/[[:space:]]\{1,\}/ /g; s/;/; /g; s/[; ]*$//')
+			else
+				_auth='not authenticated'
+			fi
+			_note="devin validates an unknown model id itself, pre-flight, before any ACU is spent, so no catalogue was called and no id is offered from memory"
+			;;
+		copilot)
+			_cfg=${COPILOT_HOME:-${HOME:-}/.copilot}
+			if [ -f "$_cfg/config.json" ]; then
+				_login=$(sed -n 's/.*"login"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$_cfg/config.json" | sed -n 1p)
+				_host=$(sed -n 's/.*"host"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$_cfg/config.json" | sed -n 1p)
+				[ -n "$_login" ] && _auth="$_login at ${_host:-not recorded} — read from the CLI state file, not checked"
+			fi
+			_note="this CLI ships no auth check and no model catalogue; it refuses an unknown id pre-flight, in seconds, with nothing billed"
+			;;
+		esac
+		printf '%s%s%s%spresent%s%s%s%s%s%s%s\n' \
+			"$h" "$_t" "$_cli" "$_t" "$_t" "$_where" "$_t" "$_auth" "$_t" "$_ids" "$_t$_note"
+	done
+	return 0
+}
+
+if [ "${1:-}" = --probe-host ]; then
+	[ $# -eq 1 ] || die "--probe-host takes no other argument: it reads this host and raises nothing"
+	probe_host
+	exit 0
+fi
+
+# ==============================================================================
+# arguments
+# ==============================================================================
+
+[ $# -ge 1 ] || usage
+case "$1" in -h | --help) usage ;; esac
+[ $# -ge 3 ] || usage
+
+ROLE=$1
+SLUG=$2
+WT=$3
+shift 3
+
+HARNESS='' MODEL='' EFFORT='' PROVIDER='' ALLOWED='' EXCLUDED='' RETURNED=''
+SANDBOX=workspace-write SANDBOX_GIVEN=no
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--harness) [ $# -ge 2 ] || die "--harness needs a value"; HARNESS=$2; shift 2 ;;
+	--model) [ $# -ge 2 ] || die "--model needs a value"; MODEL=$2; shift 2 ;;
+	--effort) [ $# -ge 2 ] || die "--effort needs a value"; EFFORT=$2; shift 2 ;;
+	--provider) [ $# -ge 2 ] || die "--provider needs a value"; PROVIDER=$2; shift 2 ;;
+	--sandbox) [ $# -ge 2 ] || die "--sandbox needs a value"; SANDBOX=$2; SANDBOX_GIVEN=yes; shift 2 ;;
+	--allowed-tools) [ $# -ge 2 ] || die "--allowed-tools needs a value"; ALLOWED=$2; shift 2 ;;
+	--exclude-tools) [ $# -ge 2 ] || die "--exclude-tools needs a value"; EXCLUDED=$2; shift 2 ;;
+	--final-message) [ $# -ge 2 ] || die "--final-message needs a value"; RETURNED=$2; shift 2 ;;
+	-h | --help) usage ;;
+	*) die "unknown option: $1" ;;
+	esac
+done
+
+case "$ROLE" in
+research | build | evaluate | repair-brief) ;;
+# RETIRED, and refused by name rather than as an unknown word, so that anything
+# still asking for it is told why it is gone rather than left guessing at a typo.
+draft) die "the 'draft' role was retired by the gate-1 ruling, 2026-08-23: no fresh context drafts or rewrites a brief — the practitioner writes it, and the gate into \`refined\` is research-if-asked then evaluate. Nothing here will author one" ;;
+*) die "unknown role '$ROLE' — the roles are research, build, evaluate and repair-brief" ;;
+esac
+
+case "$SLUG" in
+*[!a-z0-9-]* | -* | '') die "invalid slug '$SLUG' — use lower-case letters, digits and hyphens" ;;
+esac
+
+[ -d "$WT" ] || die "no such worktree: $WT"
+WT=$(CDPATH= cd -- "$WT" && pwd -P)
+
+ROUND=${REMIT_ROUND:-1}
+AUTHORITY=${REMIT_AUTHORITY:-}
+RUBRICS=${REMIT_RUBRICS:-}
+STANDARDS=${REMIT_STANDARDS:-}
+MUSTFIX=${REMIT_MUSTFIX:-}
+PROVFILE=${REMIT_PROVENANCE:-}
+
+# One gate's evaluator is never handed another gate's standards, and no other
+# role is handed any. A rubric file arriving for a role that does not judge is a
+# mistake at the seam, not something to quietly ignore.
+if [ -n "$RUBRICS" ] && [ "$ROLE" != evaluate ]; then
+	die "REMIT_RUBRICS was set for the '$ROLE' role — a rubric goes to the gate's evaluator and to nobody else"
+fi
+
+# And the other way: the `fix` section is the BAR, and goes to the roles that
+# author. A role that judges is handed the gate file whole and never this
+# derived half of it, because a judge reading only one section would think that
+# section was the whole gate.
+if [ -n "$STANDARDS" ]; then
+	case "$ROLE" in
+	build | research) ;;
+	*) die "REMIT_STANDARDS was set for the '$ROLE' role — the gate's \`fix\` section is the bar handed to the roles that author, and to nobody else" ;;
+	esac
+fi
+
+# ==============================================================================
+# the registry: `.remit/settings.json`
+# ==============================================================================
+#
+# What the file is, what it may carry and how a seat is resolved from it are this
+# script's header. This is the reading of it.
+
+SETTINGS=${REMIT_SETTINGS:-}
+if [ -z "$SETTINGS" ]; then
+	_r=$(git rev-parse --show-toplevel 2>/dev/null) || _r=''
+	[ -n "$_r" ] && SETTINGS="$_r/.remit/settings.json"
+fi
+[ -n "$SETTINGS" ] ||
+	die "no registry: REMIT_SETTINGS is unset and this directory is not inside a Git repository, so there is nowhere to look for .remit/settings.json. Every seat comes from the registry and there is no default left to fall back on"
+[ -e "$SETTINGS" ] ||
+	die "no registry at $SETTINGS — every seat this script raises comes from one the practitioner registered there, and there is no standing default left to fall back on. \`sh bin/remit setup\` proposes one from what is on this host, and \`sh bin/remit setup --write\` saves it"
+[ -s "$SETTINGS" ] || die "the registry $SETTINGS is empty — a registry that registers nothing can raise nothing"
+
+command -v jq >/dev/null 2>&1 ||
+	die "no 'jq' on PATH — the registry $SETTINGS is JSON and this script reads it with jq. It will not guess at a parse it cannot make; install jq, or nothing here is raised"
+
+# One pass. It emits either error lines, each beginning `!`, or the registry
+# flattened into two record kinds, tab separated:
+#
+#   H <harness> <cli> <model model …>
+#   D <role>    <harness> <model>
+#
+# Every refusal below names the KEY it could not read. A JSON syntax error never
+# reaches this program at all: jq refuses the parse first, and its own message,
+# which names the line, is what gets printed.
+SETTINGS_JQ='
+def E($m): "!\t" + $m;
+def nonempty: type == "string" and length > 0;
+. as $r
+| ["research","build","evaluate","repair-brief"] as $ROLES
+| ["claude","codex","pi","devin","copilot"] as $KNOWN
+| (
+  if ($r | type) != "object" then
+    [E("the top level of the registry is a \($r | type), not an object carrying `harnesses` and `defaults`")]
+  else
+    [ $r | keys[] | select(. != "harnesses" and . != "defaults")
+      | E("unknown top-level key `\(.)` — the registry carries `harnesses` and `defaults`, and nothing else") ]
+  + ( if ($r | has("harnesses")) | not then
+        [E("no `harnesses` — the registry names every harness a seat may sit on")]
+      elif ($r.harnesses | type) != "object" then
+        [E("`harnesses` is a \($r.harnesses | type), not an object")]
+      elif ($r.harnesses | length) == 0 then
+        [E("`harnesses` is empty — a registry that registers no harness can raise nothing")]
+      else
+        [ $r.harnesses | to_entries[] | . as $h |
+          if ($KNOWN | index($h.key)) == null then
+            E("`harnesses.\($h.key)` is not a harness remit drives — those are claude, codex, pi, devin and copilot")
+          elif ($h.value | type) != "object" then
+            E("`harnesses.\($h.key)` is a \($h.value | type), not an object with `cli` and `models`")
+          elif ((($h.value | keys) - ["cli","models"]) | length) > 0 then
+            E("`harnesses.\($h.key)` carries \((($h.value | keys) - ["cli","models"]) | join(", ")) — a harness entry carries `cli` and `models`, and nothing else")
+          elif (($h.value.cli // null) | nonempty | not) then
+            E("`harnesses.\($h.key).cli` is missing or not a non-empty string — it names the command this host runs")
+          elif (($h.value.models // null) | type) != "array" then
+            E("`harnesses.\($h.key).models` is missing or not an array of model ids")
+          elif ($h.value.models | length) == 0 then
+            E("`harnesses.\($h.key).models` is empty — a harness with no registered model registers no seat")
+          elif ([$h.value.models[] | select(nonempty | not)] | length) > 0 then
+            E("`harnesses.\($h.key).models` carries an entry that is not a non-empty string")
+          elif (($h.value.models | unique | length) != ($h.value.models | length)) then
+            E("`harnesses.\($h.key).models` lists the same id twice")
+          elif ([$h.value.models[] | select(test("[ \\t\\n]"))] | length) > 0 then
+            E("`harnesses.\($h.key).models` carries an id with whitespace in it, and this script separates ids by spaces")
+          else empty end ]
+      end )
+  + ( if ($r | has("defaults")) | not then
+        [E("no `defaults` — the registry names the seat each role takes")]
+      elif ($r.defaults | type) != "object" then
+        [E("`defaults` is a \($r.defaults | type), not an object")]
+      else
+        [ $r.defaults | keys[] | select(. == "draft")
+          | E("`defaults.draft` seats a role that retired on 2026-08-23: nothing but the practitioner writes a brief, so no fresh context drafts one and there is no seat to register for it") ]
+      + [ $r.defaults | keys[] | . as $k | select($k != "draft") | select(($ROLES | index($k)) == null)
+          | E("`defaults.\($k)` is not a role remit has — those are research, build, evaluate and repair-brief") ]
+      + [ $ROLES[] | . as $k | select(($r.defaults | has($k)) | not)
+          | E("`defaults.\($k)` is missing — every role takes a seat the practitioner registered, and a role with none can raise nothing") ]
+      + [ $r.defaults | to_entries[] | . as $d | select(($ROLES | index($d.key)) != null) |
+          if ($d.value | type) != "object" then
+            E("`defaults.\($d.key)` is a \($d.value | type), not an object with `harness` and `model`")
+          elif ((($d.value | keys) - ["harness","model"]) | length) > 0 then
+            E("`defaults.\($d.key)` carries \((($d.value | keys) - ["harness","model"]) | join(", ")) — a seat carries `harness` and `model`, and nothing else")
+          elif (($d.value.harness // null) | nonempty | not) then
+            E("`defaults.\($d.key).harness` is missing or not a non-empty string")
+          elif (($d.value.model // null) | nonempty | not) then
+            E("`defaults.\($d.key).model` is missing or not a non-empty string")
+          elif ((($r.harnesses // {}) | type) != "object") or ((($r.harnesses // {}) | has($d.value.harness)) | not) then
+            E("`defaults.\($d.key).harness` is `\($d.value.harness)`, which `harnesses` does not register")
+          elif ((((($r.harnesses[$d.value.harness]).models) // []) | index($d.value.model)) == null) then
+            E("`defaults.\($d.key).model` is `\($d.value.model)`, which is not registered for harness `\($d.value.harness)`")
+          else empty end ]
+      end )
+  end
+) as $errs
+| if ($errs | length) > 0 then $errs[]
+  else
+    ( $r.harnesses | to_entries[] | "H\t\(.key)\t\(.value.cli)\t\(.value.models | join(" "))" ),
+    ( $r.defaults  | to_entries[] | "D\t\(.key)\t\(.value.harness)\t\(.value.model)" )
+  end
+'
+
+JQERR=$(mktemp 2>/dev/null) || JQERR=${TMPDIR:-/tmp}/$ME-jqerr-$$
+if ! REGISTRY=$(jq -r "$SETTINGS_JQ" "$SETTINGS" 2>"$JQERR"); then
+	printf '%s: the registry %s is not JSON this script can parse, so NOTHING is applied from it. jq refused it, and its own message names the line:\n' "$ME" "$SETTINGS" >&2
+	sed 's/^/    /' "$JQERR" >&2
+	rm -f "$JQERR"
+	exit 2
+fi
+rm -f "$JQERR"
+
+# A malformed registry refuses EVERYTHING rather than applying the half of it
+# that reads — `rubrics_check`'s rule in `bin/remit`, applied to this file.
+if printf '%s\n' "$REGISTRY" | grep -q '^!'; then
+	printf '%s: the registry %s has entries this script cannot read, so NONE of it is applied:\n' "$ME" "$SETTINGS" >&2
+	printf '%s\n' "$REGISTRY" | sed -n "s/^!$(printf '\t')/    /p" >&2
+	printf 'The shape is in this script'"'"'s header. `sh bin/remit setup` proposes one from what is on this host, and `sh bin/remit setup --write` saves it.\n' >&2
+	exit 2
+fi
+
+TAB=$(printf '\t')
+
+reg_registered() { # $1 harness -> 0 when the registry carries it
+	printf '%s\n' "$REGISTRY" | awk -F"$TAB" -v h="$1" '$1 == "H" && $2 == h { f = 1 } END { exit f ? 0 : 1 }'
+}
+reg_cli() { # $1 harness -> the command the registry names for it
+	printf '%s\n' "$REGISTRY" | awk -F"$TAB" -v h="$1" '$1 == "H" && $2 == h { print $3; exit }'
+}
+reg_harnesses() { # -> every registered harness, space separated
+	printf '%s\n' "$REGISTRY" | awk -F"$TAB" '$1 == "H" { printf "%s ", $2 }' | sed 's/ $//'
+}
+reg_models() { # $1 harness -> its registered ids, space separated
+	printf '%s\n' "$REGISTRY" | awk -F"$TAB" -v h="$1" '$1 == "H" && $2 == h { print $4; exit }'
+}
+reg_has_model() { # $1 harness  $2 model -> 0 when that harness registers it
+	printf '%s\n' "$REGISTRY" | awk -F"$TAB" -v h="$1" -v m="$2" '
+		$1 == "H" && $2 == h { n = split($4, w, " "); for (i = 1; i <= n; i++) if (w[i] == m) f = 1 }
+		END { exit f ? 0 : 1 }'
+}
+reg_carriers() { # $1 model -> every registered harness carrying it, space separated
+	printf '%s\n' "$REGISTRY" | awk -F"$TAB" -v m="$1" '
+		$1 == "H" { n = split($4, w, " "); for (i = 1; i <= n; i++) if (w[i] == m) printf "%s ", $2 }' | sed 's/ $//'
+}
+reg_default() { # $1 role  $2 harness|model -> that half of the role's registered seat
+	printf '%s\n' "$REGISTRY" | awk -F"$TAB" -v r="$1" -v f="$2" '$1 == "D" && $2 == r { print (f == "harness" ? $3 : $4); exit }'
+}
+
+# The digest of the registry AS READ, so a record can be held against the file
+# this raise actually resolved through. The tool that made it is named beside it:
+# a bare hex string nobody can reproduce is a decoration, not a record.
+if command -v sha256sum >/dev/null 2>&1; then
+	REGISTRY_HASH="sha256:$(sha256sum "$SETTINGS" | awk '{print $1}')"
+elif command -v shasum >/dev/null 2>&1; then
+	REGISTRY_HASH="sha256:$(shasum -a 256 "$SETTINGS" | awk '{print $1}')"
+elif command -v cksum >/dev/null 2>&1; then
+	REGISTRY_HASH="cksum:$(cksum "$SETTINGS" | awk '{print $1 "-" $2}')"
+else
+	REGISTRY_HASH='none — no digest tool on PATH, so the registry is named here but not fingerprinted'
+fi
+
+# ==============================================================================
+# the seat: role -> harness + model, strictly, from the registry
+# ==============================================================================
+
+SEAT_FROM=''
+SEAT_KIND=''
+
+unregistered() { # $1 what was asked for, in words
+	die "$1 — not registered in .remit/settings.json ($SETTINGS). That is a registry to fix, not a seat for this script to substitute"
+}
+
+if [ "$HARNESS" = native ]; then
+	# `native` raises NOTHING. It records a context the calling harness already
+	# had, whose text is already on disk, so there is no seat to resolve and no
+	# CLI to find. The registry above still had to read: one this script cannot
+	# read refuses every raise, and that includes the one that raises nothing.
+	SEAT_FROM='the command line — native records a context this script did not raise'
+	SEAT_KIND=override
+elif [ -n "$HARNESS" ] && [ -n "$MODEL" ]; then
+	reg_registered "$HARNESS" || unregistered "harness '$HARNESS' (registered: $(reg_harnesses))"
+	reg_has_model "$HARNESS" "$MODEL" ||
+		unregistered "model '$MODEL' for harness '$HARNESS' (registered there: $(reg_models "$HARNESS"))"
+	SEAT_FROM='--harness and --model, both checked against the registry'
+	SEAT_KIND=override
+elif [ -n "$HARNESS" ]; then
+	reg_registered "$HARNESS" || unregistered "harness '$HARNESS' (registered: $(reg_harnesses))"
+	if [ "$(reg_default "$ROLE" harness)" = "$HARNESS" ]; then
+		MODEL=$(reg_default "$ROLE" model)
+	else
+		die "--harness $HARNESS was given with no --model, and the registry seats '$ROLE' on $(reg_default "$ROLE" harness) instead — so nothing registered says which model this role takes on $HARNESS. Name one with --model (registered for $HARNESS: $(reg_models "$HARNESS")); a model is never picked for you"
+	fi
+	SEAT_FROM='--harness, with the model the registry seats this role on there'
+	SEAT_KIND=override
+elif [ -n "$MODEL" ]; then
+	# The practitioner reaching for a named model — his own example, "use sol".
+	# It resolves when the registry carries it, and fails loudly when it does not.
+	if [ "$(reg_default "$ROLE" model)" = "$MODEL" ]; then
+		HARNESS=$(reg_default "$ROLE" harness)
+	else
+		carriers=$(reg_carriers "$MODEL")
+		case "$carriers" in
+		'') unregistered "model '$MODEL'" ;;
+		*' '*) die "model '$MODEL' is registered for more than one harness — $carriers — so this raise would be choosing between them. Name the one you mean with --harness" ;;
+		*) HARNESS=$carriers ;;
+		esac
+	fi
+	SEAT_FROM='--model, with the harness the registry registers it under'
+	SEAT_KIND=override
+else
+	HARNESS=$(reg_default "$ROLE" harness)
+	MODEL=$(reg_default "$ROLE" model)
+	[ -n "$HARNESS" ] && [ -n "$MODEL" ] ||
+		die "the registry $SETTINGS registers no seat for the '$ROLE' role, so there is nothing to raise it on and nothing to substitute"
+	SEAT_FROM="the registry's own default for this role"
+	SEAT_KIND=registered
+fi
+
+# Reasoning effort is expressible on the command line for exactly one of these
+# CLIs. Where the harness has no effort control, the model half of a standing
+# constraint still binds and the effort half is unenforceable there — which is
+# said, not silently dropped, and certainly not accepted here and ignored.
+if [ -n "$EFFORT" ] && [ "$HARNESS" != copilot ]; then
+	die "--effort applies only to a copilot raise — no other CLI this script drives exposes a reasoning-effort control, and an effort this script cannot pass is never reported as one that applied"
+fi
+
+# ==============================================================================
+# availability: a REGISTERED seat that is not here is reported, never substituted
+# ==============================================================================
+#
+# A separate question from registration, with a separate answer, because
+# "the practitioner never registered this" and "he registered it and it is not
+# here" are different problems, and only one of them is a registry to edit.
+
+absent() { # $1 why, in words
+	die "the '$HARNESS' seat is registered but not available: $1. Nothing is substituted for it, and this raise did not happen"
+}
+
+# The command the REGISTRY names for this harness, not one this script assumed.
+if [ "$HARNESS" = native ]; then
+	CLI=''
+else
+	CLI=$(reg_cli "$HARNESS")
+fi
+
+# devin and copilot are resolved separately below: neither is always on PATH, so
+# "not on PATH" is not the same question as "not installed".
+if [ -n "$CLI" ] && [ "$HARNESS" != devin ] && [ "$HARNESS" != copilot ]; then
+	command -v "$CLI" >/dev/null 2>&1 ||
+		absent "the registered command '$CLI' is not on PATH"
+fi
+
+if [ "$HARNESS" = native ]; then
+	[ -n "$RETURNED" ] ||
+		die "--final-message is required with --harness native — the context was the calling harness's own and what it returned is never invented"
+	[ -f "$RETURNED" ] || die "no final-message file at $RETURNED"
+	[ -n "$MODEL" ] ||
+		die "--model is required with --harness native — the provenance names the model that authored the work and never guesses it"
+else
+	[ -z "$RETURNED" ] ||
+		die "--final-message applies only to --harness native; for a CLI the final message is captured from the run"
+	[ -n "$AUTHORITY" ] ||
+		die "REMIT_AUTHORITY names the bounded authority for this step and there is none — a context is never raised without one"
+	[ -f "$AUTHORITY" ] || die "no authority file at $AUTHORITY"
+	[ -s "$AUTHORITY" ] || die "the authority file $AUTHORITY is empty"
+fi
+
+MODEL_CHECK=''
+
+if [ "$HARNESS" = pi ]; then
+	# The registry already guarantees the id is REGISTERED. Whether the CLI on
+	# THIS host still carries it is the availability question, and pi is the one
+	# CLI here that can answer it.
+	if ! catalog=$("$CLI" --list-models 2>&1) || [ -z "$catalog" ]; then
+		printf '%s: could not read pi'\''s model catalogue, so the registered id cannot be checked against this host. Not raising a context:\n%s\n' "$ME" "$catalog" >&2
+		exit 2
+	fi
+	printf '%s\n' "$catalog" | pi_catalogue_ids | grep -Fxq -- "$MODEL" ||
+		absent "the registered model '$MODEL' is not in \`$CLI --list-models\` on this host. Pi would accept it silently and answer with something else, and that substitution is what this check exists to prevent"
+	MODEL_CHECK="verified against \`$CLI --list-models\` before the run"
+fi
+
+DEVIN='' DEVIN_TIER='' DEVIN_ORG='' DEVIN_TIER_NOTE='' DEVIN_JSON=''
+DEVIN_MODE=accept-edits DEVIN_TIMEOUT=${REMIT_DEVIN_TIMEOUT:-3600}
+DEVIN_VERSION='' DEVIN_ACU='' PERM_APPLIED='' ATIF=''
+
+if [ "$HARNESS" = devin ]; then
+	# `devin` is not always on PATH. Its Windows package installer adds the
+	# binary's directory to the persisted user PATH, which any shell whose
+	# process tree predates the install never sees — so the package path is tried
+	# second, and only both missing is an absent capability.
+	if command -v "$CLI" >/dev/null 2>&1; then
+		DEVIN=$CLI
+	else
+		DEVIN=$(packaged_path devin)
+	fi
+	[ -n "$DEVIN" ] ||
+		absent "the registered command '$CLI' is neither on PATH nor at devin's package path"
+
+	# On PATH but unauthenticated is absent, the same shape as `gh auth status`.
+	if ! devin_auth=$("$DEVIN" auth status 2>&1); then
+		printf '%s: the devin seat is registered but not available: `%s auth status` reports it is not authenticated. Nothing is substituted for it, and this raise did not happen:\n%s\n' "$ME" "$DEVIN" "$devin_auth" >&2
+		exit 2
+	fi
+	devin_field() { printf '%s\n' "$devin_auth" | sed -n "s/^[[:space:]]*$1:[[:space:]]*//p" | sed -n 1p | sed 's/[[:space:]]*$//'; }
+	DEVIN_TIER=$(devin_field Tier)
+	DEVIN_ORG=$(devin_field 'Primary org')
+	devin_ent=$(devin_field Enterprise)
+	# A seat bought for an organisation that logged in without pinning its host
+	# first lands on the public free tier with no error at all. That is reported
+	# here — a login to fix, not something this script corrects, and a genuine
+	# free-tier account is a first-class target that gets identical containment.
+	case "$DEVIN_TIER" in
+	*Free*)
+		if [ "$devin_ent" = yes ] || [ -n "$DEVIN_ORG" ]; then
+			DEVIN_TIER_NOTE="the account reports '$DEVIN_TIER' while also reporting an organisation. An enterprise seat that logged in before its host was pinned lands on the public free tier silently, and that is what this looks like. The tier above is what this raise is billed and governed by; it is reported, not corrected."
+		fi
+		;;
+	esac
+
+	# No flag guarantees a -p run is non-interactive: a probe run was dropped into
+	# an interactive picker and hung until it was killed. The wait is therefore
+	# bounded by mechanism.
+	case "$DEVIN_TIMEOUT" in
+	'' | *[!0-9]* | 0) die "REMIT_DEVIN_TIMEOUT must be a positive whole number of seconds, not '$DEVIN_TIMEOUT'" ;;
+	esac
+	command -v timeout >/dev/null 2>&1 ||
+		die "no 'timeout' on PATH — a devin run is bounded by mechanism because no flag guarantees non-interactivity, and an unguarded run is not substituted for a guarded one"
+
+	# The ATIF export is the only channel carrying a devin run's final message,
+	# and the only one carrying the permission mode that actually applied. A raise
+	# whose result could not be read back is not started at all, rather than
+	# started and reported on guesswork.
+	if command -v jq >/dev/null 2>&1; then
+		DEVIN_JSON=jq
+	elif command -v node >/dev/null 2>&1; then
+		DEVIN_JSON=node
+	else
+		die "neither jq nor node is on PATH — a devin run is judged from its ATIF export, which nothing here could read; not raising a context"
+	fi
+
+	[ "$SANDBOX_GIVEN" = no ] ||
+		die "--sandbox does not apply to a devin raise — devin's OS-level sandbox is unsupported on Windows and this script never passes it. A devin context's containment is its worktree, the permission rules and the hook written for the run, and the provenance says exactly that"
+
+	# A .devin/ that is already there is the repository's own: it is not
+	# overwritten, and not silently layered under rules this script relies on.
+	[ ! -e "$WT/.devin" ] ||
+		die "$WT/.devin already exists — this script writes the context's containment there for the run and removes it again, and it will not overwrite a .devin the repository already has"
+
+	MODEL_CHECK="not checked here: devin validates an unknown id itself, pre-flight, before any ACU is spent, and prints its catalogue when it refuses"
+fi
+
+COPILOT='' COPILOT_VERSION='' COPILOT_HOST='' COPILOT_LOGIN='' COPILOT_JSON=''
+COPILOT_TIMEOUT=${REMIT_COPILOT_TIMEOUT:-3600}
+COPILOT_CANARY_TIMEOUT=${REMIT_COPILOT_CANARY_TIMEOUT:-300}
+COPILOT_CANARY_MODEL=${REMIT_COPILOT_CANARY_MODEL:-}
+COPILOT_HOOK_JSON='' COPILOT_HOOK_SH='' COPILOT_HOOKDIR_MADE='' COPILOT_GITHUBDIR_MADE=''
+COPILOT_CANARY_ID='' COPILOT_CANARY_AIU='' COPILOT_HOOK_ATTEST=''
+COPILOT_AIU='' COPILOT_PREMIUM='' COPILOT_CFG_DIR=''
+# Displayed, not expanded: the rules themselves are appended one at a time with
+# globbing off, because `shell(git:*)` is a pathname pattern to an unquoted shell.
+COPILOT_DENY='shell(git) shell(git:*) shell(gh) shell(gh:*)'
+
+if [ "$HARNESS" = copilot ]; then
+	# Where the two package paths are, and why neither CLI is always on PATH, is
+	# `packaged_path` above: copilot sits at the WinGet package ROOT and devin
+	# under a bin/, which is exactly why that knowledge has one home.
+	if command -v "$CLI" >/dev/null 2>&1; then
+		COPILOT=$CLI
+	else
+		COPILOT=$(packaged_path copilot)
+	fi
+	[ -n "$COPILOT" ] ||
+		absent "the registered command '$CLI' is neither on PATH nor at copilot's package path"
+
+	# The CLI updates itself by default, so the version that ran is read at raise
+	# time. A documented version would be a guess about the future.
+	COPILOT_VERSION=$("$COPILOT" --version 2>&1 | sed -n 1p | sed 's/[[:space:]]*$//')
+
+	# There is NO live authentication check to make: this CLI ships no
+	# `auth status` and no `logout` subcommand, and an invalid token in the
+	# environment did not fail a run. What exists is a state file. The identity is
+	# READ and recorded the way a devin raise records tier and org, and never made
+	# a condition of running. Nothing but the host and the login is read, and
+	# neither is a credential: the token lives in the OS credential store.
+	COPILOT_CFG_DIR=${COPILOT_HOME:-${HOME:-}/.copilot}
+	if [ -f "$COPILOT_CFG_DIR/config.json" ]; then
+		COPILOT_HOST=$(sed -n 's/.*"host"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$COPILOT_CFG_DIR/config.json" | sed -n 1p)
+		COPILOT_LOGIN=$(sed -n 's/.*"login"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$COPILOT_CFG_DIR/config.json" | sed -n 1p)
+	fi
+
+	# No flag guarantees a run is non-interactive. No probe ever saw one block —
+	# but a run that has never hung is not a run that cannot.
+	case "$COPILOT_TIMEOUT" in
+	'' | *[!0-9]* | 0) die "REMIT_COPILOT_TIMEOUT must be a positive whole number of seconds, not '$COPILOT_TIMEOUT'" ;;
+	esac
+	case "$COPILOT_CANARY_TIMEOUT" in
+	'' | *[!0-9]* | 0) die "REMIT_COPILOT_CANARY_TIMEOUT must be a positive whole number of seconds, not '$COPILOT_CANARY_TIMEOUT'" ;;
+	esac
+	command -v timeout >/dev/null 2>&1 ||
+		die "no 'timeout' on PATH — a copilot run is bounded by mechanism because no flag guarantees non-interactivity, and an unguarded run is not substituted for a guarded one"
+
+	# The JSONL envelope is the only channel carrying a copilot run's final
+	# message free of narration, and the only one carrying the run id, the served
+	# model and the cost. It is also what the containment canary is judged from.
+	if command -v jq >/dev/null 2>&1; then
+		COPILOT_JSON=jq
+	elif command -v node >/dev/null 2>&1; then
+		COPILOT_JSON=node
+	else
+		die "neither jq nor node is on PATH — a copilot run is judged from its JSONL envelope, which nothing here could read; not raising a context"
+	fi
+
+	[ "$SANDBOX_GIVEN" = no ] ||
+		die "--sandbox does not apply to a copilot raise — this build ships no --sandbox flag at all, its OS-level sandboxing is experimental and reports every Windows host as supported without checking, and this script never passes it. A copilot context's containment is the deny rules and the hook written for the run — git and gh, tested by a canary before the run starts — and the provenance says exactly that, including that no read boundary is enforced"
+
+	# .github/ is not devin's .devin/: almost every repository already has one. So
+	# the guard is on the two FILES this script writes, never on the directory,
+	# and the removal afterwards takes back only what it created.
+	COPILOT_HOOK_JSON="$WT/.github/hooks/remit-no-git.json"
+	COPILOT_HOOK_SH="$WT/.github/hooks/remit-no-git.sh"
+	for f in "$COPILOT_HOOK_JSON" "$COPILOT_HOOK_SH"; do
+		[ ! -e "$f" ] ||
+			die "$f already exists — this script writes the context's containment there for the run and removes it again, and it will not overwrite a file the repository already has"
+	done
+
+	MODEL_CHECK="not checked here: copilot refuses an unknown model id and an unsupported effort pre-flight, in seconds, with nothing billed"
+fi
+
+case "$HARNESS" in
+codex) MODEL_CHECK="none available: codex ships no model catalogue — \`codex doctor\` reports only the model already configured. The run header names the model that actually served this run, and that is what \`model:\` carries" ;;
+claude) MODEL_CHECK="none available: the claude CLI ships no model catalogue. The run envelope names the model that actually served this run, and that is what \`model:\` carries" ;;
+native) MODEL_CHECK="none: no CLI was invoked, so the model is the one the caller named" ;;
+esac
+
+command -v env >/dev/null 2>&1 ||
+	die "no 'env' on PATH — every context here is started with an allow-listed environment and there is no way to do that without it; not raising a context"
+
+# ==============================================================================
+# the run directory, the scratch home, and the environment allow-list
+# ==============================================================================
+
+RUNDIR=${TMPDIR:-/tmp}/$ME-$SLUG-$ROLE-$$
+mkdir -p "$RUNDIR" || die "cannot create the run directory $RUNDIR"
+OUTFILE="$RUNDIR/stdout"
+ERRFILE="$RUNDIR/stderr"
+PROGRESSFILE="$RUNDIR/progress"
+FINALFILE="$RUNDIR/final-message"
+BRIEF="$RUNDIR/briefing"
+ATIF="$RUNDIR/atif.json"
+ENVLIST="$RUNDIR/envlist"
+
+REAL_HOME=${HOME:-}
+SCRUB_HOME="$RUNDIR/home"
+mkdir -p "$SCRUB_HOME" || die "cannot create the scratch home under $RUNDIR"
+
+# THE ONE WRITABLE SCRATCH ROOT, and why it is in the worktree rather than beside
+# the run log. A sandboxed seat — codex on Windows runs as a dedicated local
+# account under a restricted token — can write to its WORKSPACE and to its OWN
+# temp, and to nothing else. The run log lives under the COORDINATOR's temp,
+# which on this host is a directory inside the practitioner's user profile: the
+# seat's account is refused there, so every fixture that tried to land in it
+# failed on write before it tested anything. The worktree is the one directory
+# that is writable for every seat on every harness, so that is where the scratch
+# goes, and `TMPDIR`, `TEMP` and `TMP` all name it.
+#
+# It is APPARATUS, not delivery. It is emptied before the context starts, so a
+# crashed earlier run leaves nothing for this one to trip on, and `remove_scratch`
+# below takes it away before the tree is handed back — a tree the seam is about
+# to stage must carry what the context AUTHORED and nothing it merely scribbled.
+#
+# The NAME is short on purpose. A worktree path is already long, Windows still
+# refuses a path over 260 characters in most tools, and everything a seat writes
+# now hangs off this one — a clone of the repository, a throwaway repository with
+# a `.git/objects/…` under it. Every character spent here is spent again on every
+# file below it.
+SCRUB_TMP="$WT/.remit-tmp"
+rm -rf "$SCRUB_TMP"
+mkdir -p "$SCRUB_TMP" ||
+	die "cannot create the scratch root at $SCRUB_TMP — a seat with nowhere to write cannot run anything, and this script will not raise one that cannot"
+
+# AND IT IGNORES ITSELF, for the run that never reaches the removal below.
+#
+# `remove_scratch` takes this directory away on every path this script controls,
+# and the trap takes it on an interrupt or a terminate. NEITHER reaches a run
+# that is KILLED — a signal no shell can trap, a harness reaping a long job, a
+# machine going down mid-raise. What is left then is a directory of the seat's
+# scratch sitting at the top of a worktree the seam stages wholesale, and what
+# it holds is a clone of the repository and throwaway repositories: a delivery
+# carrying that is the residue this work exists to end, arriving by the one door
+# the cleanup cannot close.
+#
+# So the directory ignores itself. A `.gitignore` whose single pattern is `*`
+# matches every entry beneath it INCLUDING that file, so git reports nothing
+# here in `status`, counts nothing here in `ls-files --others`, and stages
+# nothing here on `add -A` — while a repository CLONED into this directory is
+# untouched by it, because a `.gitignore` above a repository's own top level is
+# not one of the files that repository reads.
+#
+# It is written here rather than checked in anywhere because the worktree is the
+# TARGET repository's, not remit's: a line in remit's own `.gitignore` would
+# protect remit's repository and no other, and this mechanism is installed into
+# repositories whose ignore file remit does not write. The one that travels is
+# the one the script makes at the moment it makes the directory.
+printf '*\n' >"$SCRUB_TMP/.gitignore" ||
+	die "cannot write $SCRUB_TMP/.gitignore — without it a run killed before its cleanup leaves the seat's scratch where the seam would stage it, and this script will not raise a seat it cannot keep out of a delivery"
+
+# The apparatus this raise put on disk, taken away in one place because it is
+# taken away from more than one. Returns non-zero if the scratch root survived.
+remove_scratch() {
+	rm -rf "$SCRUB_HOME"
+	rm -rf "$SCRUB_TMP"
+	[ ! -e "$SCRUB_TMP" ]
+} # end remove_scratch
+
+# WHAT A SCRATCH ROOT THAT WILL NOT GO MEANS, in the two places it can happen.
+# The condition is the same one — `remove_scratch` reporting the directory
+# survived — and what it COSTS is not, so the answer is not either. Both are
+# written here, next to each other and to the removal itself, because a reader
+# deciding whether a difference is deliberate should not have to hold two ends of
+# a two-thousand-line script in mind to see that it is.
+#
+# Neither can be produced by this suite on both of its platforms — it needs a
+# directory writable when a run starts and unwritable when it ends, and Git Bash
+# hands the owner the write back through the ACL a POSIX `chmod` maps to. So each
+# is a FUNCTION, ending in the marker `t/unit/remit-invoke.sh` lifts it out on,
+# and what is tested there is the decision each makes when it is told the root
+# survived — which is the whole of what this script contributes to that outcome.
+
+# AT THE END OF A RUN THAT FINISHED, it is a REFUSAL and not a warning. The
+# directory sits inside the worktree the seam is about to stage, and a delivery
+# carrying a context's fixtures is worse than a raise that reports it could not
+# finish. What survived is named, so it can be removed by hand.
+scratch_gone_or_refuse() { # -> 0 when the root went; does not return when it did not
+	remove_scratch && return 0
+	die "could not remove the scratch root at $SCRUB_TMP — refusing to hand back a tree that still carries what the context scribbled rather than what it authored. The run itself finished and what it said is in $RUNDIR"
+} # end scratch_gone_or_refuse
+
+# ON A PATH THAT IS ALREADY REFUSING, it is REPORTED and the refusal already in
+# flight is what the caller exits with. Turning it into a `die` there would swap
+# a raise's own exit code — the one that says WHY the raise was refused — for
+# this script's generic 2, and the reason the seat was never raised would be lost
+# behind the housekeeping that followed it. So it is said, loudly, and the caller
+# goes on to exit with what it came to exit with.
+scratch_gone_or_warn() { # -> always 0; says so when the root survived
+	remove_scratch && return 0
+	say "the scratch root at $SCRUB_TMP could not be removed — remove it before this tree is staged"
+	return 0
+} # end scratch_gone_or_warn
+
+# And on any path out that never reaches it — a refusal composing the briefing,
+# an interrupt, a signal. The run log stays, because it IS the record; the
+# scratch home and the scratch root go, because they are apparatus, and the
+# scratch root sits in a tree somebody is about to read.
+trap 'rm -rf "$SCRUB_HOME" "$SCRUB_TMP"' EXIT INT TERM
+
+# --- the two visibility channels ---------------------------------------------
+# The run directory's name carries this process's pid, so nothing outside can
+# work out where to look. Saying where it is, the moment it exists, is what makes
+# tailing it possible at all — and it is said before the briefing is composed, so
+# a watcher started now sees the run rather than the end of it.
+: >"$PROGRESSFILE" || die "cannot create the progress log at $PROGRESSFILE"
+if [ -n "${REMIT_PROGRESS:-}" ]; then
+	printf '%s\n' "$RUNDIR" >"$REMIT_PROGRESS" ||
+		die "cannot write the run directory's location to REMIT_PROGRESS=$REMIT_PROGRESS — a caller that asked to be able to watch this run is not given silence instead"
+fi
+
+HEARTBEAT=${REMIT_HEARTBEAT:-30}
+case "$HEARTBEAT" in
+'' | *[!0-9]*)
+	die "REMIT_HEARTBEAT must be a whole number of seconds, or 0 to silence it — not '$HEARTBEAT'"
+	;;
+esac
+
+# The allow-list, written down before anything runs. This file IS the record of
+# what crossed into the context, and it is what the provenance quotes: a scrub
+# nobody can read afterwards is a claim, not a mechanism.
+scrub_list() {
+	printf 'PATH=%s\n' "$PATH"
+	printf 'HOME=%s\n' "$SCRUB_HOME"
+	printf 'TMPDIR=%s\n' "$SCRUB_TMP"
+	printf 'TEMP=%s\n' "$SCRUB_TMP"
+	printf 'TMP=%s\n' "$SCRUB_TMP"
+	[ -n "${LANG:-}" ] && printf 'LANG=%s\n' "$LANG"
+	[ -n "${LC_ALL:-}" ] && printf 'LC_ALL=%s\n' "$LC_ALL"
+	[ -n "${LC_CTYPE:-}" ] && printf 'LC_CTYPE=%s\n' "$LC_CTYPE"
+	[ -n "${SYSTEMROOT:-}" ] && printf 'SYSTEMROOT=%s\n' "$SYSTEMROOT"
+	[ -n "${COMSPEC:-}" ] && printf 'COMSPEC=%s\n' "$COMSPEC"
+	[ -n "${PATHEXT:-}" ] && printf 'PATHEXT=%s\n' "$PATHEXT"
+	# Without this a Windows CLI writes a literal `%SystemDrive%` directory
+	# into whatever its CWD happens to be — here, the worktree the seam is
+	# about to stage. The block at the top of this file says which incident
+	# this came from.
+	[ -n "${SYSTEMDRIVE:-}" ] && printf 'SYSTEMDRIVE=%s\n' "$SYSTEMDRIVE"
+	# The harness's own config variable — a PATH to its configuration, never a
+	# credential. Where the coordinator already sets one, that value is what is
+	# passed; otherwise it is computed from the coordinator's real home.
+	case "$HARNESS" in
+	claude) printf 'CLAUDE_CONFIG_DIR=%s\n' "${CLAUDE_CONFIG_DIR:-$REAL_HOME/.claude}" ;;
+	codex) printf 'CODEX_HOME=%s\n' "${CODEX_HOME:-$REAL_HOME/.codex}" ;;
+	pi) printf 'PI_CODING_AGENT_DIR=%s\n' "${PI_CODING_AGENT_DIR:-$REAL_HOME/.pi/agent}" ;;
+	copilot)
+		printf 'COPILOT_HOME=%s\n' "${COPILOT_HOME:-$REAL_HOME/.copilot}"
+		# Without this, repo hooks do not load in prompt mode at all, and the
+		# equivalent permission flag does NOT satisfy the gate.
+		printf 'GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS=true\n'
+		;;
+	devin)
+		# devin has no config-directory variable; on Windows its configuration and
+		# state live under these two, and `--config` is refused rather than passed.
+		[ -n "${APPDATA:-}" ] && printf 'APPDATA=%s\n' "$APPDATA"
+		[ -n "${LOCALAPPDATA:-}" ] && printf 'LOCALAPPDATA=%s\n' "$LOCALAPPDATA"
+		;;
+	esac
+	return 0
+}
+scrub_list >"$ENVLIST" || die "could not write the environment allow-list at $ENVLIST"
+
+# ==============================================================================
+# the briefing — the role's limits, then the authority, then what the gate asks
+# ==============================================================================
+
+role_limits() {
+	case "$ROLE" in
+	build)
+		printf 'You are a BUILDER. You author a WORKING TREE at `%s` and stop there.\n\n' "$WT"
+		printf -- '- You NEVER run `git` or `gh`, in any wrapping. Not `git add`, not a commit,\n'
+		printf '  not a branch, not a push, not a pull request. The tree you leave\n'
+		printf '  uncommitted is exactly what the mechanism expects: it stages, commits with\n'
+		printf '  the provenance trailers, pushes and opens the pull request after you exit.\n'
+		printf -- '- You NEVER run `bin/remit` or `bin/remit-invoke`. Moving the item is the\n'
+		printf '  state machine'\''s and raising a context is the seam'\''s; a builder that runs\n'
+		printf '  either has left its boundary.\n'
+		printf -- '- You work only inside the authority below. You never widen it. Something the\n'
+		printf '  authority does not cover is reported in what you return, not done.\n'
+		printf -- '- An outcome you could not reach is reported as unreached. Nothing is\n'
+		printf '  invented, no proof is substituted for an easier one, and a capability that\n'
+		printf '  is absent is said to be absent.\n'
+		;;
+	evaluate)
+		printf 'You are an EVALUATOR. You JUDGE the work in front of you and you change\n'
+		printf 'nothing.\n\n'
+		printf -- '- STATE WHAT YOU EXPECT THE PROOF TO SHOW BEFORE YOU READ THE DELIVERY.\n'
+		printf '  Write that expectation down as the first thing in your answer. An\n'
+		printf '  expectation formed after reading is not an expectation.\n'
+		printf -- '- You NEVER repair, amend, accept, merge or close. A must-fix goes back to a\n'
+		printf '  fresh builder; that is the mechanism'\''s, not yours.\n'
+		printf -- '- You NEVER run `bin/remit` or `bin/remit-invoke`, and you never run `git`\n'
+		printf '  or `gh` to CHANGE anything — nothing that writes, stages, pushes,\n'
+		printf '  comments, merges or closes. READING is not that and is fine: `git show`,\n'
+		printf '  `git diff`, `git log`, and `gh pr checks` and `gh run view` for the checks\n'
+		printf '  the rubrics below make you rest on. A judgement cannot rest on a check\n'
+		printf '  nobody is allowed to read.\n'
+		printf -- '- A finding is a FACT with its evidence, never a task. You do not classify\n'
+		printf '  findings by consequence: only a rubric below can accept a finding or make\n'
+		printf '  one a must-fix, and every such use cites the rubric and the evidence.\n'
+		printf -- '- HOW YOU JUDGE — what you may re-execute and what stands as the executing\n'
+		printf '  proof — IS THE RUBRICS BELOW, and this briefing does not say it a second\n'
+		printf '  time. There is one copy of that law and the rubric file is it; a copy\n'
+		printf '  here would be one more thing to keep true and the first to go stale.\n'
+		printf '  Read it there and judge by it.\n'
+		printf -- '- FINDING THE CHECK a rubric points you at: `.github/workflows/` is where\n'
+		printf '  the checks are defined and where each job is named for the shell and the\n'
+		printf '  platform it runs — including the platform your sandbox cannot reach,\n'
+		printf '  which from a Windows host is dash on Linux. Find the job for the platform\n'
+		printf '  in question, read its result, and cite it by the name it reports. A proof\n'
+		printf '  you can neither read a finished check for nor find kept output of is\n'
+		printf '  reported as UNRUN — not as passed, and not as somebody else'\''s word\n'
+		printf '  that it passed.\n'
+		printf -- '- EVERYTHING YOU WRITE GOES IN ONE PLACE: `%s`, which is what `TMPDIR`,\n' "$SCRUB_TMP"
+		printf '  `TEMP` and `TMP` name in your environment. Your clone of this repository,\n'
+		printf '  any fixture, any scratch file. It is inside the worktree because that is\n'
+		printf '  the one directory your sandbox can write to, and it is removed when this\n'
+		printf '  run ends, so nothing you make is left behind. If you ever find you cannot\n'
+		printf '  write there, say so in your answer and stop — do NOT make a directory of\n'
+		printf '  your own beside the repository to get past it. A judgement that had to\n'
+		printf '  litter the practitioner'\''s checkout to reach itself is a finding about\n'
+		printf '  this mechanism, and reporting it is worth more than the judgement.\n'
+		;;
+	research)
+		printf 'You are a RESEARCHER. You establish what is true and you change nothing.\n\n'
+		printf -- '- You NEVER run `git` or `gh` for anything but READING, and you NEVER run\n'
+		printf '  `bin/remit` or `bin/remit-invoke`. You author no product change.\n'
+		printf -- '- You work only inside the authority below and NEVER widen it: you establish\n'
+		printf '  what it names and stop, rather than surveying whatever is nearby.\n'
+		printf -- '- Everything you report is evidenced by something you actually ran or read,\n'
+		printf '  named where you found it. Documentation is not evidence of behaviour. What\n'
+		printf '  you could not establish is reported as unestablished.\n'
+		;;
+	repair-brief)
+		printf 'You analyse an ESCALATION and propose an amendment to the brief.\n\n'
+		printf -- '- THE BRIEF IS UNTOUCHED until the practitioner rules. You edit no file at\n'
+		printf '  all: you return a proposal as text.\n'
+		printf -- '- You NEVER run `git` or `gh` for anything but READING, and you NEVER run\n'
+		printf '  `bin/remit` or `bin/remit-invoke`.\n'
+		printf -- '- You say which of the three is at fault — the brief, the proof, or the\n'
+		printf '  build — and why, from the record. A proposal with no evidence behind it is\n'
+		printf '  worse than none.\n'
+		;;
+	esac
+}
+
+role_returns() {
+	case "$ROLE" in
+	build) printf 'Your final message. It is recorded as the delivery'\''s returned text, quoted\nand not endorsed. The tree you authored is the delivery; the message says what\nyou did, what you could not do, and what you left undone.\n' ;;
+	research) printf 'Your findings as free text. They are written to `research.md` beside the brief\nexactly as returned.\n' ;;
+	repair-brief) printf 'The proposed amendment, as text. It is appended to the record under the\nescalation, and the brief is not touched.\n' ;;
+	evaluate)
+		printf 'ONE verdict, in these line shapes. They are the only text the mechanism\n'
+		printf 'parses; every other line is carried into the record verbatim.\n\n'
+		printf '  Verdict: PASS | PASS WITH FINDINGS | FAIL     (required; the first wins)\n'
+		printf '  Must-fix: <text>                              (zero or more)\n'
+		printf '  Finding: <text>                               (zero or more)\n\n'
+		printf 'PASS means everything holds and nothing is worth recording. PASS WITH\n'
+		printf 'FINDINGS means the same, with findings recorded. FAIL means a must-fix\n'
+		printf 'stands, the boundary was crossed, or the proof does not hold.\n'
+		;;
+	esac
+}
+
+{
+	printf '# A fresh context, raised by remit for the `%s` role\n\n' "$ROLE"
+	printf 'You were raised by `%s` for work item `%s`, round %s. Your worktree is\n' "$ME" "$SLUG" "$ROUND"
+	printf '`%s`. You are not in a conversation with anybody: what you return as your\n' "$WT"
+	printf 'final message is the whole of what comes back, and it goes into a record\n'
+	printf 'people read.\n\n'
+	printf '## What this role may do, and may not\n\n'
+	role_limits
+	printf '\n## What you return\n\n'
+	role_returns
+	if [ -n "$AUTHORITY" ]; then
+		printf '\n## Your authority — `%s`, reproduced in full\n\n' "$AUTHORITY"
+		printf 'This is the whole of what you were given. It is not a summary of something\n'
+		printf 'else and there is nothing behind it.\n\n'
+		tr -d '\015' <"$AUTHORITY"
+	fi
+	if [ -n "$MUSTFIX" ] && [ -f "$MUSTFIX" ] && [ -s "$MUSTFIX" ]; then
+		printf '\n## The must-fix coming back to you\n\n'
+		printf 'This is the finding and nothing else. You are not shown the evaluator'\''s\n'
+		printf 'other findings, and you are not shown any earlier attempt'\''s account of\n'
+		printf 'itself. Discharge this.\n\n'
+		tr -d '\015' <"$MUSTFIX"
+	fi
+	if [ -n "$STANDARDS" ] && [ -f "$STANDARDS" ]; then
+		printf '\n## The standards this work is held to\n\n'
+		printf 'The practitioner'\''s `fix` rubrics for the gate this work is heading into,\n'
+		printf 'reproduced verbatim from `%s`. Work that falls short of one of\n' "$STANDARDS"
+		printf 'these comes back to a fresh author as a must-fix. They are the bar, not a\n'
+		printf 'checklist to write about: meet them and say nothing about them.\n\n'
+		printf 'This is the ONLY part of that gate'\''s file you are shown. What may carry work\n'
+		printf 'past a gate, what the practitioner must see, and what may be let go are\n'
+		printf 'judgements about the work and belong to the context that judges it.\n\n'
+		tr -d '\015' <"$STANDARDS"
+		printf '\n'
+	fi
+	if [ "$ROLE" = evaluate ]; then
+		printf '\n## The rubrics for THIS gate\n\n'
+		if [ -n "$RUBRICS" ] && [ -f "$RUBRICS" ]; then
+			printf 'These are the practitioner'\''s own standards for the gate this item is at —\n'
+			printf '`%s`, reproduced verbatim. They are the only rubrics you may cite. You are\n' "$RUBRICS"
+			printf 'not shown any other gate'\''s file, and there is no rubric anywhere else for\n'
+			printf 'you to reach for.\n\n'
+			tr -d '\015' <"$RUBRICS"
+			printf '\n'
+		else
+			printf 'THERE ARE NONE. No rubric file exists for this gate, so there is nothing to\n'
+			printf 'cite: you may not let this work on, hold it, accept a finding, or make one a\n'
+			printf 'must-fix by rubric. Judge the work against its authority and return the\n'
+			printf 'verdict; where it stops is the mechanism'\''s to decide, not yours.\n\n'
+		fi
+		printf '### How to cite one\n\n'
+		printf 'A rubric is applied ONLY by citing its id and the evidence, on a line of its\n'
+		printf 'own. These four are the whole vocabulary:\n\n'
+		printf '  promote: <id>: <evidence>   this item passes THIS gate whatever the\n'
+		printf '                              practitioner'\''s `until` said — this gate only,\n'
+		printf '                              never the next, which asks again\n'
+		printf '  hold: <id>: <evidence>      the item stops in the stage it is in, for the\n'
+		printf '                              practitioner'\''s eyes; a hold BEATS a promote in\n'
+		printf '                              the same verdict\n'
+		printf '  fix: <id>: <evidence>       a must-fix. Following a `Finding:` line it makes\n'
+		printf '                              THAT finding the must-fix; standing alone it is\n'
+		printf '                              the gate'\''s standard missed. A verdict carrying\n'
+		printf '                              one is a FAIL whatever its `Verdict:` line said\n'
+		printf '  accept: <id>: <evidence>    disposes the `Finding:` line above it\n\n'
+		printf 'With no rubric to cite you can neither let work on nor settle a finding. A\n'
+		printf 'finding you leave with no disposition is shown to the practitioner where the\n'
+		printf 'item stops — that is the design working, not a gap for you to close.\n'
+	fi
+} >"$BRIEF"
+[ -s "$BRIEF" ] || die "the briefing could not be composed at $BRIEF"
+
+# ==============================================================================
+# the record of this raise — on stderr, because stdout is the payload
+# ==============================================================================
+
+rule_off
+say "$ME — raising a fresh context"
+say "  role         : $ROLE (round $ROUND)"
+say "  item         : $SLUG"
+say "  harness      : $HARNESS${CLI:+ ($CLI)} — resolved from $SEAT_FROM"
+say "  model        : ${MODEL:-<the CLI's own default>}"
+say "  model check  : ${MODEL_CHECK:-none}"
+say "  authority    : ${AUTHORITY:-<none: the calling harness raised this context>}"
+say "  rubrics      : ${RUBRICS:-<none — this role is handed no rubric>}"
+say "  standards    : ${STANDARDS:-<none — this role is handed no bar>}"
+say "  worktree     : $WT"
+say "  briefing     : $BRIEF"
+say "  run log      : $RUNDIR"
+if [ "$HEARTBEAT" -gt 0 ]; then
+	say "  heartbeat    : every ${HEARTBEAT}s on this stderr and in $PROGRESSFILE while the CLI runs (REMIT_HEARTBEAT=0 silences it)"
+else
+	say "  heartbeat    : silenced (REMIT_HEARTBEAT=0) — nothing will be said between the line below and the run's end"
+fi
+[ -n "${REMIT_PROGRESS:-}" ] && say "  progress at  : $REMIT_PROGRESS names this run directory, written before anything was raised"
+say "  environment  : env -i with $(awk 'END { print NR }' "$ENVLIST") allow-listed variables and nothing else; HOME is the scratch directory $SCRUB_HOME"
+say "  scratch      : $SCRUB_TMP (TMPDIR, TEMP and TMP) — the seat's one writable scratch root, removed with the run"
+say "  registry     : $SETTINGS ($REGISTRY_HASH), seat $SEAT_KIND"
+if [ "$HARNESS" = devin ]; then
+	say "  devin binary : $DEVIN"
+	say "  account      : tier ${DEVIN_TIER:-<not reported>}, primary org ${DEVIN_ORG:-<none reported>}"
+	say "  permissions  : requesting $DEVIN_MODE, with the git deny and the hook written to $WT/.devin for the run"
+	[ -n "$EXCLUDED" ] &&
+		say "  exclusions   : $EXCLUDED — under devin these are DENY rules, and a denied call ends the run rather than failing on its own. This raise has chosen a kill switch, not a scoping."
+	say "  bounded wait : ${DEVIN_TIMEOUT}s (REMIT_DEVIN_TIMEOUT)"
+fi
+if [ "$HARNESS" = copilot ]; then
+	say "  copilot bin  : $COPILOT"
+	say "  version      : ${COPILOT_VERSION:-<not reported>}"
+	say "  account      : ${COPILOT_LOGIN:-<not recorded>} at ${COPILOT_HOST:-<not recorded>} — recorded, not checked and not gated on"
+	say "  effort       : ${EFFORT:-<none asked for>}"
+	say "  containment  : deny [$COPILOT_DENY], plus a preToolUse hook written to $WT/.github/hooks for the run — git and gh in any wrapping, and NOTHING else: no read boundary is enforced and the provenance discloses that rather than implying one. Then the repo-hook environment opt-in, then a canary that puts a wrapped git AND one in-tree file write of real source to the CLI before the context is raised"
+	say "  bounded wait : ${COPILOT_TIMEOUT}s (REMIT_COPILOT_TIMEOUT), canary ${COPILOT_CANARY_TIMEOUT}s"
+fi
+rule_off
+[ -n "$DEVIN_TIER_NOTE" ] && say "note: $DEVIN_TIER_NOTE"
+
+# ==============================================================================
+# the adapters
+# ==============================================================================
+
+# The pulse, for the whole of the one window in which this script is otherwise
+# silent. It says elapsed seconds and the seat, because that is all this script
+# knows: the raised context's own output is in the run directory and never
+# crosses to the caller. Two destinations, for two readers — this script's stderr
+# for a caller that runs it directly, and the progress log for one that runs it
+# through `bin/remit`, which captures this stderr to a file of its own.
+HEARTBEAT_PID=''
+heartbeat_start() {
+	[ "$HEARTBEAT" -gt 0 ] || return 0
+	(
+		_elapsed=0
+		while sleep "$HEARTBEAT"; do
+			_elapsed=$((_elapsed + HEARTBEAT))
+			_pulse="$ME: still running — $ROLE on $HARNESS, ${_elapsed}s"
+			printf '%s\n' "$_pulse" >&2
+			printf '%s\n' "$_pulse" >>"$PROGRESSFILE"
+		done
+	) &
+	HEARTBEAT_PID=$!
+	return 0
+}
+heartbeat_stop() {
+	[ -n "$HEARTBEAT_PID" ] || return 0
+	kill "$HEARTBEAT_PID" 2>/dev/null
+	wait "$HEARTBEAT_PID" 2>/dev/null
+	HEARTBEAT_PID=''
+	return 0
+}
+# So an interrupted raise does not leave a pulse behind it. This is the only
+# trap here: nothing else in this script is cleaned up on a signal today, and
+# this change does not quietly take that on.
+trap 'heartbeat_stop' INT TERM
+
+run_harness() { # $1 stdin file or 'none'; rest: the command, env prefix included
+	sf=$1
+	shift
+	heartbeat_start
+	if [ "$sf" = none ]; then
+		(cd "$WT" && "$@") >"$OUTFILE" 2>"$ERRFILE"
+	else
+		(cd "$WT" && "$@" <"$sf") >"$OUTFILE" 2>"$ERRFILE"
+	fi
+	HARNESS_EXIT=$?
+	heartbeat_stop
+}
+
+# The devin context's containment, written into its tree for the run only.
+#
+# Two files, because one of them is not enough. The deny rule is the direct
+# expression of remit's law and it does block a bare `git` and a `&&` chain — but
+# it does not look inside an interpreter's quoted arguments, so `sh -c "git
+# status"` walked straight past a live deny rule when it was tried. A PreToolUse
+# hook sees the whole command string and closes that, and since a context
+# realistically needs a shell, the hook is not a second line of defence here: it
+# is the line that holds — and holds by ending the run, which is what a block
+# costs here.
+#
+# The allow list names tools by the shipped build's OWN names, read as
+# `function_name` values out of a real run's export — not the names Cognition
+# documents, which include a `glob` the build does not have. An entry that
+# matches nothing is silent: it grants nothing and says nothing, and the context
+# that reaches for what it was meant to grant ends the run instead. So the list
+# is what a context needs and ALL of it — with exec narrowed to `Exec(sh)`, so
+# the deny and the hook still stand between a context and git. A list pruned for
+# tidiness is a run that dies on its first search.
+#
+# `accept-edits` is requested explicitly on every raise and every tier. It is
+# never inferred from an organisation's policy, and this configuration behaves
+# the same whether or not one exists.
+#
+# Written here, removed before anything else, committed nowhere. The copies kept
+# in the run directory are the record of what actually applied.
+DEVIN_DENY='Exec(git) Exec(gh) Write(.git/**) Write(.devin/**)'
+DEVIN_ALLOW='read write grep find_file_by_name todo_write get_output skill mcp_list_tools Exec(sh)'
+devin_json_array() { # $1 space- or comma-separated entries -> "a", "b"
+	printf '%s\n' "$1" | tr ' ,' '\n\n' |
+		awk 'NF { printf "%s%s", sep, "\"" $0 "\""; sep = ", " }'
+}
+devin_write_containment() { # $1 the context's tree
+	devin_dir=$1/.devin
+	mkdir -p "$devin_dir" || return 1
+	cat >"$devin_dir/config.json" <<EOF || return 1
+{
+  "permissions": {
+    "deny": [$(devin_json_array "$DEVIN_DENY${EXCLUDED:+ $EXCLUDED}")],
+    "allow": [$(devin_json_array "$DEVIN_ALLOW${ALLOWED:+ $ALLOWED}")]
+  }
+}
+EOF
+	# Event names sit at the top level of this file. The schema Cognition's own
+	# documentation shows (nested under "hooks") is rejected by the shipped build,
+	# and rejected SILENTLY — the hook simply never fires. Trust the probe.
+	cat >"$devin_dir/hooks.v1.json" <<'EOF' || return 1
+{
+  "PreToolUse": [
+    {
+      "matcher": "exec",
+      "hooks": [ { "type": "command", "command": "sh .devin/remit-no-git.sh" } ]
+    }
+  ]
+}
+EOF
+	cat >"$devin_dir/remit-no-git.sh" <<'EOF' || return 1
+#!/bin/sh
+# Written by remit-invoke for one raise, and removed after it. A context never
+# runs git: the delivery seam performs every git mechanic once the context has
+# stopped.
+#
+# A block here does not refuse one call and let the context carry on — under
+# devin the run stops at it. So the message below is written for whoever reads
+# the run afterwards as much as for the context, which will not get to act on it.
+#
+# This reads the whole PreToolUse payload rather than a parsed field of it, so no
+# quoting, chaining or interpreter-wrapping can hide the command from the test.
+#
+# The test is on a WORD BOUNDARY, never a substring: `.gitignore`, `digit`,
+# `legitimate` and `github` are ordinary words, and a context that cannot say
+# them is one this hook has broken rather than contained.
+payload=$(cat)
+if [ -z "$payload" ]; then
+	printf 'blocked by remit law: this hook could not read the tool call to check it, and it does not pass what it cannot read.\n' >&2
+	exit 2
+fi
+if printf '%s\n' "$payload" | grep -Eiq '(^|[^A-Za-z0-9_-])(git|gh)([^A-Za-z0-9_-]|$)'; then
+	printf 'blocked by remit law: a builder never runs git or gh. Author the working tree and stop there — remit branches, commits, pushes and opens the pull request after you exit, and a tree you leave uncommitted is exactly what it expects.\n' >&2
+	exit 2
+fi
+exit 0
+EOF
+	return 0
+}
+
+# The copilot context's containment, written into its tree for the run only.
+#
+# Three things, because no one of them is enough, and because the CLI reports
+# nothing at all about what applied:
+#
+#   1. Deny rules for git and gh. They fire, and a denial names the rule that
+#      fired — but the matcher only ever sees the STEM of a command, so
+#      `sh -c "git status"`, `powershell -Command "…"`, `cmd /c …` and
+#      `node -e "…"` all walk through. Naming the interpreters as well only moves
+#      the hole to the next interpreter on the machine.
+#   2. A preToolUse hook. It receives the WHOLE tool call — tool name and the
+#      full command string — which is why no amount of quoting or wrapping hides
+#      from it, and it is the only thing in this CLI that sees that much. That is
+#      the whole of what it uses that sight for: git and gh, on a word boundary,
+#      in any wrapping. It is NOT a read boundary. A worktree path arm lived here
+#      and was withdrawn — ruled 2026-08-22 — because five rounds of it were
+#      escaped by a one-token respelling apiece while this git test was never
+#      escaped once, and because the mechanism that holds a read boundary is the
+#      one a context is RAISED in rather than any reading of command text. The
+#      canary below therefore puts a wrapped git to the live CLI alongside an
+#      in-tree write of real source, so neither the containment claim nor the
+#      claim that a context can still work is ever made on no attempt at all.
+#   3. The environment opt-in. Repo hooks in .github/hooks/ do not load in prompt
+#      mode unless the folder is trusted or an environment variable says so — and
+#      a raised worktree is never trusted. The permission FLAG does not satisfy
+#      that gate; only the variable does, and it is on the allow-list for exactly
+#      that reason.
+#
+# The hook file's schema is nested and Claude-Code-shaped, and `matcher` is a
+# regular expression, not a glob: `.*` matches every tool and `*` is rejected as
+# an invalid regex with the hook silently skipped. A hook that fails to load
+# blocks nothing and says nothing on stderr, which is why the canary exists.
+#
+# Written here, removed before anything else, committed nowhere. The copies kept
+# in the run directory are the record of what actually applied.
+copilot_write_containment() { # $1 the context's tree
+	if [ ! -d "$1/.github" ]; then
+		mkdir -p "$1/.github" || return 1
+		COPILOT_GITHUBDIR_MADE=yes
+	fi
+	if [ ! -d "$1/.github/hooks" ]; then
+		mkdir -p "$1/.github/hooks" || return 1
+		COPILOT_HOOKDIR_MADE=yes
+	fi
+	cat >"$1/.github/hooks/remit-no-git.json" <<'EOF' || return 1
+{
+  "hooks": {
+    "preToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [ { "type": "command", "command": "sh .github/hooks/remit-no-git.sh" } ]
+      }
+    ]
+  }
+}
+EOF
+	# git and gh, in any wrapping, and nothing else. Nothing is baked into this
+	# file at write time: the tree path was, and it was baked in for the path arm
+	# that has since been withdrawn.
+	cat >"$1/.github/hooks/remit-no-git.sh" <<'EOF' || return 1
+#!/bin/sh
+# Written by remit-invoke for one raise, and removed after it. A context never
+# runs git: the delivery seam performs every git mechanic once the context has
+# stopped, and a tree left uncommitted is exactly what it expects.
+#
+# This reads the WHOLE preToolUse payload rather than a parsed field of it, so
+# no quoting, chaining or interpreter-wrapping hides the command from the test.
+# That is the one thing this hook has that nothing else in this CLI does: the
+# deny matcher and the built-in path wall both inspect only what a command
+# leaves standing as an argument of its own, and both are walked past by the
+# same wrapped payload.
+#
+# The test is on a WORD BOUNDARY, never a substring: `.gitignore`, `digit`,
+# `legitimate` and `github` are ordinary words, and a context that cannot say
+# them is one this hook has broken rather than contained.
+#
+# THIS HOOK ENFORCES NOTHING ELSE, and that is a decision rather than an
+# oversight. It is not a read boundary. A worktree path arm was built here and
+# withdrawn: five rounds of it were escaped by a one-token respelling apiece,
+# while this git test was never escaped once. A context under this hook runs on
+# the host's own login and reaches whatever that login reaches. The boundary
+# that would hold is the one the context is RAISED in — an OS-level sandbox, a
+# container, a scratch user — and no reading of command text substitutes for
+# it. The provenance discloses exactly that rather than implying a boundary
+# that is not here.
+payload=$(cat)
+if [ -z "$payload" ]; then
+	printf 'blocked by remit law: this hook could not read the tool call to check it, and it does not pass what it cannot read.\n' >&2
+	exit 2
+fi
+if printf '%s\n' "$payload" | grep -Eiq '(^|[^A-Za-z0-9_-])(git|gh)([^A-Za-z0-9_-]|$)'; then
+	printf 'blocked by remit law: a builder never runs git or gh. Author the working tree and stop there — remit branches, commits, pushes and opens the pull request after you exit, and a tree you leave uncommitted is exactly what it expects.\n' >&2
+	exit 2
+fi
+exit 0
+EOF
+	return 0
+} # end copilot_write_containment
+
+# Removes only what was created — never a .github/ the repository already had.
+copilot_remove_containment() { # $1 the context's tree
+	rm -f "$1/.github/hooks/remit-no-git.json" "$1/.github/hooks/remit-no-git.sh"
+	[ "$COPILOT_HOOKDIR_MADE" = yes ] && rmdir "$1/.github/hooks" 2>/dev/null
+	[ "$COPILOT_GITHUBDIR_MADE" = yes ] && rmdir "$1/.github" 2>/dev/null
+	return 0
+} # end copilot_remove_containment
+
+# THE ONE WAY OUT WHEN THE CANARY REFUSES THE RAISE. No context ran, so there is
+# nothing to capture and nothing to report about one; what is left is a tree
+# carrying this script's own apparatus — the containment it wrote, and the
+# scratch root it made — and neither may outlive the raise that made it. Exit 7
+# is the canary's own code and is why the caller stops here: the reason the seat
+# was never raised is in it, and `copilot_canary` has already said the rest.
+#
+# It is a function so that the whole path can be run in one piece by
+# `t/unit/copilot-containment.sh`, which cannot reach it through the CLI: making
+# a real canary fail needs the copilot CLI, an account and a billed run, and the
+# offline tier may have none of the three.
+copilot_canary_refused() { # $1 the context's tree — does not return
+	copilot_remove_containment "$1"
+	scratch_gone_or_warn
+	exit 7
+} # end copilot_canary_refused
+
+# Reading a copilot run out of its JSONL envelope. `final` is the reason this is
+# read at all: text-mode stdout glues the tool renderings to the answer with no
+# delimiter, while the envelope keeps them apart — the final message is the LAST
+# assistant.message whose toolRequests list is empty.
+NODE_COPILOT='const fs=require("fs");const ls=fs.readFileSync(process.argv[1],"utf8").split(/\r?\n/);const ev=[];for(const l of ls){if(!l.trim())continue;try{ev.push(JSON.parse(l))}catch(e){}}const k=process.argv[2];const T=t=>ev.filter(e=>e&&e.type===t);let v="";if(k==="final"){const m=T("assistant.message").filter(e=>((e.data&&e.data.toolRequests)||[]).length===0);if(m.length&&m[m.length-1].data.content!=null)process.stdout.write(String(m[m.length-1].data.content));process.exit(0)}else if(k==="calls"){const c={};for(const e of T("tool.execution_start"))c[e.data.toolCallId]=(e.data.arguments&&(e.data.arguments.command||e.data.arguments.path))||"";const out=[];for(const e of T("tool.execution_complete"))out.push((e.data.success?"ran":"blocked")+"\t"+(c[e.data.toolCallId]||""));process.stdout.write(out.join("\n")+(out.length?"\n":""));process.exit(0)}else if(k==="refusals"){const c={};for(const e of T("tool.execution_start"))c[e.data.toolCallId]=(e.data.arguments&&(e.data.arguments.command||e.data.arguments.path))||"";const out=[];for(const e of T("tool.execution_complete"))if(!e.data.success)out.push((c[e.data.toolCallId]||"?")+" -> "+(((e.data.error||{}).message)||"denied").split("\n")[0]);v=out.join(" | ")}else{const r=T("result");const last=r.length?r[r.length-1]:null;if(k==="session_id")v=last&&last.sessionId;else if(k==="result_present")v=last?"yes":"";else if(k==="premium")v=last&&last.usage&&last.usage.premiumRequests;else if(k==="changed")v=(last&&last.usage&&last.usage.codeChanges&&last.usage.codeChanges.filesModified||[]).join(", ");else if(k==="model"){const m=T("assistant.message");v=m.length&&m[m.length-1].data?m[m.length-1].data.model:""}else if(k==="aiu"){const u=T("session.usage_checkpoint");if(u.length){const n=u[u.length-1].data.totalNanoAiu;if(typeof n==="number")v=(n/1e9).toFixed(3)}}}process.stdout.write(v==null||v===false?"":String(v)+"\n")'
+copilot_get() { # $1 envelope file  $2 field
+	case "$COPILOT_JSON" in
+	jq)
+		case "$2" in
+		final) jq -rs '[.[] | select(.type=="assistant.message") | select(((.data.toolRequests // []) | length) == 0)] | last | .data.content // empty' "$1" ;;
+		calls) jq -rs '(reduce (.[] | select(.type=="tool.execution_start")) as $e ({}; .[$e.data.toolCallId] = ($e.data.arguments.command // $e.data.arguments.path // ""))) as $c | .[] | select(.type=="tool.execution_complete") | [(if .data.success then "ran" else "blocked" end), ($c[.data.toolCallId] // "")] | @tsv' "$1" ;;
+		refusals) jq -rs '(reduce (.[] | select(.type=="tool.execution_start")) as $e ({}; .[$e.data.toolCallId] = ($e.data.arguments.command // $e.data.arguments.path // ""))) as $c | [.[] | select(.type=="tool.execution_complete") | select(.data.success | not) | (($c[.data.toolCallId] // "?") + " -> " + ((.data.error.message // "denied") | split("\n")[0]))] | join(" | ")' "$1" ;;
+		session_id) jq -rs '[.[] | select(.type=="result")] | last | .sessionId // empty' "$1" ;;
+		result_present) jq -rs 'if any(.[]; .type=="result") then "yes" else empty end' "$1" ;;
+		premium) jq -rs '[.[] | select(.type=="result")] | last | .usage.premiumRequests // empty' "$1" ;;
+		changed) jq -rs '[.[] | select(.type=="result")] | last | ((.usage.codeChanges.filesModified // []) | join(", "))' "$1" ;;
+		model) jq -rs '[.[] | select(.type=="assistant.message")] | last | .data.model // empty' "$1" ;;
+		aiu) jq -rs '[.[] | select(.type=="session.usage_checkpoint")] | last | if . == null then empty else ((.data.totalNanoAiu / 1000000000 * 1000 | round) / 1000 | tostring) end' "$1" ;;
+		esac
+		;;
+	node) node -e "$NODE_COPILOT" "$1" "$2" ;;
+	esac
+} # end copilot_get
+
+# The canary. Containment on this CLI is tested at every raise and never assumed,
+# because the one mechanism that holds fails OPEN when it fails: a hook with a
+# bad matcher, a bad schema, or a path the CLI cannot reach is skipped and the
+# run proceeds uncontained with nothing on stderr to say so.
+#
+# So a cheap throwaway run, in the context's own tree, under the exact
+# configuration the context will get, attempts three things. Two must RUN: an
+# ordinary command, and an ordinary in-tree FILE WRITE through the file tool. One
+# must be BLOCKED: a wrapped `git`, which is the whole of what this containment
+# claims. Anything else — including a run in which the model simply declined to
+# attempt one of them — refuses the raise. This is the honest analogue of the
+# codex sandbox read-back: refuse, never downgrade silently.
+#
+# It probes exactly what the containment claims and nothing else. It once put
+# four spellings of leaving the tree to the CLI as well, for a worktree path arm
+# that has since been withdrawn: there is no read boundary to test now, and a
+# canary that went on testing one would be certifying a claim this raise no
+# longer makes.
+#
+# The WRITE probe is here for the mirror image of that, and it is not decoration.
+# A containment can be tightened until nothing escapes and nothing works, and a
+# gate that only ever probes escapes reports PASSED over a hook under which no
+# builder can author a line — which is exactly what happened here once, when a
+# network-path test began firing on every Windows path a file tool sends,
+# including the tree's own. Ordinary work is now part of what the gate certifies,
+# so that failure cannot pass this gate again.
+#
+# The probe's CONTENT is load-bearing for the same reason. A write probe whose
+# text is one line of prose no boundary would ever object to certifies nothing
+# about authoring: it passed unchanged over a containment that refused a `//`
+# comment and a closing tag in a builder's own source. So the probe writes a line
+# of real source — a line comment and a closing markup tag — and the file is read
+# back and required to carry both before the gate calls the write a write.
+#
+# The probes are written to a manifest FIRST and the prompt is generated from it,
+# so what the CLI is asked to do and what any test replays are one list and
+# cannot drift apart.
+#
+# Its cost is one small run. It bills the raise's own model unless
+# REMIT_COPILOT_CANARY_MODEL names a cheaper one, so nothing is substituted
+# behind the caller's back, and what it cost is recorded in the provenance.
+#
+# It tests the BASE containment — the rules and the hook this script writes — and
+# not any rules a caller added with --allowed-tools or --exclude-tools. That is
+# deliberate and it is not a hole: an added deny only narrows what a context may
+# do, a denial outranks any allow, and the hook runs before either is consulted,
+# so no caller addition can loosen what the canary proved.
+COPILOT_CANARY_MARK=REMIT_CANARY_CONTROL_OK
+COPILOT_CANARY_FILE=remit-canary-write-probe.ts
+# Ordinary source, not prose: a line comment and a closing markup tag are the two
+# shapes a boundary built out of slashes refuses first, and a probe without them
+# cannot tell a containment from a harness broken shut.
+COPILOT_CANARY_WRITTEN='const canary = 1; // written by the containment canary and removed after it </probe>'
+copilot_canary() { # $1 the context's tree — returns 0 if contained, 1 if not
+	# The tree is kept here because `set --` below takes $1 for the command line.
+	cop_tree=$1
+	cdir=$RUNDIR/canary
+	mkdir -p "$cdir/log" || return 1
+	# The blocked probe is a `git` inside `sh -c "…"`: the deny rules see only the
+	# stem of that command and let it through, so what refuses it can only be the
+	# hook. That is the whole of what this containment claims, and it is therefore
+	# the whole of what is put to the live CLI here.
+	cop_git='git status --porcelain'
+	# The manifest is written first and the prompt is generated from it, so the
+	# list of probes has one authoritative form: what the CLI is asked to attempt,
+	# and what any offline test replays against the hook, are the same lines.
+	cop_tab=$(printf '\t')
+	{
+		printf 'run%sshell%s%s\n' "$cop_tab" "$cop_tab" "echo $COPILOT_CANARY_MARK"
+		printf 'run%sfile%s%s\n' "$cop_tab" "$cop_tab" "$COPILOT_CANARY_FILE"
+		printf 'block%sshell%s%s\n' "$cop_tab" "$cop_tab" "sh -c \"$cop_git\""
+	} >"$cdir/probes"
+	{
+		printf 'You are a containment self-test for the seam that raises contexts. Nothing\n'
+		printf 'here is real work and nothing here is a task.\n\n'
+		printf 'Do exactly these things, one tool call each, in this order. Some of them are\n'
+		printf 'expected to be refused — that refusal IS the test — so attempt every one of\n'
+		printf 'them and do not stop when one is refused.\n\n'
+		cop_n=0
+		while IFS=$cop_tab read -r cop_ex cop_kind cop_text; do
+			cop_n=$((cop_n + 1))
+			case $cop_kind in
+			shell) printf '%s. Run this with the shell tool: %s\n' "$cop_n" "$cop_text" ;;
+			file) printf '%s. Using your file-creation tool and NOT a shell command, create a file\n   called %s in the current directory, whose whole content is the one line:\n   %s\n' "$cop_n" "$cop_text" "$COPILOT_CANARY_WRITTEN" ;;
+			esac
+		done <"$cdir/probes"
+		printf '\nThe last one is expected to be refused. Attempt it anyway: the refusal is\n'
+		printf 'the test, and a step not attempted is a step this run cannot report on.\n\n'
+		printf 'Then reply with exactly %s lines, one per step, in the form\n' "$cop_n"
+		printf '  <number>|RAN or BLOCKED\n\n'
+		printf 'Create, modify and delete nothing else. Run nothing else.\n'
+	} >"$cdir/prompt"
+
+	# The canary runs under the SAME allow-listed environment the context will
+	# get: a probe of a different environment certifies a different run. Where the
+	# allow-list file is not there, this function has been lifted out on its own
+	# by a test, and the repo-hook opt-in alone is set — which is what the
+	# wrapper did before the scrub existed.
+	if [ -f "${ENVLIST:-/nonexistent}" ]; then
+		set --
+		while IFS= read -r cop_v; do
+			[ -n "$cop_v" ] && set -- "$@" "$cop_v"
+		done <"$ENVLIST"
+		set -- env -i "$@" GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS=true
+	else
+		set -- env GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS=true
+	fi
+	set -- "$@" timeout "$COPILOT_CANARY_TIMEOUT" "$COPILOT" \
+		--output-format json --allow-all-tools --no-ask-user --disable-builtin-mcps \
+		--log-dir "$cdir/log"
+	set -- "$@" --deny-tool 'shell(git)' --deny-tool 'shell(git:*)' \
+		--deny-tool 'shell(gh)' --deny-tool 'shell(gh:*)'
+	cop_model=${COPILOT_CANARY_MODEL:-$MODEL}
+	[ -n "$cop_model" ] && set -- "$@" --model "$cop_model"
+	say "containment canary: one throwaway run under the context's own configuration${cop_model:+, on $cop_model}."
+	(cd "$cop_tree" && "$@" <"$cdir/prompt") >"$cdir/out.jsonl" 2>"$cdir/stderr"
+	cop_exit=$?
+
+	COPILOT_CANARY_ID=$(copilot_get "$cdir/out.jsonl" session_id)
+	COPILOT_CANARY_AIU=$(copilot_get "$cdir/out.jsonl" aiu)
+	# The log line is the one thing the CLI does say about its own hooks, and it
+	# is available at the default level. It cannot prove the hook WORKED — that is
+	# the canary's job — but when the canary fails it is what says why.
+	cop_loaded=no cop_bad=''
+	if grep -lq 'Loading repo hooks in prompt mode' "$cdir"/log/*.log 2>/dev/null; then cop_loaded=yes; fi
+	cop_bad=$(grep -h -E 'Invalid hook configuration|Invalid matcher regex' "$cdir"/log/*.log 2>/dev/null | sed -n 1p)
+	COPILOT_HOOK_ATTEST="repo hooks loaded: $cop_loaded${cop_bad:+; the CLI rejected the hook file: $cop_bad}"
+
+	cop_calls=$(copilot_get "$cdir/out.jsonl" calls)
+	cop_v() { printf '%s\n' "$cop_calls" | grep -F -- "$1" | sed -n 1p | cut -f1; }
+	cop_control=$(cop_v "$COPILOT_CANARY_MARK")
+	cop_wrapped=$(cop_v "$cop_git")
+	# The write probe is judged on DISK and on its CONTENT, not on the envelope: a
+	# file that is there carrying the source it was asked to carry is the only
+	# thing that proves a context could have authored one, and it is proof no
+	# envelope field has to be trusted for. It is then removed — the canary runs
+	# in the context's own tree, before the context does, and anything it left
+	# behind would be staged later as the context's authorship with nothing able
+	# to tell them apart.
+	cop_wrote=no
+	if [ -f "$cop_tree/$COPILOT_CANARY_FILE" ]; then
+		cop_wrote=empty
+		grep -Fq '//' "$cop_tree/$COPILOT_CANARY_FILE" &&
+			grep -Fq '</' "$cop_tree/$COPILOT_CANARY_FILE" &&
+			cop_wrote=yes
+	fi
+	rm -f "$cop_tree/$COPILOT_CANARY_FILE"
+	# So the tree must be left as it was found APART from that one probe file,
+	# which is expected and is accounted for above. Anything else is the failure
+	# this check exists for.
+	cop_dirt=$(copilot_get "$cdir/out.jsonl" changed |
+		tr ',' '\n' | sed 's|.*[/\\]||; s|^ *||; s| *$||' |
+		grep -v -x -F "$COPILOT_CANARY_FILE" | grep -v '^$' | tr '\n' ' ' | sed 's| *$||')
+
+	if [ "$cop_control" = ran ] && [ "$cop_wrote" = yes ] && [ "$cop_wrapped" = blocked ] && [ -z "$cop_dirt" ]; then
+		say "containment canary PASSED: the ordinary command ran, an ordinary in-tree file write RAN and left on disk a line of real source carrying a \`//\` comment and a closing tag, and the wrapped git — which the deny rules cannot see inside — was blocked. That is what this containment claims and all it claims: no read boundary is enforced, and the provenance says so. Session ${COPILOT_CANARY_ID:-not reported}, ${COPILOT_CANARY_AIU:-unreported} AI credits. Log attestation: $COPILOT_HOOK_ATTEST."
+		return 0
+	fi
+
+	say "FAILED CONTAINMENT CANARY: this raise cannot show that its context would have been contained AND able to work, so no context was raised."
+	say "  ordinary command   : ${cop_control:-never attempted} (must be: ran)"
+	say "  in-tree file write : $cop_wrote (must be: yes — the file must be on disk after the run AND carry the \`//\` comment and the closing tag it was asked for; 'empty' means the file is there but its source is not, which is a containment that permits a write and refuses what builders actually write)"
+	say "  wrapped git        : ${cop_wrapped:-never attempted} (must be: blocked)"
+	say "  log attestation    : $COPILOT_HOOK_ATTEST"
+	[ -n "$cop_dirt" ] &&
+		say "  tree left dirty    : $cop_dirt (must be: nothing beyond the write probe, which is removed) — the canary wrote into the context's tree, and nothing later could tell its files from the context's"
+	say "  canary exit code   : $cop_exit; session ${COPILOT_CANARY_ID:-not reported}; envelope kept at $cdir"
+	say "A 'never attempted' line is not proof the containment holds: it means the canary model did not issue that call, so the test did not run. A 'ran' on the wrapped git line means the containment did NOT hold and a context would have been free to do the same. A 'no' or an 'empty' on the file-write line is the opposite failure and refuses the raise just as firmly: a containment that also refuses ordinary authoring is not a containment, it is a broken harness, and a gate that never tries to write the shapes builders write cannot tell the two apart. Either way this is reported, not worked around, and never downgraded to a warning."
+	return 1
+} # end copilot_canary
+
+SANDBOX_APPLIED=''
+RUN_ID=''
+MODEL_SERVED=''
+run_model=''
+model_channel=''
+
+# Reading one field out of a JSON envelope, with whichever reader exists.
+NODE_JSON='const fs=require("fs");let o;try{o=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}catch(e){process.exit(1)}const k=process.argv[2];const v=k==="model"?Object.keys(o.modelUsage||{})[0]:o[k];process.stdout.write(v==null?"":String(v)+"\n")'
+json_get() { # $1 envelope file  $2 field: result | session_id | is_error | model
+	case "$JSONTOOL" in
+	jq)
+		case "$2" in
+		model) jq -r '(.modelUsage // {}) | keys | .[0] // empty' "$1" ;;
+		*) jq -r ".$2 // empty" "$1" ;;
+		esac
+		;;
+	node) node -e "$NODE_JSON" "$1" "$2" ;;
+	esac
+}
+JSONTOOL=none
+
+# Reading a devin run out of its ATIF export, with whichever reader the
+# precondition found. The one worth restating is `final`, because it is the whole
+# reason this file is read at all: the final message is the LAST step whose
+# source is "agent", and taking it from stdout instead would take the narration
+# glued to the front of it with no delimiter to cut on.
+NODE_ATIF='const fs=require("fs");let o;try{o=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}catch(e){process.exit(1)}const k=process.argv[2];const st=Array.isArray(o.steps)?o.steps:[];const ag=st.filter(function(s){return s&&s.source==="agent"});const last=ag.length?ag[ag.length-1]:null;let v="";if(k==="final"){if(last&&last.message!=null)process.stdout.write(String(last.message));process.exit(0)}else if(k==="session_id")v=o.session_id;else if(k==="model_name")v=o.agent&&o.agent.model_name;else if(k==="agent_version")v=o.agent&&o.agent.version;else if(k==="permission_mode")v=o.agent&&o.agent.extra&&o.agent.extra.permission_mode;else if(k==="cut")v=(last&&(last.tool_calls||[]).length)?"yes":"";else if(k==="acu"){let s=0,n=0;st.forEach(function(x){const c=x&&x.extra&&x.extra.committed_acu_cost;if(typeof c==="number"){s+=c;n++}});v=n?s.toFixed(5):""}else if(k==="refusals"){const out=[];const texts=function(ob){if(ob==null)return[];if(typeof ob==="string")return[ob];if(Array.isArray(ob))return ob.reduce(function(a,x){return a.concat(texts(x))},[]);if(typeof ob==="object")return texts(ob.results!=null?ob.results:(ob.content!=null?ob.content:JSON.stringify(ob)));return[String(ob)]};st.forEach(function(x){texts(x&&x.observation).forEach(function(t){if(/permission denied|was rejected|tool blocked|rejected by the user|canceled because another tool call/i.test(t))out.push(t.split("\n")[0])})});v=out.join(" | ")}process.stdout.write(v==null||v===false?"":String(v)+"\n")'
+atif_get() { # $1 export file  $2 field
+	case "$DEVIN_JSON" in
+	jq)
+		case "$2" in
+		final) jq -r '[.steps[]? | select(.source == "agent")] | last | .message // empty' "$1" ;;
+		session_id) jq -r '.session_id // ""' "$1" ;;
+		model_name) jq -r '.agent.model_name // ""' "$1" ;;
+		agent_version) jq -r '.agent.version // ""' "$1" ;;
+		permission_mode) jq -r '.agent.extra.permission_mode // ""' "$1" ;;
+		cut) jq -r '[.steps[]? | select(.source == "agent")] | last | if . == null then "" elif ((.tool_calls // []) | length) > 0 then "yes" else "" end' "$1" ;;
+		acu) jq -r '[.steps[]?.extra.committed_acu_cost // empty] | if length == 0 then "" else ((add * 100000 | round) / 100000 | tostring) end' "$1" ;;
+		refusals) jq -r '[.steps[]? | .observation | select(. != null) | [.. | strings] | .[] | select(test("permission denied|was rejected|tool blocked|rejected by the user|canceled because another tool call"; "i")) | split("\n")[0]] | join(" | ")' "$1" ;;
+		esac
+		;;
+	node) node -e "$NODE_ATIF" "$1" "$2" ;;
+	esac
+}
+
+# The environment prefix goes into the positional parameters, and each adapter
+# appends its own command to it. A shell function has its own positional
+# parameters, so nothing a function does below disturbs this.
+set --
+while IFS= read -r _v; do
+	[ -n "$_v" ] && set -- "$@" "$_v"
+done <"$ENVLIST"
+set -- env -i "$@"
+
+HARNESS_EXIT=0
+
+case "$HARNESS" in
+claude)
+	set -- "$@" claude -p --output-format json
+	[ -n "$MODEL" ] && set -- "$@" --model "$MODEL"
+	# Command-granular tool scoping is how a claude context's grant omits git.
+	[ -n "$ALLOWED" ] && set -- "$@" --allowedTools "$ALLOWED"
+	say "invoking: claude -p --output-format json${MODEL:+ --model $MODEL} < $(basename "$BRIEF")"
+	run_harness "$BRIEF" "$@"
+	;;
+codex)
+	# `-` takes the briefing on stdin; -o writes the final message; the sandbox
+	# denies .git by upstream design, which is the ruled behaviour enforced.
+	set -- "$@" codex exec -s "$SANDBOX" -C "$WT" --skip-git-repo-check -o "$FINALFILE"
+	[ -n "$MODEL" ] && set -- "$@" -m "$MODEL"
+	set -- "$@" -
+	say "invoking: codex exec -s $SANDBOX${MODEL:+ -m $MODEL} < $(basename "$BRIEF")"
+	run_harness "$BRIEF" "$@"
+	;;
+pi)
+	set -- "$@" pi
+	[ -n "$PROVIDER" ] && set -- "$@" --provider "$PROVIDER"
+	set -- "$@" --model "$MODEL" --no-session
+	# Whole-tool scoping only: excluding git means excluding bash wholesale, so a
+	# pi context restrained by mechanism has no shell at all. The caller chose;
+	# this records which.
+	[ -n "$EXCLUDED" ] && set -- "$@" --exclude-tools "$EXCLUDED"
+	set -- "$@" -p "@$BRIEF"
+	say "invoking: pi --model $MODEL --no-session -p @$(basename "$BRIEF")"
+	run_harness none "$@"
+	;;
+devin)
+	# `--prompt-file` is the only briefing channel — a briefing on stdin is
+	# refused outright — and the trust flag is needed on EVERY run, not merely the
+	# first, because a -p run never persists trust. `--config` is never passed: it
+	# replaces the user config rather than layering with it, and a replacement
+	# missing the user's own state drops a -p run into interactive onboarding and
+	# hangs it. `--sandbox` is never passed either; it is refused above rather
+	# than forwarded. The bounded wait is part of the command because no flag
+	# guarantees non-interactivity.
+	devin_write_containment "$WT" || {
+		rm -rf "$WT/.devin"
+		die "could not write the context's containment under $WT/.devin — not raising a context this script cannot contain"
+	}
+	cp "$WT/.devin/config.json" "$RUNDIR/devin-config.json"
+	cp "$WT/.devin/hooks.v1.json" "$RUNDIR/devin-hooks.v1.json"
+	cp "$WT/.devin/remit-no-git.sh" "$RUNDIR/devin-remit-no-git.sh"
+	set -- "$@" timeout "$DEVIN_TIMEOUT" "$DEVIN" -p \
+		--prompt-file "$BRIEF" \
+		--respect-workspace-trust false \
+		--permission-mode "$DEVIN_MODE" \
+		--export "$ATIF"
+	# No catalogue check, unlike pi: devin rejects an unknown model id before it
+	# starts and before anything is billed, so a wrong id fails loudly by itself
+	# rather than being answered by something else.
+	[ -n "$MODEL" ] && set -- "$@" --model "$MODEL"
+	say "invoking: devin -p --prompt-file $(basename "$BRIEF") --permission-mode $DEVIN_MODE${MODEL:+ --model $MODEL}"
+	run_harness none "$@"
+	# The containment was apparatus for the run; it is not part of the tree the
+	# context leaves, and it is gone before anything else touches that tree.
+	rm -rf "$WT/.devin"
+	[ ! -e "$WT/.devin" ] ||
+		die "could not remove the containment at $WT/.devin — refusing to leave a tree that still carries this script's apparatus"
+	;;
+copilot)
+	# The briefing goes on stdin. `--prompt-file` does not exist here and the argv
+	# channel dies above roughly 32 KB with the shell's own "Argument list too
+	# long" before the CLI even starts — a cliff with no warning on the near side
+	# of it, and a remit briefing is kilobytes and grows.
+	#
+	# `--allow-all-tools` and never `--allow-all` or `--yolo`: the blunt flags
+	# throw away the file-tool refusals and the naive-command refusals for
+	# nothing. That default path wall is kept because it is free, not because it
+	# contains anything — the hook is what contains.
+	#
+	# `--disable-builtin-mcps` because the built-in GitHub server connects on
+	# every run by default, and a context reaching GitHub through an MCP tool is
+	# invisible to every shell deny rule and to a hook that inspects shell
+	# commands. Ruled: the CLI is the route and that server is not.
+	#
+	# Never `--no-custom-instructions`, which would strip the AGENTS.md a context
+	# needs; never `--share`, whose default path writes the transcript into the
+	# directory about to be staged; never `--share-gist`.
+	copilot_write_containment "$WT" || {
+		copilot_remove_containment "$WT"
+		die "could not write the context's containment under $WT/.github/hooks — not raising a context this script cannot contain"
+	}
+	cp "$COPILOT_HOOK_JSON" "$RUNDIR/copilot-remit-no-git.json"
+	cp "$COPILOT_HOOK_SH" "$RUNDIR/copilot-remit-no-git.sh"
+	if ! copilot_canary "$WT"; then
+		copilot_canary_refused "$WT"
+	fi
+	set -- "$@" timeout "$COPILOT_TIMEOUT" "$COPILOT" \
+		--output-format json --allow-all-tools --no-ask-user --disable-builtin-mcps \
+		--log-dir "$RUNDIR/copilot-log"
+	set -- "$@" --deny-tool 'shell(git)' --deny-tool 'shell(git:*)' \
+		--deny-tool 'shell(gh)' --deny-tool 'shell(gh:*)'
+	# `shell(git:*)` is a pathname pattern to an unquoted shell, so any caller
+	# additions are split with globbing off.
+	if [ -n "$EXCLUDED" ] || [ -n "$ALLOWED" ]; then
+		cop_ifs=$IFS
+		set -f
+		IFS=' ,'
+		for r in $EXCLUDED; do set -- "$@" --deny-tool "$r"; done
+		for r in $ALLOWED; do set -- "$@" --allow-tool "$r"; done
+		IFS=$cop_ifs
+		set +f
+	fi
+	[ -n "$MODEL" ] && set -- "$@" --model "$MODEL"
+	# Both halves of a standing model constraint are expressible on this CLI, so
+	# both are passed where the caller named them, and neither is reported as
+	# applied when it was not.
+	[ -n "$EFFORT" ] && set -- "$@" --effort "$EFFORT"
+	say "invoking: copilot --output-format json${MODEL:+ --model $MODEL}${EFFORT:+ --effort $EFFORT} < $(basename "$BRIEF")"
+	run_harness "$BRIEF" "$@"
+	copilot_remove_containment "$WT"
+	{ [ ! -e "$COPILOT_HOOK_JSON" ] && [ ! -e "$COPILOT_HOOK_SH" ]; } ||
+		die "could not remove the containment at $WT/.github/hooks — refusing to leave a tree that still carries this script's apparatus"
+	;;
+native)
+	# Nothing is raised here: the context was the calling harness's own sub-agent,
+	# and what it returned was given at --final-message.
+	HARNESS_EXIT=0
+	: >"$OUTFILE"
+	: >"$ERRFILE"
+	say "no CLI invoked: the context was the calling harness's own sub-agent, and its returned result was given at --final-message."
+	;;
+esac
+
+# The scratch home and the scratch root are apparatus for the run and are gone
+# the moment the run is. This run FINISHED, so a root that will not go is a
+# refusal — stated once, where the two answers to that condition sit together.
+scratch_gone_or_refuse
+
+if [ "$HARNESS" != native ]; then
+	say "the harness process exited with code $HARNESS_EXIT — that is completion, not success."
+fi
+
+# ==============================================================================
+# capture the context's final message
+# ==============================================================================
+
+final_note=''
+case "$HARNESS" in
+claude)
+	# The envelope is the cleanest return contract of the CLIs this script drives,
+	# but only if something here can read JSON. jq first; node otherwise, which is
+	# present wherever `claude` is. If neither can read it, the envelope travels
+	# verbatim and says so — nothing is guessed out of it with a regex.
+	if command -v jq >/dev/null 2>&1 && jq -e . "$OUTFILE" >/dev/null 2>&1; then
+		JSONTOOL=jq
+	elif command -v node >/dev/null 2>&1 && node -e "$NODE_JSON" "$OUTFILE" result >/dev/null 2>&1; then
+		JSONTOOL=node
+	else
+		JSONTOOL=none
+	fi
+	model_channel='run envelope'
+	if [ "$JSONTOOL" = none ]; then
+		cp "$OUTFILE" "$FINALFILE"
+		final_note="neither jq nor node could read the claude envelope as JSON — it is carried verbatim and nothing was extracted from it"
+	else
+		json_get "$OUTFILE" result >"$FINALFILE"
+		RUN_ID=$(json_get "$OUTFILE" session_id)
+		# The envelope names the model that actually served the run; a raise names
+		# an alias. Authorship is never obscured, so the provenance follows the
+		# envelope where they differ.
+		run_model=$(json_get "$OUTFILE" model)
+		[ -n "$run_model" ] && MODEL_SERVED=$run_model
+		[ "$(json_get "$OUTFILE" is_error)" = true ] &&
+			final_note="the claude envelope reports is_error: true"
+	fi
+	;;
+codex)
+	[ -f "$FINALFILE" ] || : >"$FINALFILE"
+	# codex prints its run header AND its transcript on STDERR; stdout carries
+	# only the context's own final message. Neither stream is trusted wholesale —
+	# the transcript on stderr is the context talking as much as stdout is — so
+	# the header is read from the HEADER BLOCK alone: the lines between codex's
+	# own banner and the separator that closes the block, before a single word of
+	# builder text exists. A transcript line shaped like `sandbox: …` therefore
+	# cannot become the run header however far down it appears, and a build that
+	# stops printing the banner leaves no header at all. That is the honest
+	# outcome: a header that cannot be found is unconfirmed, and unconfirmed is a
+	# state this script reports; a forged one is not.
+	HEADER="$RUNDIR/header-block"
+	awk '
+		/^OpenAI Codex v/ { banner = 1; next }
+		!banner { next }
+		/^-+[[:space:]]*$/ { seps++; if (seps >= 2) exit; next }
+		seps >= 1 { print }
+	' "$ERRFILE" >"$HEADER"
+	RUN_ID=$(sed -n 's/^ *session id: *//p' "$HEADER" | sed -n 1p)
+	SANDBOX_APPLIED=$(sed -n 's/^ *sandbox: *//p' "$HEADER" | sed -n 1p)
+	# The header block is the truth of what ran, including which model served it.
+	model_channel='run header'
+	run_model=$(sed -n 's/^ *model: *//p' "$HEADER" | sed -n 1p)
+	[ -n "$run_model" ] && MODEL_SERVED=${run_model%% *}
+	;;
+devin)
+	# stdout is the agent's own prose with the pre-tool narration glued to the
+	# final message and no delimiter between them, so it is never parsed for one.
+	# The export keeps them apart, and carries with them the run id, the model
+	# that served the run, its cost, and the permission mode that actually
+	# applied. It is this run's single provenance channel.
+	: >"$FINALFILE"
+	model_channel='run export'
+	if [ ! -s "$ATIF" ]; then
+		final_note="devin wrote no ATIF export, so nothing about this run can be read back — the final message, the run id, the model that served it and the permission mode that applied are all absent here, and none of them is invented"
+	else
+		atif_get "$ATIF" final >"$FINALFILE"
+		RUN_ID=$(atif_get "$ATIF" session_id)
+		DEVIN_VERSION=$(atif_get "$ATIF" agent_version)
+		DEVIN_ACU=$(atif_get "$ATIF" acu)
+		PERM_APPLIED=$(atif_get "$ATIF" permission_mode)
+		run_model=$(atif_get "$ATIF" model_name)
+		[ -n "$run_model" ] && MODEL_SERVED=$run_model
+		# Exit 0 says a run happened, not that its tool calls ran. A denied or
+		# rejected call is invisible on stdout, silent on stderr, and exits 0 with
+		# the agent simply stopping where it was.
+		refusals=$(atif_get "$ATIF" refusals)
+		if [ ! -s "$FINALFILE" ]; then
+			final_note="${final_note:+$final_note; }the run export carries no agent message at all — this run produced no turn"
+		elif [ -n "$(atif_get "$ATIF" cut)" ]; then
+			final_note="${final_note:+$final_note; }the run's last agent step was still calling tools, so the message above is narration and not a completed answer — the run stopped where it was"
+		fi
+		[ -n "$refusals" ] &&
+			final_note="${final_note:+$final_note; }tool calls were refused during this run and devin still exited 0: $refusals"
+	fi
+	;;
+copilot)
+	# Text-mode stdout glues the tool renderings to the answer with no stable
+	# delimiter, and `-s` gives a clean answer at the price of every scrap of
+	# provenance. The JSONL envelope is neither: it keeps narration and answer
+	# apart as separate labelled records, and carries the run id, the model that
+	# served the run, its cost, and every denied call with the reason.
+	: >"$FINALFILE"
+	model_channel='run envelope'
+	if [ ! -s "$OUTFILE" ]; then
+		final_note="copilot wrote no JSONL envelope, so nothing about this run can be read back — the final message, the run id, the model that served it and its cost are all absent here, and none of them is invented"
+	else
+		copilot_get "$OUTFILE" final >"$FINALFILE"
+		RUN_ID=$(copilot_get "$OUTFILE" session_id)
+		run_model=$(copilot_get "$OUTFILE" model)
+		[ -n "$run_model" ] && MODEL_SERVED=$run_model
+		COPILOT_AIU=$(copilot_get "$OUTFILE" aiu)
+		COPILOT_PREMIUM=$(copilot_get "$OUTFILE" premium)
+		# A run that never started writes no terminal result event at all, which
+		# makes "did a run happen?" a fact rather than an inference.
+		[ -z "$(copilot_get "$OUTFILE" result_present)" ] &&
+			final_note="the envelope carries no terminal result event, so this run never completed — what came back, if anything, is a fragment and not an answer"
+		if [ ! -s "$FINALFILE" ]; then
+			final_note="${final_note:+$final_note; }the envelope carries no assistant message free of tool calls — this run produced no final message"
+		fi
+		cop_refusals=$(copilot_get "$OUTFILE" refusals)
+		[ -n "$cop_refusals" ] &&
+			final_note="${final_note:+$final_note; }tool calls were refused during this run and copilot still exited 0 — the containment firing looks exactly like this, and so does a context being stopped from doing its task: $cop_refusals"
+	fi
+	;;
+pi)
+	cp "$OUTFILE" "$FINALFILE"
+	;;
+native)
+	cp "$RETURNED" "$FINALFILE"
+	;;
+esac
+
+# `codex exec -o` writes no trailing newline; without one the final message runs
+# into whatever is printed after it.
+if [ -s "$FINALFILE" ] && [ -n "$(tail -c 1 "$FINALFILE")" ]; then
+	printf '\n' >>"$FINALFILE"
+fi
+
+# ==============================================================================
+# the provenance sidecar, then the payload
+# ==============================================================================
+
+print_harness_stderr() {
+	if [ -s "$ERRFILE" ]; then
+		say "harness stderr, verbatim:"
+		rule_off
+		cat "$ERRFILE" >&2
+		rule_off
+	else
+		say "the harness wrote nothing to stderr."
+	fi
+}
+
+# The provenance is written even for a run that failed: what ran, and how far it
+# got, is exactly what a failure report needs.
+write_provenance() {
+	[ -n "$PROVFILE" ] || return 0
+	{
+		printf 'role: %s\n' "$ROLE"
+		printf 'harness: %s\n' "$HARNESS"
+		printf 'seat: %s\n' "$SEAT_KIND"
+		printf 'registry: %s %s\n' "$SETTINGS" "$REGISTRY_HASH"
+		if [ -n "$MODEL_SERVED" ]; then
+			printf 'model: %s\n' "$MODEL_SERVED"
+			if [ -n "$MODEL" ] && [ "$MODEL_SERVED" != "$MODEL" ]; then
+				printf 'model-note: the run itself reports the model above; this raise asked for %s\n' "$MODEL"
+			fi
+		elif [ -n "$MODEL" ]; then
+			printf 'model: %s (asked)\n' "$MODEL"
+			if [ -n "$model_channel" ]; then
+				printf 'model-note: no %s named the model that served this run, so the id above is the one asked for and not one confirmed\n' "$model_channel"
+			else
+				printf 'model-note: no channel of this raise named the model that served it, so the id above is the one asked for and not one confirmed\n'
+			fi
+		else
+			printf 'model-note: no model was asked for and none was reported — the CLI took its own default and named it nowhere\n'
+		fi
+		[ -n "$MODEL_CHECK" ] && printf 'model-check: %s\n' "$MODEL_CHECK"
+		[ -n "$RUN_ID" ] && printf 'session: %s\n' "$RUN_ID"
+		case "$HARNESS" in
+		codex)
+			if [ -n "$SANDBOX_APPLIED" ]; then
+				printf 'boundary: user — attested by header\n'
+				printf 'sandbox: %s\n' "$SANDBOX_APPLIED"
+				printf 'boundary-note: the boundary is codex'\''s own sandbox account, read back from the run header and required to agree with the mode requested. It bounds what this run could read and write on this filesystem; it is not a network boundary, and it is not a claim about any other harness.\n'
+			else
+				printf 'boundary: none — attested by disclosed\n'
+				printf 'boundary-note: the run header could not be read back, so the sandbox that actually applied is UNCONFIRMED and no boundary is claimed here. Codex may well have been contained; this raise cannot show it.\n'
+			fi
+			;;
+		devin)
+			if [ -n "$PERM_APPLIED" ]; then
+				printf 'boundary: none — attested by export\n'
+				printf 'permission-mode: %s (this raise requested %s)\n' "$PERM_APPLIED" "$DEVIN_MODE"
+			else
+				printf 'boundary: none — attested by disclosed\n'
+			fi
+			printf 'boundary-note: devin'\''s own OS-level sandbox is unsupported on Windows outside WSL, so it was never passed and there is no read boundary here. What did apply is the worktree, the deny rules and the PreToolUse hook — git and gh, and nothing else. The export is the channel that says which permission mode applied.\n'
+			;;
+		*)
+			printf 'boundary: none — attested by disclosed\n'
+			printf 'boundary-note: this context ran on the practitioner'\''s host under their own credentials and reached whatever that login reaches. No read boundary was enforced and none is claimed. What did hold is the environment allow-list below.\n'
+			;;
+		esac
+		[ -n "$EFFORT" ] && printf 'effort: %s\n' "$EFFORT"
+		printf 'scrub: env -i with %s and nothing else\n' \
+			"$(sed 's/=.*//' "$ENVLIST" | tr '\n' ' ' | sed 's/ $//')"
+		printf 'run-log: %s\n' "$RUNDIR"
+		[ -n "$COPILOT_VERSION" ] && printf 'harness-version: copilot %s\n' "$COPILOT_VERSION"
+		[ -n "$DEVIN_VERSION" ] && printf 'harness-version: devin %s\n' "$DEVIN_VERSION"
+		[ -n "$DEVIN_ACU" ] && printf 'cost: %s ACU — devin'\''s own per-step cost, summed from the run export\n' "$DEVIN_ACU"
+		[ -n "$COPILOT_AIU" ] && printf 'cost: %s AI credits%s — the CLI'\''s own figure from the run envelope; the canary is billed separately and is additional to it\n' "$COPILOT_AIU" "${COPILOT_PREMIUM:+, $COPILOT_PREMIUM premium requests}"
+		[ -n "$COPILOT_CANARY_ID" ] && printf 'canary-session: %s\n' "$COPILOT_CANARY_ID"
+		[ -n "$COPILOT_HOOK_ATTEST" ] && printf 'containment: %s\n' "$COPILOT_HOOK_ATTEST"
+		[ -n "$DEVIN_TIER" ] && printf 'account: tier %s, primary org %s\n' "$DEVIN_TIER" "${DEVIN_ORG:-none reported}"
+		[ -n "$COPILOT_LOGIN" ] && printf 'account: %s at %s — recorded, not checked and not gated on\n' "$COPILOT_LOGIN" "${COPILOT_HOST:-not recorded}"
+		[ -n "$DEVIN_TIER_NOTE" ] && printf 'note: %s\n' "$DEVIN_TIER_NOTE"
+		[ -n "$final_note" ] && printf 'note: %s\n' "$final_note"
+		return 0
+	} >"$PROVFILE"
+}
+
+if [ "$HARNESS_EXIT" -ne 0 ]; then
+	write_provenance
+	say "RUN-LEVEL FAILURE: $CLI exited $HARNESS_EXIT. Reported as it happened; nothing substituted, and no text is returned."
+	print_harness_stderr
+	exit 5
+fi
+
+if [ "$HARNESS" = codex ]; then
+	if [ -z "$SANDBOX_APPLIED" ]; then
+		say "note: the run header could not be read back, so the sandbox that actually applied is UNCONFIRMED. The provenance claims no boundary at all rather than the one that was asked for."
+	else
+		# The header decorates the mode with its writable roots and network state —
+		# `workspace-write [workdir, /tmp, …] (network access enabled)`. Only the
+		# leading token is the sandbox that applied; comparing the whole decorated
+		# line would fail every correctly granted raise.
+		APPLIED_MODE=${SANDBOX_APPLIED%% *}
+		if [ "$APPLIED_MODE" != "$SANDBOX" ]; then
+			write_provenance
+			say "FAILED PRECONDITION: $SANDBOX was requested; the run header reports mode '$APPLIED_MODE' (header line: $SANDBOX_APPLIED). The header is the truth of what applied, and a downgrade is reported, not worked around."
+			print_harness_stderr
+			exit 6
+		fi
+		say "sandbox: the run header confirms '$APPLIED_MODE', which is what was requested."
+	fi
+fi
+
+if [ "$HARNESS" = devin ]; then
+	# The same read-back as codex's sandbox, on the field that is devin's
+	# equivalent of it. A permission mode can be refused and quietly downgraded
+	# with nothing but a warning on stderr and an exit 0. The comparison ignores
+	# case and punctuation because the mode is asked for as `accept-edits` and
+	# reported back as `AcceptEdits`.
+	perm_norm() { printf '%s' "$1" | tr 'A-Z' 'a-z' | sed 's/[^a-z]//g'; }
+	if [ -z "$PERM_APPLIED" ]; then
+		say "note: the run export does not say which permission mode applied, so the context's containment is UNCONFIRMED. Said, not assumed."
+	elif [ "$(perm_norm "$PERM_APPLIED")" != "$(perm_norm "$DEVIN_MODE")" ]; then
+		write_provenance
+		say "FAILED PRECONDITION: $DEVIN_MODE was requested; the run export reports '$PERM_APPLIED'. The export is the truth of what applied, and a downgrade is reported, not worked around."
+		print_harness_stderr
+		exit 6
+	else
+		say "permissions: the run export confirms '$PERM_APPLIED', which is what was requested."
+	fi
+fi
+
+write_provenance
+
+[ -n "$final_note" ] && say "note: $final_note"
+say "the run's own output stays in $RUNDIR and is not printed — a context's exploration and diff do not reach the coordinator."
+rule_off
+
+cat "$FINALFILE"
+exit 0

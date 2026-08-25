@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="remit keeps practitioner-directed AI work in Git, from capture through independent evaluation and closure." />
+  <title>remit — practitioner-directed AI work in Git</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --paper: #f4f1e9;
+      --paper-raised: #fffdf7;
+      --ink: #17201d;
+      --muted: #59635e;
+      --line: #cbd0c8;
+      --accent: #075c4c;
+      --accent-ink: #f5fff9;
+      --signal: #9f321b;
+      --signal-soft: #f7ddd4;
+      --code: #101916;
+      --code-ink: #e8f3ed;
+      --shadow: rgba(24, 37, 31, .10);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --paper: #111816;
+        --paper-raised: #19221f;
+        --ink: #edf3ef;
+        --muted: #aebbb5;
+        --line: #3a4943;
+        --accent: #76d0b8;
+        --accent-ink: #0e211b;
+        --signal: #f09072;
+        --signal-soft: #512c25;
+        --code: #09100e;
+        --code-ink: #e8f3ed;
+        --shadow: rgba(0, 0, 0, .28);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 1rem;
+      line-height: 1.6;
+    }
+    a { color: var(--accent); text-underline-offset: .18em; }
+    a:hover { text-decoration-thickness: .14em; }
+    a:focus-visible { outline: .2rem solid var(--signal); outline-offset: .2rem; }
+    .wrap { width: min(70rem, calc(100% - 2rem)); margin-inline: auto; }
+    .site-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      min-height: 4.5rem;
+      border-bottom: 1px solid var(--line);
+    }
+    .wordmark { color: var(--ink); font-size: 1.2rem; font-weight: 760; text-decoration: none; }
+    .version { color: var(--muted); font-size: .8rem; letter-spacing: .06em; }
+    .hero { padding: clamp(4rem, 9vw, 8rem) 0 clamp(3rem, 7vw, 6rem); }
+    .eyebrow {
+      margin: 0 0 1.1rem;
+      color: var(--signal);
+      font-size: .78rem;
+      font-weight: 760;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 { line-height: 1.08; letter-spacing: -.035em; }
+    h1 { max-width: 16ch; margin: 0; font-size: clamp(2.7rem, 8vw, 6.8rem); }
+    h2 { max-width: 19ch; margin: 0 0 1.25rem; font-size: clamp(2rem, 5vw, 4rem); }
+    h3 { margin: 0 0 .65rem; font-size: 1.15rem; }
+    .hero-copy { max-width: 43rem; margin: 1.6rem 0 0; color: var(--muted); font-size: clamp(1.1rem, 2.2vw, 1.4rem); }
+    .actions { display: flex; flex-wrap: wrap; gap: .8rem; margin-top: 2rem; }
+    .button {
+      display: inline-block;
+      border: 1px solid var(--accent);
+      border-radius: 999px;
+      padding: .72rem 1.1rem;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-weight: 720;
+      text-decoration: none;
+    }
+    .button.secondary { background: transparent; color: var(--accent); }
+    .problem-grid, .anchor-grid, .harness-grid { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); }
+    .problem-grid { grid-template-columns: repeat(3, 1fr); }
+    .anchor-grid { grid-template-columns: repeat(6, 1fr); }
+    .harness-grid { grid-template-columns: repeat(2, 1fr); }
+    .harness-grid > .harness:last-child:nth-child(odd) { grid-column: 1 / -1; }
+    .problem, .anchor, .harness { background: var(--paper-raised); }
+    .problem { padding: clamp(1.4rem, 3vw, 2.3rem); }
+    .problem p, .anchor p, .harness p { margin: 0; color: var(--muted); }
+    .anchor { grid-column: span 2; padding: 1.5rem; }
+    .harness { padding: clamp(1.4rem, 3vw, 2rem); }
+    .anchor:nth-child(4), .anchor:nth-child(5) { grid-column: span 3; }
+    section { padding: clamp(3.5rem, 8vw, 7rem) 0; }
+    .section-intro { max-width: 42rem; margin: 0 0 2.2rem; color: var(--muted); font-size: 1.08rem; }
+    .journey-shell {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 1.2rem;
+      background: var(--paper-raised);
+      box-shadow: 0 1.2rem 3.5rem var(--shadow);
+    }
+    .journey-shell svg { display: block; width: 100%; height: auto; }
+    .diagram-note { margin: 0; padding: 1.1rem 1.4rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
+    .install-grid { display: grid; grid-template-columns: 1fr 1.15fr; gap: clamp(1.5rem, 5vw, 5rem); align-items: start; }
+    .install-command { min-width: 0; margin: 0; }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      border-radius: .8rem;
+      padding: 1.2rem;
+      background: var(--code);
+      color: var(--code-ink);
+      font: .86rem/1.65 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    }
+    pre a { color: inherit; }
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .harnesses { margin: 1rem 0 0; color: var(--muted); }
+    .aside {
+      max-width: 46rem;
+      margin-top: 2rem;
+      border-left: .25rem solid var(--signal);
+      padding: .2rem 0 .2rem 1rem;
+      color: var(--muted);
+    }
+    .closing { border-top: 1px solid var(--line); text-align: center; }
+    .closing h2 { margin-inline: auto; }
+    .closing p { max-width: 37rem; margin: 0 auto 1.6rem; color: var(--muted); }
+    footer { padding: 1.5rem 0 2.5rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem; }
+
+    @media (max-width: 48rem) {
+      .problem-grid, .anchor-grid, .harness-grid, .install-grid { grid-template-columns: 1fr; }
+      .anchor, .anchor:nth-child(4), .anchor:nth-child(5) { grid-column: auto; }
+      .site-head { min-height: 3.8rem; }
+      .version { display: none; }
+      .journey-shell { overflow-x: auto; }
+      .journey-shell svg { width: 54rem; max-width: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header class="wrap site-head">
+    <a class="wordmark" href="#top" aria-label="remit home">remit</a>
+    <span class="version">VERSION 0.2.11</span>
+  </header>
+
+  <main id="top">
+    <div class="wrap hero">
+      <p class="eyebrow">For one person with a repository</p>
+      <h1>Give your judgement room to work.</h1>
+      <p class="hero-copy">remit lets AI do the housekeeping around each piece of work. Work waits without nagging and survives between sessions. A fresh context evaluates the result before it reaches you. You keep the freedom to create and decide.</p>
+      <div class="actions">
+        <a class="button" href="https://github.com/shobman/remit">Get remit from GitHub</a>
+        <a class="button secondary" href="#how-it-works">See how an item moves</a>
+      </div>
+    </div>
+
+    <section aria-labelledby="shipping-heading">
+      <div class="wrap">
+        <p class="eyebrow">The shipping problem</p>
+        <h2 id="shipping-heading">AI can produce code faster than you can judge it.</h2>
+        <p class="section-intro">A generated change still needs a boundary and a person willing to review and own the result.</p>
+        <div class="problem-grid">
+          <article class="problem">
+            <h3>AI creates work you did not ask for</h3>
+            <p>Anthropic's own guidance documents Opus 5 expanding a task's scope and adding steps you did not request. One request becomes several decisions about what the task should include.</p>
+          </article>
+          <article class="problem">
+            <h3>Review falls behind the output</h3>
+            <p>DORA found that code generation can outrun review and deployment capacity. The decision to ship still lands with you.</p>
+          </article>
+          <article class="problem">
+            <h3>Decision volume wears you down</h3>
+            <p>A long queue of decisions makes it harder to keep judging well. Time on task adds to the strain.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="restraints-heading">
+      <div class="wrap">
+        <p class="eyebrow">What ships</p>
+        <h2 id="restraints-heading">Five restraints, kept with the work.</h2>
+        <div class="anchor-grid">
+          <article class="anchor">
+            <h3>Keep talking while builders build</h3>
+            <p>Isolated builders do the legwork while the coordinator keeps its context and stays available to you.</p>
+          </article>
+          <article class="anchor">
+            <h3>Resume without reconstructing a chat</h3>
+            <p>The context that matters stays with the item. Days later, the work continues where it stopped.</p>
+          </article>
+          <article class="anchor">
+            <h3>Receive work after fresh evaluation</h3>
+            <p>A fresh context judges the result against its brief before the work reaches you.</p>
+          </article>
+          <article class="anchor">
+            <h3>Move between AI providers</h3>
+            <p>You name the model at each dispatch, so one model can build and a rival can review. The item moves between them without copy and paste — <a href="#harnesses">five harnesses run remit's builders</a>.</p>
+          </article>
+          <article class="anchor">
+            <h3>Know who made each change</h3>
+            <p>The commit names the human, model, and session. Months later, <code>git log</code> still carries the answer.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="how-it-works" aria-labelledby="journey-heading">
+      <div class="wrap">
+        <p class="eyebrow">One item, end to end</p>
+        <h2 id="journey-heading">The state stays visible.</h2>
+        <p class="section-intro">The work item survives a session ending or a model changing. Git carries the identity, boundary, decisions, state, and history.</p>
+        <figure class="journey-shell">
+          <svg viewBox="0 0 1080 500" role="img" aria-labelledby="journey-title journey-desc">
+            <title id="journey-title">A remit work item moving from capture to closure</title>
+            <desc id="journey-desc">Four connected steps. Capture creates a parked brief. The practitioner activates it. Dispatch sends a bounded builder and produces a draft pull request. Evaluate records a verdict from a fresh context. Close archives the item when the practitioner ends that work, whether delivered or abandoned.</desc>
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--signal)"/>
+              </marker>
+            </defs>
+            <rect width="1080" height="500" fill="var(--paper-raised)"/>
+            <path d="M250 246 H300" fill="none" stroke="var(--signal)" stroke-width="4" marker-end="url(#arrow)"/>
+            <path d="M510 246 H560" fill="none" stroke="var(--signal)" stroke-width="4" marker-end="url(#arrow)"/>
+            <path d="M770 246 H820" fill="none" stroke="var(--signal)" stroke-width="4" marker-end="url(#arrow)"/>
+            <g font-family="ui-sans-serif, system-ui, sans-serif">
+              <g transform="translate(40 116)">
+                <rect width="210" height="260" rx="18" fill="var(--paper)" stroke="var(--line)" stroke-width="2"/>
+                <text x="24" y="50" fill="var(--signal)" font-size="15" font-weight="750" letter-spacing="2">01</text>
+                <text x="24" y="88" fill="var(--ink)" font-size="28" font-weight="750">Capture</text>
+                <text x="24" y="122" fill="var(--muted)" font-size="16">brief.md records the</text>
+                <text x="24" y="146" fill="var(--muted)" font-size="16">outcome and boundary.</text>
+                <rect x="24" y="180" width="90" height="34" rx="17" fill="var(--signal-soft)"/>
+                <text x="69" y="203" text-anchor="middle" fill="var(--signal)" font-size="14" font-weight="750">parked</text>
+                <text x="24" y="238" fill="var(--muted)" font-size="13">practitioner activates</text>
+                <text x="186" y="238" text-anchor="end" fill="var(--accent)" font-size="13" font-weight="750">active</text>
+              </g>
+              <g transform="translate(300 116)">
+                <rect width="210" height="260" rx="18" fill="var(--paper)" stroke="var(--line)" stroke-width="2"/>
+                <text x="24" y="50" fill="var(--signal)" font-size="15" font-weight="750" letter-spacing="2">02</text>
+                <text x="24" y="88" fill="var(--ink)" font-size="28" font-weight="750">Dispatch</text>
+                <text x="24" y="122" fill="var(--muted)" font-size="16">A bounded builder</text>
+                <text x="24" y="146" fill="var(--muted)" font-size="16">authors in isolation.</text>
+                <rect x="24" y="180" width="104" height="34" rx="17" fill="var(--signal-soft)"/>
+                <text x="76" y="203" text-anchor="middle" fill="var(--signal)" font-size="14" font-weight="750">draft PR</text>
+                <text x="24" y="238" fill="var(--muted)" font-size="13">builder gets a bounded task</text>
+              </g>
+              <g transform="translate(560 116)">
+                <rect width="210" height="260" rx="18" fill="var(--paper)" stroke="var(--line)" stroke-width="2"/>
+                <text x="24" y="50" fill="var(--signal)" font-size="15" font-weight="750" letter-spacing="2">03</text>
+                <text x="24" y="88" fill="var(--ink)" font-size="28" font-weight="750">Evaluate</text>
+                <text x="24" y="122" fill="var(--muted)" font-size="16">A fresh context judges</text>
+                <text x="24" y="146" fill="var(--muted)" font-size="16">the artifact.</text>
+                <rect x="24" y="180" width="86" height="34" rx="17" fill="var(--signal-soft)"/>
+                <text x="67" y="203" text-anchor="middle" fill="var(--signal)" font-size="14" font-weight="750">verdict</text>
+                <text x="24" y="238" fill="var(--muted)" font-size="13">FAIL revises · PASS returns</text>
+              </g>
+              <g transform="translate(820 116)">
+                <rect width="210" height="260" rx="18" fill="var(--accent)" stroke="var(--accent)" stroke-width="2"/>
+                <text x="24" y="50" fill="var(--accent-ink)" opacity=".78" font-size="15" font-weight="750" letter-spacing="2">04</text>
+                <text x="24" y="88" fill="var(--accent-ink)" font-size="28" font-weight="750">Close</text>
+                <text x="24" y="122" fill="var(--accent-ink)" opacity=".86" font-size="16">The practitioner rules</text>
+                <text x="24" y="146" fill="var(--accent-ink)" opacity=".86" font-size="16">the item finished.</text>
+                <rect x="24" y="180" width="100" height="34" rx="17" fill="var(--accent-ink)"/>
+                <text x="74" y="203" text-anchor="middle" fill="var(--accent)" font-size="14" font-weight="750">archived</text>
+                <text x="24" y="238" fill="var(--accent-ink)" opacity=".78" font-size="13">gone from current views</text>
+              </g>
+            </g>
+          </svg>
+          <figcaption class="diagram-note">The item can be parked again while active. A failing verdict leaves the pull request as a draft and returns it for correction. A passing verdict is recorded before the draft is made ready. Acceptance and closure remain the practitioner's decisions.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="harnesses" aria-labelledby="harnesses-heading">
+      <div class="wrap">
+        <p class="eyebrow">Every harness</p>
+        <h2 id="harnesses-heading">Five harnesses, one work surface.</h2>
+        <p class="section-intro">The installer puts the same five conventions where each of them looks, and <code>bin/remit-invoke</code> demonstrates CLI invocation for all five. Open whichever one you feel like this morning: the item on the other side is the same item.</p>
+        <div class="harness-grid">
+          <article class="harness">
+            <h3>Claude Code</h3>
+            <p>Hands a bounded task to an isolated sub-agent of its own, or out through the CLI. Either way the dispatch names the model it wants.</p>
+          </article>
+          <article class="harness">
+            <h3>Codex</h3>
+            <p>Nothing bespoke: the same five conventions in the path it reads, the same dispatch script, the same draft pull request at the end.</p>
+          </article>
+          <article class="harness">
+            <h3>Pi</h3>
+            <p>Serves whatever the providers configured on your own machine are ready to run. A dispatch is refused unless that machine's own catalogue lists the id.</p>
+          </article>
+          <article class="harness">
+            <h3>Devin</h3>
+            <p>Needs no path of its own, discovering the installed conventions natively. An unknown model id is turned away before the run starts.</p>
+          </article>
+          <article class="harness">
+            <h3>Copilot CLI</h3>
+            <p>The only one here that takes a reasoning effort as well as a model, and checks both before it bills anything. A hook written for the run keeps its builder off git and gh, and the dispatch tests that before it trusts it. There is no read boundary beyond that: the builder runs on your own machine under your own credentials, and every pull request says so.</p>
+          </article>
+        </div>
+        <p class="harnesses"><a href="https://github.com/shobman/remit#use-your-harness">The README's model list</a> was read on 21 August 2026. The models available to you depend on your subscription, and vendors change their model offerings often. Not every model is available at every subscription level. remit does not maintain a compatibility matrix, so check the sources beside the list for what your subscription includes today. The pull request records which model actually served each run.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="install-heading">
+      <div class="wrap install-grid">
+        <div>
+          <p class="eyebrow">Install</p>
+          <h2 id="install-heading">Bring the discipline into your repository.</h2>
+          <p class="section-intro">The README explains how to inspect or pin the installer before you run it.</p>
+          <a href="https://github.com/shobman/remit#install-remit">Read the install guide on GitHub</a>
+          <p class="harnesses">One installer serves <a href="#harnesses">all five harnesses</a>.</p>
+        </div>
+        <figure class="install-command" aria-labelledby="install-command-heading">
+          <figcaption id="install-command-heading" class="visually-hidden">Install remit command</figcaption>
+          <pre><code>curl -fsSL <a href="https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh">https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh</a> | sh -s -- /path/to/your-repository</code></pre>
+        </figure>
+      </div>
+      <div class="wrap">
+        <p class="aside"><a href="https://github.com/shobman/aidos">AIDOS</a> calls its manifesto &quot;The Hard Part Isn't the Code&quot;. It is separate from remit and complementary by design: AIDOS helps teams that start, park, and resume work together establish that work is warranted before development starts. remit sits on the engineering side, bounded by AIDOS or completely adjacent to it.</p>
+      </div>
+    </section>
+
+    <section class="closing" aria-labelledby="closing-heading">
+      <div class="wrap">
+        <h2 id="closing-heading">The housekeeping stays out of your way.</h2>
+        <p>The AI keeps the record, so work can wait without getting lost. Fresh evaluation helps you ship with confidence. The creating and deciding stay with you.</p>
+        <a class="button" href="https://github.com/shobman/remit">Open the remit repository</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">remit is MIT licensed. The installed software is the authority for what remit does.</div>
+  </footer>
+</body>
+</html>
