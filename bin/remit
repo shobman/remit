@@ -155,13 +155,16 @@
 #
 # The working marker IS the lock: `.remit/work-items/<slug>/.working`, created by
 # `resume` after its preconditions pass and removed however it exits. A second
-# `resume` of the same item refuses while it is there. It is not a stage. It
-# carries six `key: value` lines and nothing else — `pid:` the resume that owns
-# it, `host:` the machine that resume is on, `authority:` the file that resume
-# raised from, relative to the item folder, `hash:` that file's digest, `step:`
-# what the chain is doing right now, rewritten as it moves, and `raise:` the pid
-# of the fresh context in flight, EMPTY between raises. `kill` reads all six; the
-# chain re-reads its own to know it is still the one running.
+# `resume` of the same item refuses while it is there. It is not a stage, and it
+# is MACHINE STATE, never repository state: it says a resume is running HERE, so
+# it is kept out of every commit and never travels to another clone. The pathspec
+# that keeps it out is beside the marker itself. It carries six `key: value`
+# lines and nothing else — `pid:` the resume that owns it, `host:` the machine
+# that resume is on, `authority:` the file that resume raised from, relative to
+# the item folder, `hash:` that file's digest, `step:` what the chain is doing
+# right now, rewritten as it moves, and `raise:` the pid of the fresh context in
+# flight, EMPTY between raises. `kill` reads all six; the chain re-reads its own
+# to know it is still the one running.
 #
 # ==============================================================================
 # WHAT A BRIEF DEPENDS ON
@@ -919,7 +922,15 @@ gate_fix_section() { # $1 refined|accepted|closed -> the `- ` lines of its `## f
 item="$ITEMS/$slug"
 brief="$item/brief.md"
 log="$item/log.md"
-marker="$item/.working"
+marker_name=.working
+marker="$item/$marker_name"
+# The marker is machine state — see the note at the head of this script — so it
+# is excluded from every pathspec `commit_and_push` stages and commits, for EVERY
+# item and not only this one, because a broad pathspec can reach another item's
+# folder. A pathspec must be repository-relative — an absolute one is refused
+# outright on Windows — and this one is built from the same two values the marker
+# itself is, so where a marker lives is stated once.
+marker_exclude=":(exclude)${ITEMS#"$root"/}/*/$marker_name"
 itemarchive="$ITEMARCH/$slug"
 
 # ==============================================================================
@@ -1036,16 +1047,131 @@ next_finding_no() {
 # ==============================================================================
 # committing: report exactly what Git accepted, never more
 # ==============================================================================
+#
+# CONCURRENCY LIVES HERE, AND NOWHERE ELSE IN THIS SCRIPT. Several runs share one
+# repository, one working tree and one branch: four `resume`s of four different
+# items each write their own record folder, commit it and push it. Two things
+# race in that, and both are held in this one function, because it is the only
+# place a record touches the index or the remote.
+#
+#   * `.git/index.lock` — two `git add`/`git commit` in one working tree.
+#   * the branch ref — two pushes, where the loser is rejected with `cannot lock
+#     ref '...': is at X but expected Y` and its commit is left behind.
+#
+# The mutex is a DIRECTORY, because `mkdir` is the one create-or-fail primitive
+# that is atomic in every POSIX shell, and `flock` is not on Git Bash at all. It
+# lives in the git directory, so it is machine state that is never committed and
+# never travels; it holds the owning pid, so a run that waits can say who it is
+# waiting for; and it wraps THIS FUNCTION ONLY, never a whole run, so a run that
+# is waiting on a model never blocks a run that is committing.
+#
+# The wait is bounded — `REMIT_LOCK_WAIT` seconds, defaulted below. A run that
+# waits SAYS SO, once, and an expiry is REPORTED and then the commit is attempted
+# anyway. That is deliberate: a lock left behind by a killed run must cost one
+# loud wait, not a repository that can never commit again, and what an expiry
+# falls back to is exactly the behaviour this function had before the mutex
+# existed. Nothing here reaps a lock or judges whether its owner is alive.
+#
+# Inside the mutex, A REJECTED PUSH IS RETRIED: fetch the branch, replay this
+# commit on top of what came back, push again — bounded at three pushes, and
+# stopping at once when the fetch brings back nothing new, because then the
+# rejection was not a race and repeating the identical push would only fail
+# identically.
+#
+# The replay is `reset --soft` and a fresh partial commit, NOT `git rebase`.
+# `git rebase` requires a clean working tree, and a second run waiting on this
+# very lock has by definition already written its record into that tree, so a
+# rebase would refuse in precisely the case this exists for. `reset --soft`
+# touches no file on disk, and `git commit -- <paths>` takes those paths from the
+# working tree and everything else from the new HEAD — the same commit a rebase
+# would have produced, and one that cannot conflict. It is done ONLY when the
+# fetched tip already contains everything this branch held before this commit,
+# checked with `merge-base --is-ancestor` and never assumed, because otherwise
+# the reset would drop a commit that has nowhere else to live.
+#
+# WHAT THE REPLAY DOES NOT DO: it does not update the working tree with what the
+# fetch brought back. That is only ever visible when the other party is a
+# different clone or worktree; where every commit on the branch came from this
+# working tree — the case this exists for — there is nothing in the fetch the
+# tree does not already have.
+#
+# The consequence, said here rather than left to be discovered: where that fetch
+# DID bring back a change to the same paths this commit occupies, the replay
+# takes those paths from this working tree and supersedes the other party's
+# version of them, and nothing is raised, because a pathspec commit has no
+# conflict to raise. On one machine it cannot arise: every commit on this branch
+# came through this mutex, so nothing else has written those paths.
+
+LOCKDIR="$common_dir/remit-commit.lock"
+LOCK_WAIT=${REMIT_LOCK_WAIT:-120}
+# THE BOUND MUST BE A NUMBER OR IT IS NOT A BOUND. `[ "$_waited" -ge abc ]` is an
+# error in every shell this runs in — dash says `Illegal number`, bash says
+# `integer expression expected` — and an error is not true, so the expiry in
+# `lock_take` would never fire and the bounded wait above would quietly become an
+# unbounded one. That is the hang this whole mechanism exists to avoid, produced
+# by a typo in an environment variable. A value that is not digits is therefore
+# REFUSED, said out loud, and the default stands — never taken as an instruction
+# and then not honoured.
+case "$LOCK_WAIT" in
+'' | *[!0-9]*)
+	printf '%s: REMIT_LOCK_WAIT=%s is not a number of seconds — the record lock will wait 120.\n' \
+		"$ME" "$LOCK_WAIT" >&2
+	LOCK_WAIT=120
+	;;
+esac
+LOCK_HELD=no
+
+lock_take() { # -> 0 it is held, 1 the bounded wait expired and it is not
+	_waited=0
+	_said=no
+	while ! mkdir "$LOCKDIR" 2>/dev/null; do
+		if [ "$_said" = no ]; then
+			_owner=$(cat "$LOCKDIR/pid" 2>/dev/null)
+			printf 'waiting for the record lock, held by pid %s — another remit run is committing.\n' \
+				"${_owner:-unknown}"
+			_said=yes
+		fi
+		if [ "$_waited" -ge "$LOCK_WAIT" ]; then
+			printf '%s: waited %ss for the record lock at %s and it did not clear. Committing WITHOUT it — if no remit run is alive, remove that directory.\n' \
+				"$ME" "$LOCK_WAIT" "$LOCKDIR" >&2
+			return 1
+		fi
+		sleep 1
+		_waited=$((_waited + 1))
+	done
+	LOCK_HELD=yes
+	printf '%s\n' "$$" >"$LOCKDIR/pid" 2>/dev/null
+	return 0
+}
+
+lock_drop() {
+	[ "$LOCK_HELD" = yes ] || return 0
+	LOCK_HELD=no
+	rm -rf "$LOCKDIR"
+}
 
 commit_and_push() { # $1 message, then every path this change occupies
+	lock_take || :
+	commit_locked "$@"
+	_caprc=$?
+	lock_drop
+	return $_caprc
+}
+
+# The body of the above, run with the mutex held. Called from there and nowhere
+# else, so that every path out of it releases the lock in one place.
+commit_locked() { # $1 message, then every path this change occupies
 	_msg=$1
 	shift
-	git -C "$root" add -A -- "$@" || { printf '%s: could not stage %s\n' "$ME" "$*" >&2; return 2; }
-	if git -C "$root" diff --cached --quiet -- "$@" 2>/dev/null; then
+	git -C "$root" add -A -- "$@" "$marker_exclude" ||
+		{ printf '%s: could not stage %s\n' "$ME" "$*" >&2; return 2; }
+	if git -C "$root" diff --cached --quiet -- "$@" "$marker_exclude" 2>/dev/null; then
 		printf 'nothing changed on disk — nothing to commit.\n'
 		return 0
 	fi
-	git -C "$root" commit -q -m "$_msg" -- "$@" || { printf '%s: commit failed\n' "$ME" >&2; return 2; }
+	_pre=$(git -C "$root" rev-parse HEAD 2>/dev/null) || _pre=''
+	git -C "$root" commit -q -m "$_msg" -- "$@" "$marker_exclude" ||
+		{ printf '%s: commit failed\n' "$ME" >&2; return 2; }
 
 	remote=origin
 	git -C "$root" remote get-url origin >/dev/null 2>&1 || remote=$(git -C "$root" remote | sed -n 1p)
@@ -1058,10 +1184,33 @@ commit_and_push() { # $1 message, then every path this change occupies
 		printf 'committed. Detached HEAD — NOT pushed; durable on this machine only.\n' >&2
 		return 3
 	fi
-	if out=$(git -C "$root" push "$remote" "HEAD:refs/heads/$branch" 2>&1); then
-		printf 'committed and pushed to %s/%s.\n' "$remote" "$branch"
-		return 0
-	fi
+
+	_try=1
+	while :; do
+		if out=$(git -C "$root" push "$remote" "HEAD:refs/heads/$branch" 2>&1); then
+			printf 'committed and pushed to %s/%s.\n' "$remote" "$branch"
+			return 0
+		fi
+		[ "$_try" -lt 3 ] || break
+		git -C "$root" fetch -q "$remote" "$branch" 2>/dev/null || break
+		_new=$(git -C "$root" rev-parse FETCH_HEAD 2>/dev/null) || break
+		{ [ -n "$_new" ] && [ -n "$_pre" ]; } || break
+		[ "$_new" = "$_pre" ] && break
+		git -C "$root" merge-base --is-ancestor "$_pre" "$_new" 2>/dev/null || break
+		_had=$(git -C "$root" rev-parse HEAD) || break
+		git -C "$root" reset -q --soft "$_new" || break
+		git -C "$root" add -A -- "$@" "$marker_exclude" ||
+			{ git -C "$root" reset -q --soft "$_had"; break; }
+		if git -C "$root" diff --cached --quiet -- "$@" "$marker_exclude" 2>/dev/null; then
+			printf 'the remote already carries this change — nothing left to push.\n'
+			return 0
+		fi
+		git -C "$root" commit -q -m "$_msg" -- "$@" "$marker_exclude" ||
+			{ git -C "$root" reset -q --soft "$_had"; break; }
+		printf 'the push was rejected; %s had moved. Replayed this commit on top of it.\n' "$remote"
+		_pre=$_new
+		_try=$((_try + 1))
+	done
 	printf 'committed. PUSH FAILED — %s has NOT accepted this change; durable on this machine only.\n%s\n' \
 		"$remote" "$out" >&2
 	return 3
@@ -2562,7 +2711,7 @@ SAVETMP=''
 # do it here cannot tell a `remit kill` run from inside a raise apart from the
 # raise itself, and a trap that ended its own killer would lose the record.
 RAISE_PID=''
-cleanup() { rm -rf "$WORK"; [ -n "$SAVETMP" ] && rm -f "$SAVETMP"; return 0; }
+cleanup() { lock_drop; rm -rf "$WORK"; [ -n "$SAVETMP" ] && rm -f "$SAVETMP"; return 0; }
 trap 'cleanup' EXIT
 trap 'cleanup; marker_release; exit 130' INT TERM
 
