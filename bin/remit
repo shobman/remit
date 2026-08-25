@@ -158,13 +158,14 @@
 # `resume` of the same item refuses while it is there. It is not a stage, and it
 # is MACHINE STATE, never repository state: it says a resume is running HERE, so
 # it is kept out of every commit and never travels to another clone. The pathspec
-# that keeps it out is beside the marker itself. It carries six `key: value`
-# lines and nothing else — `pid:` the resume that owns it, `host:` the machine
-# that resume is on, `authority:` the file that resume raised from, relative to
-# the item folder, `hash:` that file's digest, `step:` what the chain is doing
-# right now, rewritten as it moves, and `raise:` the pid of the fresh context in
-# flight, EMPTY between raises. `kill` reads all six; the chain re-reads its own
-# to know it is still the one running.
+# that keeps it out is beside the marker itself, and one an older remit did
+# commit is taken back out by `markers_untrack`, beside `commit_and_push`. It
+# carries six `key: value` lines and nothing else — `pid:` the resume that owns
+# it, `host:` the machine that resume is on, `authority:` the file it raised
+# from, relative to the item folder, `hash:` that file's digest, `step:` what the
+# chain is doing right now, rewritten as it moves, and `raise:` the pid of the
+# fresh context in flight, EMPTY between raises. `kill` reads all six; the chain
+# re-reads its own to know it is still the one running.
 #
 # ==============================================================================
 # WHAT A BRIEF DEPENDS ON
@@ -924,13 +925,20 @@ brief="$item/brief.md"
 log="$item/log.md"
 marker_name=.working
 marker="$item/$marker_name"
+# EVERY marker this repository could hold, named once — for EVERY item and not
+# only this one, because a broad pathspec can reach another item's folder. A
+# pathspec must be repository-relative — an absolute one is refused outright on
+# Windows — and this one is built from the same two values the marker itself is,
+# so where a marker lives is stated once.
+#
+# IT REACHES THE ARCHIVE. `*` in a git pathspec crosses `/` unless `:(glob)`
+# magic asks it not to, so this one matches `<items>/.archive/<slug>/.working`
+# as well as `<items>/<slug>/.working` — which it must, because `close` moves an
+# item's folder whole into `.archive/` and a marker inside it moves with it.
+marker_glob="${ITEMS#"$root"/}/*/$marker_name"
 # The marker is machine state — see the note at the head of this script — so it
-# is excluded from every pathspec `commit_and_push` stages and commits, for EVERY
-# item and not only this one, because a broad pathspec can reach another item's
-# folder. A pathspec must be repository-relative — an absolute one is refused
-# outright on Windows — and this one is built from the same two values the marker
-# itself is, so where a marker lives is stated once.
-marker_exclude=":(exclude)${ITEMS#"$root"/}/*/$marker_name"
+# is excluded from every pathspec `commit_and_push` stages and commits.
+marker_exclude=":(exclude)$marker_glob"
 itemarchive="$ITEMARCH/$slug"
 
 # ==============================================================================
@@ -1150,6 +1158,68 @@ lock_drop() {
 	rm -rf "$LOCKDIR"
 }
 
+# A MARKER THAT IS ALREADY IN THE TREE CANNOT REMOVE ITSELF. The exclusion above
+# keeps a marker out of every pathspec this script stages and commits — which
+# also means no `add -A` here can ever stage the DELETION of one that an older
+# remit, or another clone, already committed: an excluded path is never matched,
+# in either direction. So such a marker would sit in the tree for ever unless
+# somebody remembered to take it out by hand. This is the system taking it out
+# instead, on the next commit any run makes, for every marker the repository
+# holds and not only this item's.
+#
+# WHY IT IS NOT `git commit -- <the marker paths>`. A pathspec commit takes the
+# WORKING TREE content of the paths it names, so a marker that is both committed
+# and live on disk — a resume running right now for an item whose marker was
+# committed before the exclusion existed — would be re-committed rather than
+# removed. And it is not `git rm --cached` followed by a plain `git commit`,
+# because that commits the whole index, and whatever the practitioner has staged
+# there is theirs and not this script's to publish. So the removal is built in an
+# index of its own: HEAD's tree with every marker path taken out and nothing else
+# touched, committed by an ordinary `git commit` against that index so it obeys
+# the same hooks and the same signing configuration as every other commit remit
+# makes. The real index is then brought into line, or the marker it just removed
+# would sit there as a staged ADDITION of itself.
+#
+# IT NEVER DELETES THE MARKER FROM DISK. Untracking machine state is not ending
+# the run that owns it.
+#
+# It sets MARKER_SWEPT and never fails its caller. A record that cannot reach the
+# remote is a durability problem; a marker that could not be untracked is not.
+# So a sweep that goes wrong says so, once, and the record commit still stands.
+MARKER_SWEPT=no
+markers_untrack() {
+	MARKER_SWEPT=no
+	# Read against HEAD as well as the index: after a rejected push has been
+	# reset away, the index no longer holds the marker but the tip this commit
+	# will sit on does, and that tip is what the removal has to be made against.
+	_mtracked=$(git -C "$root" ls-files --with-tree=HEAD -- "$marker_glob" 2>/dev/null) || _mtracked=''
+	[ -n "$_mtracked" ] || return 0
+	_midx="$common_dir/remit-marker-sweep.index"
+	rm -f "$_midx"
+	if GIT_INDEX_FILE="$_midx" git -C "$root" read-tree HEAD 2>/dev/null &&
+		GIT_INDEX_FILE="$_midx" git -C "$root" rm -q --cached --ignore-unmatch -- "$marker_glob" 2>/dev/null &&
+		GIT_INDEX_FILE="$_midx" git -C "$root" commit -q -m "remit: untrack the working marker — it is machine state" 2>/dev/null; then
+		MARKER_SWEPT=yes
+		# The real index still holds the entry the commit above removed, so it
+		# would now read as a staged ADDITION of that same marker — which no
+		# later commit here could ever clear, the path being excluded from every
+		# one of them. `reset -- <paths>` puts those entries back to what HEAD
+		# says, which is nothing; it touches no file on disk and has no
+		# up-to-date check to fail on a marker a live run is rewriting.
+		git -C "$root" reset -q -- "$marker_glob" 2>/dev/null ||
+			printf '%s: the marker is out of the tree, but the index still stages it — `git reset -- %s` clears that.\n' \
+				"$ME" "$marker_glob" >&2
+		printf 'untracked a working marker this repository was carrying — machine state, and it stays on disk:\n'
+		printf '%s\n' "$_mtracked" | sed 's/^/  /'
+	else
+		printf '%s: could not untrack the working marker(s) below — they are still in the tree, and the record commit below still stands.\n' \
+			"$ME" >&2
+		printf '%s\n' "$_mtracked" | sed 's/^/  /' >&2
+	fi
+	rm -f "$_midx"
+	return 0
+}
+
 commit_and_push() { # $1 message, then every path this change occupies
 	lock_take || :
 	commit_locked "$@"
@@ -1163,15 +1233,25 @@ commit_and_push() { # $1 message, then every path this change occupies
 commit_locked() { # $1 message, then every path this change occupies
 	_msg=$1
 	shift
+	# The tip everything below sits on, read BEFORE anything is committed — the
+	# marker sweep included, because the remote has not seen that commit either
+	# and the replay further down asks whether the remote has moved on from a
+	# commit the remote could have had.
+	_pre=$(git -C "$root" rev-parse HEAD 2>/dev/null) || _pre=''
+	markers_untrack
 	git -C "$root" add -A -- "$@" "$marker_exclude" ||
 		{ printf '%s: could not stage %s\n' "$ME" "$*" >&2; return 2; }
 	if git -C "$root" diff --cached --quiet -- "$@" "$marker_exclude" 2>/dev/null; then
-		printf 'nothing changed on disk — nothing to commit.\n'
-		return 0
+		# Nothing of THIS change is left to record. A sweep may still have made a
+		# commit of its own, and that one has a remote to reach.
+		if [ "$MARKER_SWEPT" = no ]; then
+			printf 'nothing changed on disk — nothing to commit.\n'
+			return 0
+		fi
+	else
+		git -C "$root" commit -q -m "$_msg" -- "$@" "$marker_exclude" ||
+			{ printf '%s: commit failed\n' "$ME" >&2; return 2; }
 	fi
-	_pre=$(git -C "$root" rev-parse HEAD 2>/dev/null) || _pre=''
-	git -C "$root" commit -q -m "$_msg" -- "$@" "$marker_exclude" ||
-		{ printf '%s: commit failed\n' "$ME" >&2; return 2; }
 
 	remote=origin
 	git -C "$root" remote get-url origin >/dev/null 2>&1 || remote=$(git -C "$root" remote | sed -n 1p)
@@ -1199,14 +1279,22 @@ commit_locked() { # $1 message, then every path this change occupies
 		git -C "$root" merge-base --is-ancestor "$_pre" "$_new" 2>/dev/null || break
 		_had=$(git -C "$root" rev-parse HEAD) || break
 		git -C "$root" reset -q --soft "$_new" || break
+		# The reset put HEAD back on a tip that still carries whatever markers
+		# the remote holds, so the sweep is made again against THAT tip. Its
+		# earlier commit went away with the reset, and an unrepeated sweep would
+		# leave the marker in the tree while reporting the push as landed.
+		markers_untrack
 		git -C "$root" add -A -- "$@" "$marker_exclude" ||
 			{ git -C "$root" reset -q --soft "$_had"; break; }
 		if git -C "$root" diff --cached --quiet -- "$@" "$marker_exclude" 2>/dev/null; then
-			printf 'the remote already carries this change — nothing left to push.\n'
-			return 0
+			if [ "$MARKER_SWEPT" = no ]; then
+				printf 'the remote already carries this change — nothing left to push.\n'
+				return 0
+			fi
+		else
+			git -C "$root" commit -q -m "$_msg" -- "$@" "$marker_exclude" ||
+				{ git -C "$root" reset -q --soft "$_had"; break; }
 		fi
-		git -C "$root" commit -q -m "$_msg" -- "$@" "$marker_exclude" ||
-			{ git -C "$root" reset -q --soft "$_had"; break; }
 		printf 'the push was rejected; %s had moved. Replayed this commit on top of it.\n' "$remote"
 		_pre=$_new
 		_try=$((_try + 1))
