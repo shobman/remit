@@ -29,9 +29,14 @@
 #   stdout      the context's final text, and NOTHING else. Every word this
 #               script says about what it did goes to stderr, because stdout is
 #               the seam's payload and `bin/remit` writes it into the record.
-#   stderr      this script's own narration and whatever the harness said.
+#   stderr      this script's own narration and whatever the harness said —
+#               including the HEARTBEAT below, which is the only thing this
+#               script says while the CLI is running.
 #   provenance  `key: value` lines written to the file named by
 #               `REMIT_PROVENANCE`. The keys are below.
+#   progress    the run directory's path, written to the file named by
+#               `REMIT_PROGRESS` the moment that directory exists — before
+#               anything is raised. See THE RUN IS VISIBLE WHILE IT RUNS below.
 #   exit 0      the context ran. Exit is COMPLETION, not success.
 #   exit 2      usage; a registry that is absent, malformed, or does not carry
 #               the seat asked for; a registered seat that is not available on
@@ -216,7 +221,15 @@
 #                            `mktemp` all land in it.
 #   LANG, LC_ALL, LC_CTYPE   locale, where the coordinator has them.
 #   SYSTEMROOT, COMSPEC,     Windows needs these to start a process at all.
-#   PATHEXT
+#   PATHEXT, SYSTEMDRIVE     SYSTEMDRIVE earns its place by an incident rather
+#                            than by theory: without it a raised Windows CLI
+#                            resolved a shell path against an undefined
+#                            variable and created a literal, unexpanded
+#                            `%SystemDrive%/ProgramData/...` tree in the
+#                            worktree's CWD, which the delivery seam then
+#                            staged and committed. It is a drive letter,
+#                            never a credential, and it is the same class
+#                            as SYSTEMROOT.
 #   the harness's own        so that a CLI whose credentials and settings live in
 #   config variable          the practitioner's real home can still find them
 #                            under a scratch HOME. One per harness:
@@ -269,6 +282,45 @@
 #     injects them into every process it starts. They are paths and a platform
 #     name, never a credential, and they are named here so that reading the
 #     allow-list against a real raise does not look like a leak.
+#
+# ==============================================================================
+# THE RUN IS VISIBLE WHILE IT RUNS
+# ==============================================================================
+#
+# A raise is minutes long and this script is silent for nearly all of it: the
+# raised harness's output goes to files in the run directory, and every other
+# line here is said before the CLI starts or after it exits. Two channels exist
+# so that a caller is not blind for the duration. Neither changes what the seam
+# RETURNS — stdout is still the context's final text and nothing else, and the
+# raised context's own exploration still never crosses to the caller.
+#
+#   REMIT_PROGRESS=<path>   the run directory's path is written to that file the
+#                           moment the directory exists, before the briefing is
+#                           composed and before anything is raised. The path
+#                           itself carries this process's pid, so a watcher
+#                           cannot guess it and this is the only way to find it
+#                           in time to tail it. Written for a raise that gets as
+#                           far as making a run directory; a refusal before that
+#                           point writes nothing, because nothing ran.
+#   REMIT_HEARTBEAT=<n>     while the CLI is running, one line every <n> seconds
+#                           on this script's own stderr AND appended to
+#                           `<run directory>/progress`. Default 30; `0` silences
+#                           it. It says the role, the harness and the elapsed
+#                           seconds, and nothing about what the context is doing
+#                           — this script does not know, and the raised harness's
+#                           stderr is deliberately NOT teed through: on devin that
+#                           channel carries agent prose, and the caller never
+#                           reads a context's exploration.
+#
+# The heartbeat has two destinations because a caller may be on either of two
+# roads. Running this script directly, its stderr is the caller's; running it
+# through `bin/remit`, that stderr is captured — see that script's header, which
+# owns what it does with it — and `<run directory>/progress` is the channel that
+# survives. `REMIT_PROGRESS` is how anything finds that directory.
+#
+# What the CALLER owes when it raises this script is stated once in `AGENTS.md`,
+# under "A raised context is visible while it runs". Read it there; it is not
+# restated here.
 #
 # ==============================================================================
 # WHAT EACH ROLE IS TOLD
@@ -1012,6 +1064,7 @@ RUNDIR=${TMPDIR:-/tmp}/$ME-$SLUG-$ROLE-$$
 mkdir -p "$RUNDIR" || die "cannot create the run directory $RUNDIR"
 OUTFILE="$RUNDIR/stdout"
 ERRFILE="$RUNDIR/stderr"
+PROGRESSFILE="$RUNDIR/progress"
 FINALFILE="$RUNDIR/final-message"
 BRIEF="$RUNDIR/briefing"
 ATIF="$RUNDIR/atif.json"
@@ -1121,6 +1174,24 @@ scratch_gone_or_warn() { # -> always 0; says so when the root survived
 # scratch root sits in a tree somebody is about to read.
 trap 'rm -rf "$SCRUB_HOME" "$SCRUB_TMP"' EXIT INT TERM
 
+# --- the two visibility channels ---------------------------------------------
+# The run directory's name carries this process's pid, so nothing outside can
+# work out where to look. Saying where it is, the moment it exists, is what makes
+# tailing it possible at all — and it is said before the briefing is composed, so
+# a watcher started now sees the run rather than the end of it.
+: >"$PROGRESSFILE" || die "cannot create the progress log at $PROGRESSFILE"
+if [ -n "${REMIT_PROGRESS:-}" ]; then
+	printf '%s\n' "$RUNDIR" >"$REMIT_PROGRESS" ||
+		die "cannot write the run directory's location to REMIT_PROGRESS=$REMIT_PROGRESS — a caller that asked to be able to watch this run is not given silence instead"
+fi
+
+HEARTBEAT=${REMIT_HEARTBEAT:-30}
+case "$HEARTBEAT" in
+'' | *[!0-9]*)
+	die "REMIT_HEARTBEAT must be a whole number of seconds, or 0 to silence it — not '$HEARTBEAT'"
+	;;
+esac
+
 # The allow-list, written down before anything runs. This file IS the record of
 # what crossed into the context, and it is what the provenance quotes: a scrub
 # nobody can read afterwards is a claim, not a mechanism.
@@ -1136,6 +1207,11 @@ scrub_list() {
 	[ -n "${SYSTEMROOT:-}" ] && printf 'SYSTEMROOT=%s\n' "$SYSTEMROOT"
 	[ -n "${COMSPEC:-}" ] && printf 'COMSPEC=%s\n' "$COMSPEC"
 	[ -n "${PATHEXT:-}" ] && printf 'PATHEXT=%s\n' "$PATHEXT"
+	# Without this a Windows CLI writes a literal `%SystemDrive%` directory
+	# into whatever its CWD happens to be — here, the worktree the seam is
+	# about to stage. The block at the top of this file says which incident
+	# this came from.
+	[ -n "${SYSTEMDRIVE:-}" ] && printf 'SYSTEMDRIVE=%s\n' "$SYSTEMDRIVE"
 	# The harness's own config variable — a PATH to its configuration, never a
 	# credential. Where the coordinator already sets one, that value is what is
 	# passed; otherwise it is computed from the coordinator's real home.
@@ -1350,6 +1426,12 @@ say "  standards    : ${STANDARDS:-<none — this role is handed no bar>}"
 say "  worktree     : $WT"
 say "  briefing     : $BRIEF"
 say "  run log      : $RUNDIR"
+if [ "$HEARTBEAT" -gt 0 ]; then
+	say "  heartbeat    : every ${HEARTBEAT}s on this stderr and in $PROGRESSFILE while the CLI runs (REMIT_HEARTBEAT=0 silences it)"
+else
+	say "  heartbeat    : silenced (REMIT_HEARTBEAT=0) — nothing will be said between the line below and the run's end"
+fi
+[ -n "${REMIT_PROGRESS:-}" ] && say "  progress at  : $REMIT_PROGRESS names this run directory, written before anything was raised"
 say "  environment  : env -i with $(awk 'END { print NR }' "$ENVLIST") allow-listed variables and nothing else; HOME is the scratch directory $SCRUB_HOME"
 say "  scratch      : $SCRUB_TMP (TMPDIR, TEMP and TMP) — the seat's one writable scratch root, removed with the run"
 say "  registry     : $SETTINGS ($REGISTRY_HASH), seat $SEAT_KIND"
@@ -1376,15 +1458,50 @@ rule_off
 # the adapters
 # ==============================================================================
 
+# The pulse, for the whole of the one window in which this script is otherwise
+# silent. It says elapsed seconds and the seat, because that is all this script
+# knows: the raised context's own output is in the run directory and never
+# crosses to the caller. Two destinations, for two readers — this script's stderr
+# for a caller that runs it directly, and the progress log for one that runs it
+# through `bin/remit`, which captures this stderr to a file of its own.
+HEARTBEAT_PID=''
+heartbeat_start() {
+	[ "$HEARTBEAT" -gt 0 ] || return 0
+	(
+		_elapsed=0
+		while sleep "$HEARTBEAT"; do
+			_elapsed=$((_elapsed + HEARTBEAT))
+			_pulse="$ME: still running — $ROLE on $HARNESS, ${_elapsed}s"
+			printf '%s\n' "$_pulse" >&2
+			printf '%s\n' "$_pulse" >>"$PROGRESSFILE"
+		done
+	) &
+	HEARTBEAT_PID=$!
+	return 0
+}
+heartbeat_stop() {
+	[ -n "$HEARTBEAT_PID" ] || return 0
+	kill "$HEARTBEAT_PID" 2>/dev/null
+	wait "$HEARTBEAT_PID" 2>/dev/null
+	HEARTBEAT_PID=''
+	return 0
+}
+# So an interrupted raise does not leave a pulse behind it. This is the only
+# trap here: nothing else in this script is cleaned up on a signal today, and
+# this change does not quietly take that on.
+trap 'heartbeat_stop' INT TERM
+
 run_harness() { # $1 stdin file or 'none'; rest: the command, env prefix included
 	sf=$1
 	shift
+	heartbeat_start
 	if [ "$sf" = none ]; then
 		(cd "$WT" && "$@") >"$OUTFILE" 2>"$ERRFILE"
 	else
 		(cd "$WT" && "$@" <"$sf") >"$OUTFILE" 2>"$ERRFILE"
 	fi
 	HARNESS_EXIT=$?
+	heartbeat_stop
 }
 
 # The devin context's containment, written into its tree for the run only.

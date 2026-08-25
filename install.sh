@@ -35,10 +35,18 @@
 #                                  by every harness here that has a pre-tool hook
 #   .github/hooks/remit-no-agent-tool.json
 #                                  Copilot CLI's registration of it
-#   .claude/settings.json          Claude Code's registration of it, OFFERED: the
-#                                  file is created when absent, and when it is
-#                                  yours the block to merge is printed and
-#                                  nothing is touched
+#   .claude/settings.json          Claude Code's registration of it AND the one
+#                                  setting remit needs from that harness —
+#                                  env.BASH_MAX_TIMEOUT_MS, which raises Claude
+#                                  Code's own 600 000 ms ceiling on a shell call
+#                                  so a long raise is not killed mid-run. What
+#                                  that setting is for is stated once in the
+#                                  AGENTS.md section this script installs,
+#                                  because JSON carries no comment. OFFERED, not imposed: the file is
+#                                  created when absent, updated when it is still
+#                                  exactly what remit wrote, and when it is yours
+#                                  the block to merge is printed and nothing is
+#                                  touched
 #   .remit/work-items/             the work location, empty
 #   .remit/field-reports/          observations from real use, empty
 #   .remit/rules/                  the practitioner's rubrics — the empty shape
@@ -58,9 +66,10 @@
 #
 # The payload's single source for each of those is one file in this checkout:
 # `bin/`, `install/skills/<name>/SKILL.md`, `install/AGENTS-remit.md`,
-# `install/hooks/pre-push`. This repository's own `.claude/`, `.agents/` and
+# `install/hooks/`. This repository's own `.claude/`, `.agents/` and
 # `.pi/` are INSTALLED COPIES, written by running this script against itself,
-# exactly as in any other target.
+# exactly as in any other target — including `.claude/settings.json`, whose
+# single source is `install/hooks/claude-settings.json`.
 #
 # `.remit/rules/` is the one thing here this script does not author. Its content
 # is `bin/remit`'s to write — `remit rules init` lays down the empty shape and
@@ -328,24 +337,60 @@ done
 install_file "$GUARD_SRC" ".remit/hooks/no-agent-tool.sh"
 install_file "$GUARD_COPILOT" ".github/hooks/remit-no-agent-tool.json"
 
-# Claude Code's registration is an OFFER, not an install. `.claude/settings.json`
-# is a file people keep their own settings in and it is not remit's to rewrite:
-# absent, it is created carrying the guard and nothing else; already carrying the
-# guard, it is left alone and reported unchanged; anything else is KEPT and the
-# block to merge is printed. That is the same restraint the pre-push hook shows a
-# repository with its own core.hooksPath.
-claude_settings="$TGT/.claude/settings.json"
-guard_cmd='sh .remit/hooks/no-agent-tool.sh'
+# Claude Code's registration is an OFFER, not an install, and the file carries
+# TWO things now: the agent-tool guard's PreToolUse entry, and
+# `env.BASH_MAX_TIMEOUT_MS`. Why a raise needs that ceiling raised is stated once
+# in the AGENTS.md section this script installs — read it there; what concerns
+# this file is only that Claude Code cuts a shell call's requested timeout to
+# `max(BASH_MAX_TIMEOUT_MS, BASH_DEFAULT_TIMEOUT_MS)`, so 600 000 ms unless this
+# file says otherwise, and a raise past ten minutes dies mid-run without it. It
+# serves one of the five harnesses; the other four need nothing, and that same
+# section says which and why.
+#
+# `.claude/settings.json` is a file people keep their own settings in and it is
+# not remit's to rewrite, so it gets install_file's four outcomes and no fifth:
+# absent, it is created carrying remit's block; still exactly what remit wrote,
+# it is updated; equal to the payload already, unchanged; ANYTHING ELSE IS KEPT —
+# no merge, no sed into somebody's JSON — and the block to merge is printed with
+# the setting to add named in words. An installer that half-parses a settings
+# file to insert a key is how a settings file gets corrupted. That is the same
+# restraint the pre-push hook shows a repository with its own core.hooksPath.
+#
+# It is recorded in the manifest like any other file, which is what makes the
+# `updated` outcome possible at all: without a record there is nothing to prove
+# the current content is remit's rather than a person's.
+SETTINGS_REL=".claude/settings.json"
+SETTINGS_KEY="BASH_MAX_TIMEOUT_MS"
+SETTINGS_MS=$(grep -o "\"$SETTINGS_KEY\"[^0-9]*[0-9]*" "$GUARD_CLAUDE" | grep -o '[0-9][0-9]*$' | sed -n 1p)
+[ -n "$SETTINGS_MS" ] || die "payload $GUARD_CLAUDE does not carry $SETTINGS_KEY — the offer below would name no value"
+claude_settings="$TGT/$SETTINGS_REL"
+new_id=$(hash_of "$GUARD_CLAUDE")
+old_id=$(manifest_id file "$SETTINGS_REL")
 if [ ! -e "$claude_settings" ]; then
 	mkdir -p "$TGT/.claude"
 	cp "$GUARD_CLAUDE" "$claude_settings"
-	report installed ".claude/settings.json" "Claude Code's PreToolUse registration of the agent-tool guard"
-	TOUCHED="$TOUCHED .claude/settings.json"
-elif grep -Fq "$guard_cmd" "$claude_settings"; then
-	report unchanged ".claude/settings.json" "it already registers the agent-tool guard"
+	record file "$new_id" "$SETTINGS_REL"
+	report installed "$SETTINGS_REL" "the agent-tool guard's PreToolUse registration, and $SETTINGS_KEY so a raise longer than ten minutes is not killed on Claude Code"
+	TOUCHED="$TOUCHED $SETTINGS_REL"
 else
-	report kept ".claude/settings.json" "it is yours and remit does not rewrite it; to make Claude Code enforce the guard, merge this into its \"hooks\" object deliberately"
-	sed 's/^/               /' "$GUARD_CLAUDE"
+	cur_id=$(hash_of "$claude_settings")
+	if [ "$cur_id" = "$new_id" ]; then
+		record file "$new_id" "$SETTINGS_REL"
+		report unchanged "$SETTINGS_REL"
+	elif [ -n "$old_id" ] && [ "$cur_id" = "$old_id" ]; then
+		cp "$GUARD_CLAUDE" "$claude_settings"
+		record file "$new_id" "$SETTINGS_REL"
+		report updated "$SETTINGS_REL"
+		TOUCHED="$TOUCHED $SETTINGS_REL"
+	else
+		if [ -n "$old_id" ]; then record file "$old_id" "$SETTINGS_REL"; fi
+		if grep -q "$SETTINGS_KEY" "$claude_settings" 2>/dev/null; then
+			report kept "$SETTINGS_REL" "it is yours and remit does not rewrite it; it already sets $SETTINGS_KEY, and that value is yours too. To make Claude Code enforce the guard, merge the \"hooks\" object below into it deliberately"
+		else
+			report kept "$SETTINGS_REL" "it is yours and remit does not rewrite it; merge the block below into it deliberately — the \"hooks\" object to enforce the guard, and \"$SETTINGS_KEY\": \"$SETTINGS_MS\" under \"env\", without which Claude Code kills any raise past its own 600000 ms ceiling"
+		fi
+		sed 's/^/               /' "$GUARD_CLAUDE"
+	fi
 fi
 
 # --- what remit no longer ships ----------------------------------------------

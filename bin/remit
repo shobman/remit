@@ -312,6 +312,19 @@
 #   REMIT_MUSTFIX     absolute path of a file holding the must-fix being sent
 #                     back, or empty on a first attempt
 #
+# WHAT THIS SCRIPT DOES WITH THE SEAM'S STDERR, because it decides what a caller
+# can see while a raise is running. Every invoke's stderr is captured to a file of
+# this script's own and printed ONLY when the seam exits non-zero. That is
+# deliberate — a resume runs a chain of raises and their narration is not this
+# script's output — and it means the seam's periodic heartbeat is NOT seen by a
+# caller that runs `remit resume`. What is seen on this road instead: the caller
+# sets `REMIT_PROGRESS=<path>`, which passes through untouched, and the seam
+# writes each raise's run directory there as that raise begins; the same
+# heartbeat lines are in that directory's `progress` file, which a watcher can
+# tail. A chain overwrites the path as it moves from raise to raise, so it always
+# names the one running now. What those two variables mean is `bin/remit-invoke`'s
+# header's to say, and is not restated here.
+#
 # WHAT THE SEAM RETURNS, per role — this is the whole text contract, and the only
 # thing this script parses:
 #

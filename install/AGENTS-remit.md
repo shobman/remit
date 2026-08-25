@@ -105,6 +105,85 @@ and for Copilot CLI, whether that CLI exposes a sub-agent tool, and what it woul
 something remit has probed — its hook guards the names Claude Code uses, which is a guard and not
 an attestation. The rule binds all five whatever enforces it.
 
+## A raised context is visible while it runs
+
+Raising a fresh context — `bin/remit-invoke` directly, or `bin/remit resume`, which raises one at
+every gate — takes minutes, and sometimes tens of them. **Run it as a BACKGROUNDED task of your own
+harness: non-blocking, so the practitioner keeps the conversation while it runs, and registered with
+the harness, so the task's lifespan is the harness's own to show and its end the harness's own to
+notify.** A raise run in the foreground is the failure this rule exists to stop, and it is a failure
+that looks like success — it shows a clock and takes the conversation away with it. Messages sent to
+a session blocked on a foreground raise go unread until the raise ends.
+
+What each harness gives you, established by driving these CLIs on 2026-08-23 and naming the version,
+because a future version may differ. Which road is taken on each is not chosen per raise: the agent
+road is closed everywhere by the rule above, whatever a harness offers, so what follows is what each
+harness gives a raise that runs as an ordinary task of its own.
+
+- **Claude Code** (2.1.241) — the road is a **backgrounded shell task**: its own shell tool with
+  `run_in_background`, and the command it runs is the `bin/remit-invoke` or `bin/remit` call itself.
+  Nothing wraps it — no agent, no task tool, no sub-agent of your own; that is the road the rule
+  above forbids, and here a `PreToolUse` hook refuses it. The harness registers the backgrounded call
+  in its own background-task list, so the raise has a tracked lifespan in the place the practitioner
+  already looks for running work, writes its output to a file it names, and notifies when it ends —
+  while the next turn is already free. It costs no second context: nothing is spent on being
+  watchable. Two conditions bind it:
+  - The call carries an **explicit timeout** generous enough for the role. With none asked for, the
+    shell tool's bound is 120 000 ms, and a call that reaches its bound is killed with SIGTERM. The
+    timeout you may ask for is itself capped at `max(BASH_MAX_TIMEOUT_MS, BASH_DEFAULT_TIMEOUT_MS)`,
+    and so at 600 000 ms when neither is set — which is what the `env.BASH_MAX_TIMEOUT_MS` remit's
+    installer offers in `.claude/settings.json` is for, alongside the agent-tool guard's registration
+    named above. Both bounds were established against a call the session waits on and were not
+    re-driven against a backgrounded one, so ask for the timeout rather than find out.
+  - `CLAUDE_AUTO_BACKGROUND_TASKS` and `CLAUDE_CODE_AUTO_BACKGROUND_TIMEOUT_MS` stay unset. Read out
+    of the shipped build, the first auto-backgrounds a sub-agent's own work at two minutes, which is
+    nothing to a call that is backgrounded already, and the second shortens any requested timeout to
+    itself for a main-agent call that can background — which is exactly this call. What either does
+    to a raise on this road was not driven, and unset is the state everything here was established
+    under.
+
+  Two things this road does not give, said rather than promised. There is no step sentence: the
+  progress channel that carries a derived "what it is doing now" belongs to the harness's own
+  sub-agent tasks, and a shell task has none. And the one ticking elapsed in 2.1.241's shipped
+  renderer belongs to the active turn's activity row, which closes the moment a backgrounded call
+  returns its id — so what a person has in front of them on that version is the background task and
+  its notification, which is the lifespan, and not a second-by-second count inside the turn. The two
+  channels below are what a watcher tails for more than that.
+- **Pi** (0.84.2) — **there is no background road here.** Pi's shell tool takes a command and a
+  timeout and nothing else, and pi has no sub-agent at all, so there is nothing here that could hold
+  a raise while the session goes on, and a raise blocks the session for its whole length. What pi
+  gives instead, for free and with nothing built, is the other half: a live `Elapsed` on the call,
+  the command's output streamed as it arrives, and no default timeout to be killed by. Say that this
+  is a limit of the harness. Do not present a blocking raise as the answer.
+- **Codex** (codex-cli 0.148.0) brackets a raise as one command-execution item, open from the moment
+  it starts until it exits, and blocks the thread on it; its own "run in background" offer means exit
+  codex and leave the task running, which is not a watched task. It has native sub-agents, and they
+  are not a road here — the agent road is closed on every harness. So a raise on codex today is
+  visible and blocking, as on pi, and that is said rather than dressed up. What would change it is a
+  non-blocking shell road: drive `codex exec --json` through a turn whose work is a long shell
+  command, and read whether the thread takes another turn while that command is still open.
+- **GitHub Copilot CLI** — **unestablished.** Nothing here describes how it surfaces a long shell
+  call, backgrounded or not, because the CLI was not available to drive. What would establish it:
+  install it, run a long shell command in prompt mode under `--output-format json`, and read whether
+  the event stream brackets that command's whole life and whether anything can be left running while
+  the session takes another turn. Until someone does, say it is unknown rather than assuming it
+  behaves like the three above.
+- **Devin** — **unestablished**, for the same reason and on the same terms. Its ATIF export
+  (`--export`) carries per-step data and is the likely channel to read, and that is a lead, not a
+  finding.
+
+Two channels make a raise say something while it runs, rather than only at its end. Both are
+`bin/remit-invoke`'s, both are optional, and its own header states exactly what each does: set
+`REMIT_PROGRESS=<path>` to be told where the run directory is the moment it exists (the path is
+otherwise unguessable), and `REMIT_HEARTBEAT=<seconds>` to change or silence the pulse it prints
+while the CLI runs. Neither changes what the seam returns, and neither puts the raised context's own
+exploration in front of you — that boundary is unchanged. Where a harness leaves you blind, those two
+are what a watcher tails; they are not a substitute for the harness registering the task.
+
+Nothing here writes into a harness's private task store, and nothing should. A raise is visible
+because it is an ordinary task of the harness that raised it, or it is not visible — those are the
+only two honest states, and the second one gets said out loud.
+
 ## The conventions are files here, not features of a harness
 
 Five conventions govern how any session behaves around this work surface. Each is an ordinary

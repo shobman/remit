@@ -32,7 +32,7 @@ The command researches where the brief asks for it, evaluates, builds, delivers,
 checks, flips ready, merges and closes — as far as his word and the repository's rubrics reach,
 one gate at a time. None of that is yours to perform, brief, sequence or repeat, and no step of it
 happens in this conversation. It raises real fresh contexts and takes minutes to hours. **Run it
-in the background and report when it returns.**
+the way AGENTS.md's "A raised context is visible while it runs" says every raise is run.**
 
 It never writes a brief. The brief is his; where the gate into `refined` returns a must-fix the
 item waits at `new` with that must-fix on the record, for him.
