@@ -1,0 +1,15 @@
+{
+  "env": {
+    "BASH_MAX_TIMEOUT_MS": "10800000"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Task|Agent|AgentTool",
+        "hooks": [
+          { "type": "command", "command": "sh .remit/hooks/no-agent-tool.sh" }
+        ]
+      }
+    ]
+  }
+}

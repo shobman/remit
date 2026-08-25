@@ -1,0 +1,71 @@
+#!/bin/sh
+# remit pre-push guard — installed by remit's installer into the repository's
+# shared hooks directory ($GIT_COMMON_DIR/hooks), so every linked worktree
+# inherits it.
+#
+# Two guards, both mechanical:
+#
+#   1. Pushes to main are permitted only from the repository's primary
+#      worktree. Linked worktrees are builders' territory; builders deliver on
+#      work/* branches and never move main.
+#
+#   2. Commits newly introduced on work/* branches must carry both session
+#      trailers, so nothing anonymous lands: a Co-Authored-By: trailer naming
+#      the model that authored the commit, and a Claude-Session: trailer —
+#      required on all commits regardless of co-author (practitioner ruling).
+#      Only commits the pusher introduces are linted: commits already on any
+#      remote — an inherited mainline merged into the branch landed with the
+#      practitioner's authority through this hook's own main path — are not
+#      linted again.
+#
+# stdin: <local ref> SP <local sha1> SP <remote ref> SP <remote sha1> LF
+set -u
+
+zero=0000000000000000000000000000000000000000
+
+git_dir=$(CDPATH= cd -- "$(git rev-parse --git-dir)" && pwd -P)
+common_dir=$(CDPATH= cd -- "$(git rev-parse --git-common-dir)" && pwd -P)
+if [ "$git_dir" = "$common_dir" ]; then primary=yes; else primary=no; fi
+
+fail=0
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+	[ -n "$remote_ref" ] || continue
+	case "$remote_ref" in
+	refs/heads/main)
+		if [ "$primary" != yes ]; then
+			printf 'remit pre-push: REFUSED — main moves only from the primary worktree at %s; this is a linked worktree.\n' \
+				"$(dirname "$common_dir")" >&2
+			fail=1
+		fi
+		;;
+	refs/heads/work/*)
+		# Deleting a work branch carries no commits to lint.
+		[ "$local_sha" != "$zero" ] || continue
+		# Lint only commits this push introduces: nothing already on any
+		# remote (an inherited, already-landed mainline is not the pusher's
+		# to answer for), and nothing already at the branch's remote tip.
+		if [ "$remote_sha" = "$zero" ]; then
+			set -- "$local_sha" --not --remotes
+		else
+			set -- "$local_sha" --not "$remote_sha" --remotes
+		fi
+		for commit in $(git rev-list "$@"); do
+			body=$(git log -1 --format=%B "$commit")
+			if ! printf '%s\n' "$body" | grep -qi '^Co-Authored-By:'; then
+				printf 'remit pre-push: REFUSED — commit %s on %s has no Co-Authored-By: trailer; nothing anonymous lands on work/* branches.\n' \
+					"$(git rev-parse --short "$commit")" "$remote_ref" >&2
+				fail=1
+				continue
+			fi
+			if ! printf '%s\n' "$body" | grep -qi '^Claude-Session:'; then
+				printf 'remit pre-push: REFUSED — commit %s on %s has no Claude-Session: trailer; the session trailer is required on all work/* commits.\n' \
+					"$(git rev-parse --short "$commit")" "$remote_ref" >&2
+				fail=1
+			fi
+		done
+		;;
+	esac
+done
+
+exit "$fail"
