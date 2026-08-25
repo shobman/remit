@@ -453,6 +453,42 @@
 # under it while it ran — so anything he wrote during a run is still a change at
 # the next one.
 #
+# Every entry that RECORDS A RAISE carries one line naming it:
+#
+#   - raise: <role> — <harness> — <seconds>s
+#   - raise: <role> — <harness> — not timed: <why>
+#
+# `<role>` is the role that ran: research, build, evaluate or repair-brief.
+# `<harness>` is the provenance sidecar's `harness:`, or `an unreported harness`
+# where the seam named none. `<seconds>` is whole seconds of wall clock, taken
+# around the raise by this script and by nothing else — where the clock could not
+# be read, or moved backwards while the raise ran, the second shape says so
+# instead, because a duration nobody measured is not one to report as a number.
+#
+# ONE LINE FOR EVERY RAISE THAT RAN TO COMPLETION: the seam exited zero and the
+# marker was still this run's when it came back. A raise his `kill` ended, and
+# one the seam refused before any context was raised, gets no line — neither is a
+# run whose length means anything. The line is written into the NEXT entry this
+# script appends, which is the entry that records what the raise produced: a
+# build's lands in the `delivery`, an evaluate's in the `verdict`, research's in
+# the `research`. Where the round failed before that entry could be written — an
+# empty stage, a push the remote refused — the line lands in the `escalated`
+# entry instead, because a raise that ran is evidence whatever became of the
+# round it belonged to.
+#
+# THE ONE LINE THAT CAN BE LOST, said out loud rather than left to be found: a
+# raise that completed inside a run his `kill` then ended before the entry could
+# be written. That run has lost the record's lock to the `kill` itself, and
+# appending from it would be writing a file another process is writing — so it
+# leaves the line behind rather than race for it.
+#
+# WHY THEY ARE WRITTEN: they are the evidence a convention reads to say how long
+# a run it is about to start will take. THAT CONVENTION IS STATED IN ONE PLACE
+# AND THIS IS NOT IT — `install/skills/remit-resume/SKILL.md`, under "Before a
+# run that will take minutes — the leave line". Nothing here says what is said to
+# the practitioner, or how these seconds become it; this script writes the line
+# and stops.
+#
 # Findings and their dispositions are lines inside an entry, numbered once per
 # item and never renumbered:
 #
@@ -747,6 +783,16 @@ EOF
 die() { printf '%s: %s\n' "$ME" "$1" >&2; exit 2; }
 say() { printf '%s\n' "$1"; }
 now() { date +%Y-%m-%d; }
+# Whole seconds since the epoch, or NOTHING at all when this host will not give
+# them. Both required shells answer `date +%s`; a host that does not, or that
+# answers with something other than digits, makes a raise one that was NOT TIMED
+# — which the record says in those words rather than carrying a number nobody
+# measured.
+secs() {
+	_s=$(date +%s 2>/dev/null) || return 0
+	case $_s in '' | *[!0-9]*) return 0 ;; esac
+	printf '%s\n' "$_s"
+}
 nocr() { tr -d '\015' <"$1"; }
 
 # --- argument parsing ---------------------------------------------------------
@@ -1033,6 +1079,15 @@ log_append() { # $1 heading text; the body on stdin
 	log_ensure
 	{
 		printf '\n## %s\n\n' "$1"
+		# The raises that have run since the last entry was written, at the top
+		# of this one and cleared as they go, so a raise is named once and in the
+		# first entry that follows it. The shape and what it is for are in this
+		# script's header, under `log.md — THE ENTRY SHAPES`.
+		if [ -n "${RAISES:-}" ] && [ -s "$RAISES" ]; then
+			cat "$RAISES"
+			printf '\n'
+			: >"$RAISES"
+		fi
 		cat
 	} >>"$log"
 }
@@ -1889,6 +1944,25 @@ chain_intact() { # 0 carry on; 1 the authority changed
 	return 1
 }
 
+# One raise, named, for the record — the fields and what they are for are in this
+# script's header, under `log.md — THE ENTRY SHAPES`. It is queued rather than
+# written, because the entry that will carry it has not been composed yet;
+# `log_append` empties the queue into the next entry it writes.
+raise_line() { # $1 role  $2 the epoch second it started  $3 the second it came back
+	_rl_h=$(prov harness)
+	[ -n "$_rl_h" ] || _rl_h='an unreported harness'
+	if [ -z "$2" ] || [ -z "$3" ]; then
+		printf -- '- raise: %s — %s — not timed: this host does not answer `date +%%s` with whole seconds\n' \
+			"$1" "$_rl_h" >>"$RAISES"
+	elif [ "$3" -lt "$2" ]; then
+		printf -- '- raise: %s — %s — not timed: the clock moved backwards while it ran\n' \
+			"$1" "$_rl_h" >>"$RAISES"
+	else
+		printf -- '- raise: %s — %s — %ss\n' "$1" "$_rl_h" "$(($3 - $2))" >>"$RAISES"
+	fi
+	return 0
+}
+
 # Runs the seam. Its stdout lands in $2 and its provenance in $WORK/prov.
 invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	_role=$1 _out=$2 _wt=$3
@@ -1933,6 +2007,11 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	# background command's stdin is not the caller's, and naming it keeps both
 	# shells the same and keeps the seam's own reading of stdin — none — a
 	# decision rather than a default.
+	#
+	# The clock is read HERE, immediately before the raise and immediately after
+	# it, so what the record calls the length of a raise is the wall clock the
+	# practitioner waited through and not the harness's own account of itself.
+	_t0=$(secs)
 	REMIT_ITEM="$item" \
 		REMIT_AUTHORITY="$AUTHORITY" \
 		REMIT_RUBRICS="$_rub" \
@@ -1946,6 +2025,7 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	mark_raise "$RAISE_PID"
 	wait "$RAISE_PID"
 	_irc=$?
+	_t1=$(secs)
 	RAISE_PID=''
 	# A raise that ENDED because his `kill` took the lock is not a raise that
 	# FAILED, and the difference is the whole of what the record says next: one
@@ -1954,6 +2034,9 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	# this can tell them apart without reading a signal number.
 	marker_is_ours || chain_ended
 	mark_raise ''
+	# It ran to completion: past the kill check above, and the seam exited zero.
+	# That is the whole of what earns a `- raise:` line, and a refusal earns none.
+	[ "$_irc" = 0 ] && raise_line "$_role" "$_t0" "$_t1"
 	if [ "$_irc" != 0 ]; then
 		printf '%s: the seam refused `%s` (exit %s):\n' "$ME" "$_role" "$_irc" >&2
 		sed 's/^/    /' "$WORK/invoke.err" >&2
@@ -2799,6 +2882,11 @@ SAVETMP=''
 # do it here cannot tell a `remit kill` run from inside a raise apart from the
 # raise itself, and a trap that ended its own killer would lose the record.
 RAISE_PID=''
+# The `- raise:` lines that have not reached an entry yet. It goes with the run:
+# a line names a raise THIS process made, and a run that ends without an entry to
+# put it in leaves nothing behind rather than seeding the next one's record.
+RAISES="$WORK/raises"
+: >"$RAISES"
 cleanup() { lock_drop; rm -rf "$WORK"; [ -n "$SAVETMP" ] && rm -f "$SAVETMP"; return 0; }
 trap 'cleanup' EXIT
 trap 'cleanup; marker_release; exit 130' INT TERM
