@@ -17,7 +17,7 @@ you do not reimplement it:
 sh "$(git rev-parse --show-toplevel)/bin/remit" new <slug> [--until <stop>] [--park]
 sh "$(git rev-parse --show-toplevel)/bin/remit" resume <slug> [--until <stop> [--park]]
 sh "$(git rev-parse --show-toplevel)/bin/remit" park <slug>
-sh "$(git rev-parse --show-toplevel)/bin/remit" kill <slug>       # end the chain running on this item
+sh "$(git rev-parse --show-toplevel)/bin/remit" stop <slug>       # end the chain running on this item
 sh "$(git rev-parse --show-toplevel)/bin/remit" close <slug>      # delivery links on stdin, or empty
 sh "$(git rev-parse --show-toplevel)/bin/remit" list [--parked]
 sh "$(git rev-parse --show-toplevel)/bin/remit" report new|close <name>

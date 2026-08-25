@@ -14,13 +14,14 @@ from what is written and what is shipped. Nothing here starts, ranks or revives 
 sh "$(git rev-parse --show-toplevel)/bin/remit" list
 ```
 
-Each row is attention, stage, the one-word reason it stopped, slug, title. Escalated items sort
-first; that ordering is the command's and carries no judgement about value or priority. Report
-the rows verbatim in substance and add nothing — no view on which matters more, no suggestion of
-where to begin. If it says there are no active items, say so and stop; do not go looking for
-something to fill the silence.
+Each row is class, stage, the one-word reason it stopped, slug, title. A class of `crashed` is a
+run that died. The command fixes the order the rows come in, and it carries no judgement about
+value or priority. Report the rows verbatim in substance and add nothing — no view on which
+matters more, no suggestion of where to begin. If it says there are no active items, say so and
+stop; do not go looking for something to fill the silence.
 
-Parked work is dormant and hidden. Show it only when he asks for parked, shelved or "the rest":
+Parked work is dormant and the board does not list it, except where the command lists it anyway
+and the row says why. Show it when he asks for parked, shelved or "the rest":
 
 ```sh
 sh "$(git rev-parse --show-toplevel)/bin/remit" list --parked

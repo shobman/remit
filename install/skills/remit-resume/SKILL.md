@@ -1,6 +1,6 @@
 ---
 name: remit-resume
-description: 'Move a work item in this repository''s .remit/ work location as far as the practitioner said it may go, and report where it stopped. Use on his words for putting an item back in motion — "pick up X", "carry on with X", "resume it", "unpark it", "run it to refined", "take it to accepted", "take it all the way", "keep going" — and after it stopped or escalated and he has ruled. Use it too on his word that a run in progress is over: "stop it", "kill it", "that''s enough, end it". Also the one place an ad-hoc check is raised: "check this", "is this any good", "have someone look at this" on work in the conversation.'
+description: 'Move a work item in this repository''s .remit/ work location as far as the practitioner said it may go, and report where it stopped. Use on his words for putting an item back in motion — "pick up X", "carry on with X", "resume it", "unpark it", "run it to refined", "take it to accepted", "take it all the way", "keep going" — and after it stopped, escalated or crashed and he has ruled. Use it too on his word that a run in progress is over: "stop it", "kill it", "that''s enough, end it". Also the one place an ad-hoc check is raised: "check this", "is this any good", "have someone look at this" on work in the conversation.'
 ---
 
 # Resume
@@ -25,8 +25,12 @@ sh "$(git rev-parse --show-toplevel)/bin/remit" park <slug>
 On "stop it", "kill it" about a run that is already going, that is its own command as well:
 
 ```sh
-sh "$(git rev-parse --show-toplevel)/bin/remit" kill <slug>
+sh "$(git rev-parse --show-toplevel)/bin/remit" stop <slug>
 ```
+
+`resume` is also the one verb that continues a run that CRASHED — a row the board shows as
+`crashed`. Run it only on his word about that item, exactly as above; a crash is never a reason
+to resume something he has not asked you to.
 
 The command researches where the brief asks for it, evaluates, builds, delivers, evaluates again,
 checks, flips ready, merges and closes — as far as his word and the repository's rubrics reach,

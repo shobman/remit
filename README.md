@@ -9,7 +9,7 @@ stay with the person who owns their consequences. It is two POSIX scripts and fi
 no service, no database, no daemon. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.2.9. Early, and in use.**
+**Version 0.2.10. Early, and in use.**
 
 ## One piece of work, start to finish
 
@@ -112,11 +112,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.2.9` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.2.10` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.2.9 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.2.10 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:

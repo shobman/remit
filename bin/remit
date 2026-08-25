@@ -83,12 +83,15 @@
 #       arguing; `remit park <slug>` is that instruction.
 #
 #   remit park <slug>            attention -> parked; the stage does not move
-#   remit kill <slug>            end the chain that is running on this item. It
-#                                refuses when none is. The worktree's in-flight
-#                                changes are discarded, the marker is cleared,
-#                                one line is recorded, and THE STAGE IS NOT
-#                                TOUCHED: the item is left at the stage it last
-#                                stopped at. See THE AUTHORITY LOCK below.
+#   remit stop <slug>            end the chain that is running on this item. It
+#                                refuses when there is no marker at all. The
+#                                worktree's in-flight changes are discarded, the
+#                                marker is disposed of, one line is recorded, and
+#                                THE STAGE IS NOT TOUCHED: the item is left at
+#                                the stage it last stopped at. A marker whose
+#                                chain is already gone is a CRASH, and this ends
+#                                that too, saying which it found. See THE
+#                                AUTHORITY LOCK and THE CRASHED CLASS below.
 #   remit close <slug>           final. Seals every finding that has no
 #                                disposition as `pre-authorised`, records the
 #                                delivery links on stdin and archives the whole
@@ -107,7 +110,10 @@
 #                                the proposal itself, atomically, having read the
 #                                registry already there first
 #   remit migrate                the one-time move of a pre-`work-items/` layout
-#   remit activate <slug>        retired: prints what replaced it, exits 2
+#   remit activate <slug>        retired into `resume`: prints what replaced it,
+#                                exits 2
+#   remit kill <slug>            retired into `stop`: prints what replaced it,
+#                                exits 2
 #
 # EXIT CODES, every one of them:
 #
@@ -121,8 +127,8 @@
 #      authority changed under it. The attention is now `escalated`, the STAGE IS
 #      UNCHANGED, and the reason is appended to `log.md`. It sorts first in `list`
 #      and needs one word to continue.
-# 130  a running `resume` was ENDED — by a signal, or by `remit kill` clearing its
-#      marker. `kill` is the one that records what happened; the chain that was
+# 130  a running `resume` was ENDED — by a signal, or by `remit stop` clearing its
+#      marker. `stop` is the one that records what happened; the chain that was
 #      ended records nothing further, because two accounts of one stop is one
 #      account too many.
 #
@@ -130,42 +136,70 @@
 # THE LIST PROJECTION
 # ==============================================================================
 #
-#   work-items/* -> read the header and the last recorded stop
+#   work-items/* -> read the header, the last recorded stop, and the marker
 #                -> report unreadable or invalid entries on stderr, never drop
 #                   them in silence
-#                -> exclude closed; show parked only with --parked
-#                -> escalated first, then active
+#                -> exclude closed; show parked only with --parked, EXCEPT a
+#                   parked item that crashed, which is on the plain list under
+#                   the crashed class and says in its row that it is parked
+#                -> CRASHED first, then escalated, then active
 #                -> within each, by stage rank: accepted, refined, new
 #                -> tie-break by slug
 #
-# Each row is five tab-separated columns — attention, stage, the reason it
-# stopped, slug, title — with ` [working]` appended while a `resume` of that item
-# is in progress. The reason is READ FROM THE RECORD (the most recent
+# Ruled by the practitioner, 2026-08-25: "on session start, a check for .working
+# shows as the NUMBER 1 item above escalation, as a item crashed … 1) A crashed
+# raise should continue … 2) Escalate items next 3) Active items next 4) not
+# shown is parked items", and "when i say on session start or even on the glance
+# when i ask for items actually … it's when i ask the principal about my current
+# work, that it appears, in that list process".
+# There is ONE projection and every glance at the board reads it, which is what
+# makes that true wherever he asks.
+#
+# Each row is five tab-separated columns — class, stage, the reason it stopped,
+# slug, title. The CLASS is the item's attention — `active`, `escalated`,
+# `parked` — or `crashed`, which outranks it: a marker this machine can see no
+# running process for says the chain crashed, and THE CRASHED CLASS below says
+# why that is the only thing it can mean. A live marker appends ` [working]` to
+# the title; a crashed one appends what the marker knows — the step it died at,
+# the dead pid, and how stale.
+#
+# Crashed outranking `parked` is the one place the class column LOSES something
+# he ruled — the crash is a fact about a run and the park is a fact about his
+# attention, and surfacing the first does not undo the second. So a crashed row
+# whose header still says parked appends ` [parked]` after the crash note: it
+# leads the board, because a crash is the loudest thing on it, and the row says
+# it is parked so that reading the board is not reading it wrong.
+#
+# The reason is READ FROM THE RECORD (the most recent
 # `## stopped —` or `## escalated —` entry in `log.md`), never computed, and is
 # one of: `until ran out`, `promote: <id>` (a rubric the gate's evaluator cited
 # carried it past what the practitioner said, and it rests here), `hold: <id>`
 # (a rubric the gate's evaluator cited stopped it here for his eyes), `fix:
 # <id>` (a rubric the gate's evaluator cited is the must-fix still standing),
 # `depends on: <the work item the line names that has not closed, or what it
-# left unreadable>`, `4 fails`, `same must-fix twice`, `cannot act: <what>`, `authority changed`
-# (it changed while the chain was running — THE AUTHORITY LOCK below), `killed on
-# the practitioner's word at <step>`, `queued phase: <file>` (a phase was waiting
+# left unreadable>`, `<n> fails`, `same must-fix twice`, `cannot act: <what>`, `authority changed`
+# (it changed while the chain was running — THE AUTHORITY LOCK below), `stopped
+# on the practitioner's word at <step>`, `stopped a crashed chain at <step>`,
+# `queued phase: <file>` (a phase was waiting
 # at the `accepted` stop and is now the authority), `parked`, `parked at until`.
 # An item with nothing recorded shows `-`.
 #
 # The working marker IS the lock: `.remit/work-items/<slug>/.working`, created by
 # `resume` after its preconditions pass and removed however it exits. A second
-# `resume` of the same item refuses while it is there. It is not a stage, and it
+# `resume` of the same item refuses while the chain it names is RUNNING. It is
+# not a stage, and it
 # is MACHINE STATE, never repository state: it says a resume is running HERE, so
 # it is kept out of every commit and never travels to another clone. The pathspec
 # that keeps it out is beside the marker itself, and one an older remit did
 # commit is taken back out by `markers_untrack`, beside `commit_and_push`. It
-# carries six `key: value` lines and nothing else — `pid:` the resume that owns
+# carries seven `key: value` lines and nothing else — `pid:` the resume that owns
 # it, `host:` the machine that resume is on, `authority:` the file it raised
 # from, relative to the item folder, `hash:` that file's digest, `step:` what the
-# chain is doing right now, rewritten as it moves, and `raise:` the pid of the
-# fresh context in flight, EMPTY between raises. `kill` reads all six; the chain
-# re-reads its own to know it is still the one running.
+# chain is doing right now, rewritten as it moves, `raise:` the pid of the
+# fresh context in flight, EMPTY between raises, and `at:` the second the marker
+# was last written, which is the second the chain last did anything. `stop` reads
+# all seven; `list` reads `pid`, `host`, `step` and `at`; the chain re-reads its
+# own to know it is still the one running.
 #
 # ==============================================================================
 # WHAT A BRIEF DEPENDS ON
@@ -448,6 +482,8 @@
 #   ## ruling — <the practitioner's words> — <date>
 #   ## admitted — <date>          (only when `new` goes straight on to the chain)
 #   ## amended — <what changed> — <date>
+#   ## resumed — <label> — <date>  (a run going back in where the record left
+#                                   off, or picking a crashed chain up)
 #   ## stopped — <reason> — <date>
 #   ## escalated — <reason> — <date>
 #   ## closed — <date>
@@ -455,7 +491,7 @@
 #
 # Every entry where the item COMES TO REST — the stops, the escalations, the
 # admission, and the amendment above — carries two lines naming the authority it
-# rests with:
+# rests with, and so does the resume that goes back in:
 #
 #   - authority: <file, relative to the item folder>
 #   - authority hash: <its digest>
@@ -600,7 +636,7 @@
 # thing `new` asks the gate for on its own. That is the law's table, row one.
 #
 # ==============================================================================
-# THE AUTHORITY LOCK — KILL, AMENDMENT AND THE PHASE QUEUE
+# THE AUTHORITY LOCK — STOP, AMENDMENT AND THE PHASE QUEUE
 # ==============================================================================
 #
 # Admitted by the practitioner, 2026-08-23: "i'm keenly interested in keeping it
@@ -609,7 +645,7 @@
 # Nothing here reads what he said, and nothing here judges what a half-built tree
 # is worth.
 #
-#   | state                 | `remit kill`               | he adds "also do Y"    |
+#   | state                 | `remit stop`               | he adds "also do Y"    |
 #   |-----------------------|----------------------------|------------------------|
 #   | new, stopped          | refused, nothing running   | brief edited; the next |
 #   |                       |                            | resume runs gate 1     |
@@ -678,8 +714,15 @@
 # a `, then park` he had just reached: work he queued is not work he parked, and
 # the row he reads says which phase is now the authority.
 #
-# `remit kill` is his word that the in-flight work is gone. It refuses unless a
-# chain is running. IN THIS ORDER, because each step depends on the one before
+# `remit stop` is his word that the in-flight work is gone. Named `kill` until
+# he ruled on 2026-08-25 — "kill feels more load bearing than simply stop - can
+# we change it to stop please? … i'm locked in on it" — and `kill` retires the
+# way `activate` did, saying what replaced it and exiting 2. It ends the CHAIN,
+# not the item: abandoning the item is `close`, and the stage this leaves alone
+# is the item's road back in.
+#
+# It refuses only when there is NO MARKER AT ALL. IN THIS ORDER, because each
+# step depends on the one before
 # it: it ends the tree of the RAISE the marker names — a chain is inside a raise
 # for almost all of the time it runs, and one left alive would go on writing into
 # the worktree about to be discarded; it sends TERM to the chain's own pid; it
@@ -692,10 +735,31 @@
 # machine — this script commits what it writes, so a marker travels, and a pid
 # read on the wrong machine names some unrelated local process. On the machine
 # that wrote it a pid can still be reused between the marker being written and
-# `kill` reading it; this script cannot tell that apart, and says so here rather
+# `stop` reading it; this script cannot tell that apart, and says so here rather
 # than pretending. The chain also stops itself at
 # its next step when its marker is gone or is no longer its own, so a resume that
 # outlived the signal does not run on.
+#
+# THAT IT ALWAYS DISPOSES ITS OWN MARKER IS LOAD-BEARING for everything else: it
+# is what leaves a marker with no running chain meaning ONE thing. THE CRASHED
+# CLASS, beside `marker_alive`, is where that is said.
+#
+# ==============================================================================
+# THE ROAD BACK IN
+# ==============================================================================
+#
+# A chain that stopped — his `stop`, an escalation, or a crash — RESUMES AT THE
+# STEP IT STOPPED AT AND NEVER EARLIER. The record is what says where that is,
+# and `resume_point` is the whole of how it is read; the reasons the night of
+# 2026-08-23/24 made it necessary are on this item's own record and are not
+# repeated here.
+#
+# ONLY `resume` CONTINUES A CRASHED RUN, and it is never automatic — ruled by him
+# on 2026-08-25: "the alternative is to just resume auto - but i think this is
+# better to give me the chance to rule it." It stays on his board until he deals
+# with it. Every OTHER verb wipes the marker as part of doing its own job — `stop`
+# ends the dead chain and says so, `park` parks, `close` archives — so no verb
+# ever refuses until a person hand-deletes a file. That is `crash_take`.
 
 set -u
 
@@ -735,13 +799,17 @@ usage:
                          --park attaches to the --until beside it; on its own it
                          is refused — `remit park <slug>` is that instruction.
   remit park <slug>      attention -> parked. The stage does not move.
-  remit kill <slug>      end the chain running on this item — his word that the
-                         in-flight work is gone. Refused when nothing is running.
+  remit stop <slug>      end the chain running on this item — his word that the
+                         in-flight work is gone. Refused only when there is no
+                         marker at all.
                          Ends the fresh context it had raised and everything
                          under it, waits for the chain to be gone, discards the
-                         build worktree's changes, clears the marker, records one
-                         line naming the step it was at, and leaves the item AT
-                         THE STAGE IT LAST STOPPED AT.
+                         build worktree's changes, disposes the marker, records
+                         one line naming the step it was at, and leaves the item
+                         AT THE STAGE IT LAST STOPPED AT. A marker whose chain is
+                         already gone is a CRASH: this ends that too and says so.
+                         It ends the CHAIN, not the item — `close` abandons an
+                         item.
   remit close <slug>     FINAL. Seals every finding with no disposition as
                          `pre-authorised`, keeps anything on stdin as the
                          delivery links, and archives the whole folder to
@@ -749,7 +817,13 @@ usage:
                          REACHED. This verb stamps NO stage: work abandoned at
                          `refined` is archived at `refined`, and a brief that
                          depends on it is not let through by its archiving.
-  remit list [--parked]  escalated first, then active by stage; --parked instead
+  remit list [--parked]  the board — everything not closed, in the order THE
+                         LIST PROJECTION in this script's header fixes, which is
+                         the one place that ordering is stated; --parked lists
+                         the parked instead. A crashed row is an item whose
+                         marker names no chain this machine can see running: it
+                         says the step it died at, the dead pid and how stale,
+                         and only `resume` continues it.
   remit report new <name>    file .remit/field-reports/<name>.md from stdin
   remit report close <name>  archive it to field-reports/.archive/
   remit rules init       lay down .remit/rules/ — refined.md, accepted.md,
@@ -770,7 +844,8 @@ usage:
   remit migrate          one-time: .remit/<slug>/ -> .remit/work-items/<slug>/,
                          evaluation.md -> log.md, **State:** -> **Attention:** +
                          **Stage:**, root field-reports/ -> .remit/field-reports/
-  remit activate <slug>  retired — it says what replaced it and exits 2
+  remit activate <slug>  retired into `resume` — it says so and exits 2
+  remit kill <slug>      retired into `stop` — it says so and exits 2
 
 Only the practitioner decides an item is closed, or how far it may go without
 them. This script records and applies that; it decides nothing.
@@ -787,8 +862,8 @@ Exit codes: 0 done — committed, and pushed if a remote exists. A `resume` that
               capability it needs is absent, or the authority changed under it.
               Attention is now `escalated`, the stage is unchanged, and log.md
               says why.
-          130 a running `resume` was ENDED — by a signal, or by `remit kill`.
-              `kill` records what happened; the chain it ended records nothing.
+          130 a running `resume` was ENDED — by a signal, or by `remit stop`.
+              `stop` records what happened; the chain it ended records nothing.
 EOF
 	exit 2
 }
@@ -867,7 +942,7 @@ resume)
 		die "--park at a resume attaches to the --until beside it. To park this item where it is, run: $ME park $slug"
 	fi
 	;;
-park | kill | close)
+park | stop | close)
 	[ $# -eq 1 ] || usage
 	slug=$1
 	check_slug "$slug"
@@ -875,6 +950,17 @@ park | kill | close)
 activate)
 	[ $# -eq 1 ] || usage
 	printf '%s: `activate` has retired into `resume`. Run `remit resume %s` — it activates the item and then moves it as far as you said it may go.\n' \
+		"$ME" "$1" >&2
+	exit 2
+	;;
+kill)
+	# Retired into `stop` on the practitioner's ruling of 2026-08-25 — "kill
+	# feels more load bearing than simply stop - can we change it to stop
+	# please? … i'm locked in on it." It retires the way `activate` did: it says
+	# what replaced it and exits 2, so a script or an agent still typing the old
+	# word is told rather than obeyed.
+	[ $# -eq 1 ] || usage
+	printf '%s: `kill` has retired into `stop`. Run `remit stop %s` — it ends the chain running on that item, exactly as `kill` did.\n' \
 		"$ME" "$1" >&2
 	exit 2
 	;;
@@ -1009,11 +1095,22 @@ hdr() { # $1 file  $2 name -> the value, or empty
 	nocr "$1" | sed -n "s/^\*\*$2:\*\* *//p" | sed -n 1p | sed 's/[[:space:]]*$//'
 }
 
+# The ONE refusal for a file the script-owned header cannot be written into.
+# `put_header` calls it before it writes anything, and so does every verb that
+# must be sure of its job before it takes a crashed marker off the board — the
+# reason that matters is at `crash_take`. Asking it early and asking it late are
+# the same question, and this is the only place the answer is worded.
+require_title() { # $1 file
+	nocr "$1" | grep -q '^# ' ||
+		die "$1 has no '# Title' heading — the header has nowhere to go"
+}
+
 # Re-emit the whole script-owned header as one block directly under the title.
 # Every existing header line is removed first, so this is idempotent and cannot
 # leave two of anything. An empty value omits the line entirely.
 put_header() { # $1 file  $2 attention  $3 stage  $4 until  $5 migrated (KEEP preserves)
 	_f=$1 _at=$2 _st=$3 _un=$4 _mg=$5
+	require_title "$_f"
 	[ "$_mg" = KEEP ] && _mg=$(hdr "$_f" Migrated)
 	awk -v at="$_at" -v st="$_st" -v un="$_un" -v mg="$_mg" '
 		BEGIN { ins = 0; eat = 0 }
@@ -1034,7 +1131,7 @@ put_header() { # $1 file  $2 attention  $3 stage  $4 until  $5 migrated (KEEP pr
 		eat == 1 && $0 == "" { next }
 		{ eat = 0; print }
 		END { if (ins == 0) exit 3 }
-	' "$_f" >"$_f.tmp" || { rm -f "$_f.tmp"; die "$_f has no '# Title' heading — the header has nowhere to go"; }
+	' "$_f" >"$_f.tmp" || { rm -f "$_f.tmp"; die "the header of $_f could not be rewritten — $ME left it as it was"; }
 	mv "$_f.tmp" "$_f"
 }
 
@@ -1143,7 +1240,7 @@ next_finding_no() {
 #
 # The wait is bounded — `REMIT_LOCK_WAIT` seconds, defaulted below. A run that
 # waits SAYS SO, once, and an expiry is REPORTED and then the commit is attempted
-# anyway. That is deliberate: a lock left behind by a killed run must cost one
+# anyway. That is deliberate: a lock left behind by a run that was stopped must cost one
 # loud wait, not a repository that can never commit again, and what an expiry
 # falls back to is exactly the behaviour this function had before the mutex
 # existed. Nothing here reaps a lock or judges whether its owner is alive.
@@ -1510,19 +1607,35 @@ list_items() { # $1 active|parked
 				printf '%s: work-items/%s has no readable **Attention:** line — not listed.\n' "$ME" "$s" >&2
 				continue
 			fi
+			# THE CLASS, computed here once, and read by the filter, the order
+			# and the row alike — so an item cannot be crashed for one of them
+			# and not for the others. What a class is and how it ranks is THE
+			# LIST PROJECTION in this script's header.
+			mark=''
+			cls=$at
+			if [ -f "${dir}.working" ]; then
+				if marker_alive "${dir}.working"; then
+					mark=' [working]'
+				else
+					cls=crashed
+					mark=" [$(crashed_note "${dir}.working")]"
+					# The class column has just lost `parked`, so the row says
+					# it instead — the reason is stated once, in THE LIST
+					# PROJECTION above.
+					[ "$at" = parked ] && mark="$mark [parked]"
+				fi
+			fi
 			case "$1" in
-			active) [ "$at" = active ] || [ "$at" = escalated ] || continue ;;
-			parked) [ "$at" = parked ] || continue ;;
+			active) [ "$cls" = active ] || [ "$cls" = escalated ] || [ "$cls" = crashed ] || continue ;;
+			parked) [ "$cls" = parked ] || continue ;;
 			esac
 			reason=$(last_reason "${dir%/}")
 			[ -n "$reason" ] || reason='-'
 			title=$(nocr "$b" | sed -n '/^# /{s/^# *//p;q;}')
-			mark=''
-			[ -f "${dir}.working" ] && mark=' [working]'
-			case "$at" in escalated) k1=0 ;; *) k1=1 ;; esac
+			case "$cls" in crashed) k1=0 ;; escalated) k1=1 ;; *) k1=2 ;; esac
 			k2=$((3 - $(rank "$st")))
 			printf '%s%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-				"$k1" "$k2" "$s" "$at" "$st" "$reason" "$s" "$title$mark"
+				"$k1" "$k2" "$s" "$cls" "$st" "$reason" "$s" "$title$mark"
 		done
 	)
 	if [ -z "$rows" ]; then
@@ -1613,7 +1726,7 @@ last_authority_hash() { # $1 item dir -> the digest, or empty
 }
 
 # ==============================================================================
-# the marker: the lock, and everything `kill` needs to know
+# the marker: the lock, and everything `stop` needs to know
 # ==============================================================================
 
 # The machine the marker was written on. A pid means nothing without it: this
@@ -1623,9 +1736,14 @@ this_host() { uname -n 2>/dev/null || printf 'an unnameable machine\n'; }
 
 # `step:` and `raise:` are held here as well as written, because each is rewritten
 # without the other being re-derived and a marker missing one of them would leave
-# a `kill` guessing.
+# a `stop` guessing.
 MARK_STEP=''
 MARK_RAISE=''
+
+# Seconds since the epoch, or empty where this host's `date` will not say. It is
+# read through a digit filter rather than trusted, because a `date` that answers
+# `%s` literally would otherwise be arithmetic in a later subtraction.
+now_secs() { date +%s 2>/dev/null | sed -n 's/^\([0-9][0-9]*\)$/\1/p' | sed -n 1p; }
 
 marker_write() { # $1 the step the chain is at
 	MARK_STEP=$1
@@ -1636,22 +1754,30 @@ marker_write() { # $1 the step the chain is at
 		printf 'hash: %s\n' "$AUTHORITY_HASH"
 		printf 'step: %s\n' "$MARK_STEP"
 		printf 'raise: %s\n' "$MARK_RAISE"
+		printf 'at: %s\n' "$(now_secs)"
 	} >"$marker"
 }
 
-marker_field() { # $1 key -> the value, or empty
-	[ -f "$marker" ] || return 0
-	nocr "$marker" | sed -n "s/^$1: *//p" | sed -n 1p
+# One reader for every marker, this item's or another item's. `list` asks about
+# markers it does not own, so the file is a parameter and `marker_field` is the
+# same question asked about this run's own.
+marker_read() { # $1 marker file  $2 key -> the value, or empty
+	[ -f "$1" ] || return 0
+	nocr "$1" | sed -n "s/^$2: *//p" | sed -n 1p
 }
 
-# Rewrites the step and nothing else, so that a `kill` can name what it ended.
+marker_field() { # $1 key -> the value, or empty
+	marker_read "$marker" "$1"
+}
+
+# Rewrites the step and nothing else, so that a `stop` can name what it ended.
 mark_step() { # $1 the step
 	[ -f "$marker" ] || return 0
 	marker_write "$1"
 }
 
 # The pid of the raise IN FLIGHT, empty between raises. It is on the marker and
-# not merely in this process because the practitioner's `kill` runs in another
+# not merely in this process because the practitioner's `stop` runs in another
 # one, and a chain is inside a raise for almost all of the time it is running.
 mark_raise() { # $1 the pid, or empty
 	MARK_RAISE=${1:-}
@@ -1666,7 +1792,7 @@ marker_is_ours() { # 0 while this process still holds the lock
 }
 
 # Puts the lock down, and ONLY when it is still this process's to put down. A
-# chain that a `kill` ended leaves through here whichever way it goes — the TERM
+# chain that a `stop` ended leaves through here whichever way it goes — the TERM
 # it was sent, or its own next step finding the marker gone — and by then the
 # practitioner may already have resumed the item — that second resume holds the
 # marker now, and a blind `rm` on the way out of the first would take the lock out
@@ -1677,12 +1803,119 @@ marker_release() {
 }
 
 # ==============================================================================
+# the crashed class
+# ==============================================================================
+#
+# Ruled by the practitioner, 2026-08-25: "there are currently two reasons for a
+# left .working — 1) the process died the computer died etc … 2) i killed it, and
+# the kill didn't handle it properly. if we fix 2 correctly then we only have to
+# worry about 1 … when a kill happens, the kill should dispose … which leaves the
+# only possible situation for a .working without a pid, to be that the process
+# died." `stop` disposes its own marker before it signals anything, and no other
+# verb leaves one behind either — THE ROAD BACK IN, in this script's header, is
+# where that is ruled. So a marker whose chain is not running means ONE thing,
+# and this script may say it without hedging: THE CHAIN CRASHED.
+#
+# LIVE IS THE NARROW ANSWER. A marker is live only where this machine can see the
+# process it names: written here, and a pid that still answers. A marker that
+# reached this clone in a commit names a process on another machine, and a pid
+# read here would name whatever local process happens to hold that number — so it
+# is not live HERE, and every verb treats it as the crash it looks like from
+# where the practitioner is standing. Pid reuse on this machine between the
+# marker being written and this question being asked is a thing this script
+# cannot see, and the marker section above says so.
+marker_alive() { # $1 marker file -> 0 the chain it names is running on this host
+	_mh=$(marker_read "$1" host)
+	[ -z "$_mh" ] || [ "$_mh" = "$(this_host)" ] || return 1
+	_mp=$(marker_read "$1" pid)
+	case "$_mp" in '' | *[!0-9]*) return 1 ;; esac
+	kill -0 "$_mp" 2>/dev/null || return 1
+	return 0
+}
+
+# How long since the chain last wrote its marker — which is how long since it did
+# anything at all, because every step rewrites it. Said in the coarsest unit that
+# is still true, and said as an absence where this host will not answer, because
+# a staleness this script invented is worse than one it admits it cannot take.
+stale_note() { # $1 the marker's `at` value -> a phrase
+	case "$1" in '' | *[!0-9]*)
+		printf 'the marker does not say when it was last written'
+		return 0
+		;;
+	esac
+	_nw=$(now_secs)
+	if [ -z "$_nw" ]; then
+		printf 'last written at %s, and this host will not say how long ago' "$1"
+		return 0
+	fi
+	_ag=$((_nw - $1))
+	[ "$_ag" -lt 0 ] && _ag=0
+	if [ "$_ag" -lt 60 ]; then
+		printf 'last wrote %ss ago' "$_ag"
+	elif [ "$_ag" -lt 3600 ]; then
+		printf 'last wrote %sm ago' $((_ag / 60))
+	elif [ "$_ag" -lt 86400 ]; then
+		printf 'last wrote %sh ago' $((_ag / 3600))
+	else
+		printf 'last wrote %sd ago' $((_ag / 86400))
+	fi
+}
+
+# What the marker knows, in one line — the step it died at, the pid that is gone,
+# and how stale. It is the whole of what a crashed row says and the whole of what
+# a verb that wipes one records, so there is one sentence and every place prints
+# it rather than composing its own.
+crashed_note() { # $1 marker file
+	_cs=$(marker_read "$1" step)
+	[ -n "$_cs" ] || _cs='a step it did not record'
+	_cp=$(marker_read "$1" pid)
+	case "$_cp" in *[!0-9]*) _cp='' ;; esac
+	_ch=$(marker_read "$1" host)
+	if [ -n "$_ch" ] && [ "$_ch" != "$(this_host)" ]; then
+		_cw="its marker was written on $_ch, not on this machine ($(this_host)), so no chain of this one's is running for it"
+	elif [ -n "$_cp" ]; then
+		_cw="pid $_cp is gone"
+	else
+		_cw='its marker names no pid this machine can ask about'
+	fi
+	printf 'crashed at %s — %s — %s' "$_cs" "$_cw" "$(stale_note "$(marker_read "$1" at)")"
+}
+
+# THE ROAD BACK IN, in this script's header, rules which verb does what to a
+# crashed marker. This is the ONE implementation of it, so `park`, `close` and
+# `resume` cannot answer three different ways: a chain genuinely running here
+# refuses the caller, and a crashed marker is read, wiped, and handed back as
+# CRASH_NOTE for the caller to say in its own job's words. CRASH_NOTE is empty
+# when there was no marker at all.
+#
+# IT IS CALLED LAST AMONG A VERB'S PRECONDITIONS, always — stated here once for
+# `park`, `close` and `resume` alike, because it is a property of this function
+# and not of any one of them. It WRITES: it deletes the marker. The ruling it
+# serves is that a verb wipes the marker AS PART OF DOING ITS OWN JOB, so a verb
+# that wiped it and then refused would have taken the crash off his board while
+# doing nothing that was the point of taking it off — the item would be neither
+# parked nor archived nor resumed, and no longer visibly crashed either, which is
+# the one thing he ruled must stay in front of him until he deals with it. So
+# every check that can refuse runs BEFORE this, and once this has returned 0 the
+# verb goes through. The only thing this may refuse for is a chain genuinely
+# running here, and that refusal wipes nothing.
+CRASH_NOTE=''
+crash_take() { # 0 nothing is running here; 1 a chain is
+	CRASH_NOTE=''
+	[ -f "$marker" ] || return 0
+	marker_alive "$marker" && return 1
+	CRASH_NOTE=$(crashed_note "$marker")
+	rm -f "$marker"
+	return 0
+}
+
+# ==============================================================================
 # ending what a chain raised
 # ==============================================================================
 #
 # A raise is a PROCESS, and his word that a chain is over has to reach it. A
-# `kill` that only cleared the marker would leave the raise running: it would go
-# on writing into the worktree that same `kill` is about to discard, and the
+# `stop` that only cleared the marker would leave the raise running: it would go
+# on writing into the worktree that same `stop` is about to discard, and the
 # discard would then be a claim rather than a fact.
 #
 # `ps -ef` is what finds it. It is the one process listing both required shells
@@ -1701,7 +1934,7 @@ marker_release() {
 
 # The pids to end and the order to end them in: everything under $1 deepest
 # first, then $1 itself. THIS PROCESS AND EVERY PROCESS IT IS RUNNING UNDER ARE
-# LEFT OUT — `remit kill` can be run from inside a raise, and a walk that ended
+# LEFT OUT — `remit stop` can be run from inside a raise, and a walk that ended
 # its own caller would take the record it was about to write with it.
 raise_tree() { # $1 pid -> the pids to end, in the order to end them
 	case "${1:-}" in '' | *[!0-9]*) return 0 ;; esac
@@ -1898,11 +2131,118 @@ trimblank() {
 }
 
 # The pull request this item's record names, if any. Read from the record rather
-# than guessed, exactly as the closing move reads it.
-recorded_pr() {
+# than guessed. ONE reader of that line, because three moves ask it — the move
+# out of `accepted`, the move into it after a resume that did not deliver, and
+# the pull request going back to draft — and a second copy of the pattern would
+# be a second answer the day the entry shape changes.
+recorded_pr_url() {
 	[ -f "$log" ] || return 0
-	nocr "$log" | sed -n 's|^## delivery — \(https://[^ ]*\) — .*|\1|p' | sed -n '$p' |
-		sed -n 's|.*/\([0-9][0-9]*\)$|\1|p'
+	nocr "$log" | sed -n 's|^## delivery — \(https://[^ ]*\) — .*|\1|p' | sed -n '$p'
+}
+recorded_pr() {
+	recorded_pr_url | sed -n 's|.*/\([0-9][0-9]*\)$|\1|p'
+}
+
+# The same pair, taken into the two variables the moves use, and ONLY where this
+# run did not open one itself: a run that delivered knows its own.
+pr_from_record() {
+	[ -n "$PR_NUM" ] && return 0
+	PR_URL=$(recorded_pr_url)
+	PR_NUM=$(recorded_pr)
+	[ -n "$PR_NUM" ] || PR_URL=''
+	return 0
+}
+
+# ==============================================================================
+# where the chain stopped — the road back in
+# ==============================================================================
+#
+# THE RESUME POINT. A chain that stopped — his `stop`, an escalation, or a crash
+# — resumes at the step it stopped at and never earlier. What decides that is THE
+# RECORD, which this script wrote itself and which outlives every run: the last
+# entry that is a `delivery` or a `verdict` says the whole of it.
+#
+#   the last of the two is a VERDICT   that round was judged. The next round is
+#                                      the one after it, and it authors.
+#   the last of the two is a DELIVERY  a tree is on the branch and nobody has
+#                                      judged it. That round is EVALUATED, not
+#                                      rebuilt — the delivery already exists.
+#
+# The ROUND continues from the last verdict AT THIS GATE: a gate's rounds are its
+# own, so a verdict at another gate leaves this one starting at 1. Nothing here
+# reads the marker. A crash records nothing at the moment it happens, so a rule
+# that needed the marker could not answer for a chain whose marker a `stop` had
+# already disposed of — and the record answers for all three the same way.
+#
+# GATE 1 IS NOT IN THIS. It has one round by law — there is nobody to send a
+# brief back to, so the loop's rounds belong to gates 2 and 3 — and a resume
+# point for it would be a round number with nothing behind it.
+#
+# WHAT IT CANNOT SEE, said rather than papered over: a chain that died BETWEEN
+# committing a delivery and recording it leaves a commit on the branch that the
+# record does not name, and this reads that as a round still to be built. The
+# record is the authority, and a delivery nobody recorded is not one. And a
+# CONTINUED BUILD ROUND IS HANDED NO MUST-FIX: the must-fix of the round before
+# lives in the ended run's scratch and went with it, so the builder of a
+# continued round is briefed exactly as a first round's is.
+#
+# Set by `resume`, consumed by the first `run_gate` whose gate matches, and taken
+# out of the way immediately afterwards so no later gate in the same run reads a
+# round that was never its own.
+AT_GATE=''
+AT_ROUND=1
+AT_AWAITING=no
+
+resume_point() { # $1 the gate the item's stage will run
+	AT_GATE=''
+	AT_ROUND=1
+	AT_AWAITING=no
+	case "$1" in accepted | closed) ;; *) return 0 ;; esac
+	[ -f "$log" ] || return 0
+	# kind, then the gate the last verdict was into, then its round.
+	_rp=$(nocr "$log" | awk '
+		index($0, "## delivery — ") == 1 { kind = "delivery"; next }
+		index($0, "## verdict — evaluate — into ") == 1 {
+			kind = "verdict"
+			split($0, f, " — ")
+			vgate = f[3]
+			sub(/^into /, "", vgate)
+			vround = ""
+			next
+		}
+		kind == "verdict" && vround == "" && index($0, "- round: ") == 1 {
+			vround = substr($0, 10)
+		}
+		END { print kind; print vgate; print vround }
+	')
+	_rkind=$(printf '%s\n' "$_rp" | sed -n 1p)
+	_rgate=$(printf '%s\n' "$_rp" | sed -n 2p)
+	_rround=$(printf '%s\n' "$_rp" | sed -n 3p)
+	[ -n "$_rkind" ] || return 0
+	AT_GATE=$1
+	case "$_rround" in '' | *[!0-9]*) _rround=0 ;; esac
+	# ONE arithmetic, both kinds. A verdict at this gate for round N means the
+	# next round is N+1; a delivery standing after that verdict IS round N+1,
+	# waiting to be judged. A last verdict at another gate — or none at all —
+	# leaves this gate at its first round either way.
+	[ "$_rgate" = "$1" ] && [ "$_rround" -gt 0 ] && AT_ROUND=$((_rround + 1))
+	[ "$_rkind" = delivery ] && AT_AWAITING=yes
+	return 0
+}
+
+# What the resume point amounts to, for the practitioner to read. Composed here
+# so the line he sees and the line the record carries are the same line.
+resume_point_note() {
+	[ -n "$AT_GATE" ] || return 0
+	if [ "$AT_AWAITING" = yes ]; then
+		printf 'a delivery is on the branch with no verdict on it, so round %s at the gate into %s is EVALUATED, not rebuilt' \
+			"$AT_ROUND" "$AT_GATE"
+		return 0
+	fi
+	[ "$AT_ROUND" -gt 1 ] || return 0
+	printf 'the record'"'"'s last verdict at the gate into %s was round %s, so this run continues at round %s' \
+		"$AT_GATE" "$((AT_ROUND - 1))" "$AT_ROUND"
+	return 0
 }
 
 # An item that leaves `accepted` for `new` has a delivery that is no longer at the
@@ -1936,7 +2276,7 @@ pr_to_draft() {
 #
 # Asked before every raise and before every commit a running chain makes. Two
 # things can have happened since the last time, and they are not the same thing.
-# Either the practitioner ENDED this chain — `kill` took the marker and recorded
+# Either the practitioner ENDED this chain — `stop` took the marker and recorded
 # what it ended, so this process exits and records nothing, because two accounts
 # of one stop is one account too many. Or he CHANGED THE AUTHORITY under it,
 # which is refused: this returns 1 and the caller escalates at the stage it could
@@ -1947,7 +2287,7 @@ pr_to_draft() {
 # comes back — and because two accounts of one stop is one account too many.
 chain_ended() {
 	say ""
-	say "ended: the marker this resume held is gone. \`$ME kill\` records what it ended; nothing further is recorded here."
+	say "ended: the marker this resume held is gone. \`$ME stop\` records what it ended; nothing further is recorded here."
 	exit 130
 }
 
@@ -2014,7 +2354,7 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	# not be ended until the raise it had been told to abandon had finished by
 	# itself — and a raise is where a chain spends almost all of its time. `wait`
 	# IS interrupted by a trapped signal, so backgrounding is what makes his word
-	# arrive at once. And there is no pid to hand a `kill` without a `$!`.
+	# arrive at once. And there is no pid to hand a `stop` without a `$!`.
 	#
 	# Its stdin is `/dev/null` said out loud rather than left to the shell: a
 	# background command's stdin is not the caller's, and naming it keeps both
@@ -2040,10 +2380,10 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	_irc=$?
 	_t1=$(secs)
 	RAISE_PID=''
-	# A raise that ENDED because his `kill` took the lock is not a raise that
+	# A raise that ENDED because his `stop` took the lock is not a raise that
 	# FAILED, and the difference is the whole of what the record says next: one
 	# would be an escalation naming the seam, the other is his word being carried
-	# out. `kill` removes the marker BEFORE it signals anything, exactly so that
+	# out. `stop` removes the marker BEFORE it signals anything, exactly so that
 	# this can tell them apart without reading a signal number.
 	marker_is_ours || chain_ended
 	mark_raise ''
@@ -2094,7 +2434,10 @@ escalate() { # $1 reason
 		[ -n "$GATE" ] &&
 			printf -- '- gate: into %s\n' "$GATE"
 		printf -- '- stage: %s (UNCHANGED — an escalation holds the stop it could not leave)\n' "$(hdr "$brief" Stage)"
-		printf -- '- rounds run: %s\n' "$ROUND"
+		# THE ROUND IT REACHED, not a count of rounds this run made: a run that
+		# continued from the record began above 1, and the two are only the same
+		# number when it began at the beginning.
+		printf -- '- round reached: %s\n' "$ROUND"
 		# The authority THIS RUN RAISED FROM, not whatever is on disk now. An
 		# escalation is where a changed authority lands, and recording the one
 		# that changed would be this script agreeing to it.
@@ -2327,7 +2670,7 @@ checks_green() { # $1 pull request number -> 0 green, 1 with CHECKS_ERR set
 }
 
 # WHERE this item's build worktree is, decided in ONE place. The move that builds
-# it and the `kill` that discards it both ask here, so a layout that changes
+# it and the `stop` that discards it both ask here, so a layout that changes
 # cannot leave one of them looking somewhere the other never writes.
 worktree_path() { printf '%s\n' "${REMIT_WORKTREE_DIR:-$common_dir/remit-worktrees}/$slug"; }
 
@@ -2565,7 +2908,32 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 	LOOP_STOP_DETAIL=''
 	LOOP_STOP_NOTE=''
 	ROUND=1
+	# THE RESUME POINT, consumed here and by nothing else. It belongs to ONE gate
+	# — the one the item's stage runs when the resume begins — so a later gate in
+	# the same run starts at its own first round, and a run that never reaches
+	# the gate it was computed for leaves it unused.
+	if [ -n "$AT_GATE" ] && [ "$AT_GATE" = "$GATE" ] && [ "$_author" = build ]; then
+		ROUND=$AT_ROUND
+		if [ "$AT_AWAITING" = yes ]; then
+			# A delivery already on the branch is JUDGED, not built again.
+			_authornow=no
+		elif [ "$ROUND" -gt 1 ]; then
+			# ANY round above the first authors, whatever the caller said. The
+			# closing gate's FIRST round judges the folder as it stands and
+			# authors nothing — that is what its `no` means — but its second and
+			# every round after it are rounds a builder was sent back into, and a
+			# continued one is no different.
+			_authornow=yes
+		fi
+	fi
+	AT_GATE=''
+	# Whether a must-fix from the round BEFORE this one is in hand, which is not
+	# the same question as `ROUND > 1` once a round can be continued from the
+	# record: a continued round has a number above 1 and no must-fix behind it,
+	# and comparing its verdict against an empty one would stop the loop for a
+	# sameness that is really two absences.
 	_prev=''
+	_have_prev=no
 	: >"$WORK/mustfix"
 	while :; do
 		chain_intact || { LOOP_STOP="authority changed"; return 1; }
@@ -2758,19 +3126,24 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 			return 2
 		fi
 
+		# THE ROUND IS NAMED, not assumed to be four. The cap is four rounds and
+		# a run that began at round 1 reaches it having failed four times — but a
+		# run continued from the record can reach it at a higher number, and a
+		# stop that said `4 fails` there would be a count nobody took.
 		if [ "$ROUND" -ge 4 ]; then
-			LOOP_STOP_DETAIL="4 fails"
-			LOOP_STOP="4 fails"
+			LOOP_STOP_DETAIL="$ROUND fails"
+			LOOP_STOP="$ROUND fails"
 			[ -n "$_fixid" ] && LOOP_STOP="fix: $_fixid"
 			return 1
 		fi
-		if [ "$ROUND" -gt 1 ] && [ "$_mf" = "$_prev" ]; then
+		if [ "$_have_prev" = yes ] && [ "$_mf" = "$_prev" ]; then
 			LOOP_STOP_DETAIL="same must-fix twice"
 			LOOP_STOP="same must-fix twice"
 			[ -n "$_fixid" ] && LOOP_STOP="fix: $_fixid"
 			return 1
 		fi
 		_prev=$_mf
+		_have_prev=yes
 		ROUND=$((ROUND + 1))
 	done
 }
@@ -2891,9 +3264,9 @@ mkdir -p "$WORK" || die "cannot make a scratch directory"
 # leaves nothing behind: the registry is either the old file or the new one.
 SAVETMP=''
 # The raise in flight, so that `invoke` can hand its pid to the marker and clear
-# it again. Ending it is `remit kill`'s, not this trap's: the tree walk that would
-# do it here cannot tell a `remit kill` run from inside a raise apart from the
-# raise itself, and a trap that ended its own killer would lose the record.
+# it again. Ending it is `remit stop`'s, not this trap's: the tree walk that would
+# do it here cannot tell a `remit stop` run from inside a raise apart from the
+# raise itself, and a trap that ended the very command that was ending it would lose the record.
 RAISE_PID=''
 # The `- raise:` lines that have not reached an entry yet. It goes with the run:
 # a line names a raise THIS process made, and a run that ends without an entry to
@@ -3050,10 +3423,39 @@ case "$cmd" in
 
 park)
 	[ -f "$brief" ] || die "no work item '$slug' — expected .remit/work-items/$slug/brief.md"
-	[ -f "$marker" ] && die "a resume of '$slug' is in progress — its marker is at .remit/work-items/$slug/.working"
 	st=$(hdr "$brief" Stage)
 	valid_stage "$st" || die "'$slug' has no readable **Stage:** line — nothing here infers one"
-	if [ "$(hdr "$brief" Attention)" = parked ]; then
+	# Which of the two parks this is, decided BEFORE anything is asked that only
+	# one of them has to answer. An item already parked moves no header, so it
+	# never reaches `put_header` and the title question below is not its
+	# question: asking it there would refuse a park that had nothing to write.
+	park_moves=yes
+	[ "$(hdr "$brief" Attention)" = parked ] && park_moves=no
+	# Asked here rather than left to the `put_header` below, which is where it
+	# would otherwise refuse — after the marker had gone.
+	[ "$park_moves" = yes ] && require_title "$brief"
+	# LAST of the preconditions, because it WRITES — the reason is stated once,
+	# at `crash_take`.
+	crash_take ||
+		die "a resume of '$slug' is in progress — its marker is at .remit/work-items/$slug/.working"
+	if [ "$park_moves" = no ]; then
+		# Parking an item that is already parked moves no header — but if there
+		# was a crashed marker it has just come off the board, and THAT is a
+		# change, so it is recorded and committed like any other. Only where
+		# there was no marker does this exit having written nothing.
+		if [ -n "$CRASH_NOTE" ]; then
+			resolve_authority
+			{
+				printf 'Already parked, so no header moved. What this park did was take a crashed\n'
+				printf 'chain off the board.\n\n'
+				printf -- '- a crashed chain'"'"'s marker was wiped by this park: %s\n\n' "$CRASH_NOTE"
+				authority_lines
+			} | log_append "stopped — parked, and a crashed chain wiped — $(now)"
+			say "crashed: $CRASH_NOTE. The marker is gone — parking wiped it."
+			say ".remit/work-items/$slug was already parked, at stage $st; the crash is off the board."
+			commit_and_push "remit: $slug — a crashed chain's marker wiped at a park" ".remit/work-items/$slug"
+			exit $?
+		fi
 		say ".remit/work-items/$slug is already parked — nothing to commit."
 		exit 0
 	fi
@@ -3061,42 +3463,57 @@ park)
 	resolve_authority
 	{
 		printf 'Parked by the practitioner. It moves for nothing until it is resumed.\n\n'
+		[ -n "$CRASH_NOTE" ] &&
+			printf -- '- a crashed chain'"'"'s marker was wiped by this park: %s\n\n' "$CRASH_NOTE"
 		authority_lines
 	} | log_append "stopped — parked — $(now)"
+	[ -n "$CRASH_NOTE" ] && say "crashed: $CRASH_NOTE. The marker is gone — parking wiped it."
 	say ".remit/work-items/$slug is now parked, at stage $st."
 	commit_and_push "remit: $slug -> parked" ".remit/work-items/$slug"
 	exit $?
 	;;
 
-kill)
-	# His word that the in-flight work is gone. It ends a chain that IS running
-	# and refuses when none is; the matrix in this script's header is the whole of
-	# when that is. It does not touch the header: losing the in-flight work means
-	# the item is left at the stage it last stopped at.
+stop)
+	# His word that the in-flight work is gone. It ends the chain that is running
+	# on the item and refuses when there is no marker at all; the matrix in this
+	# script's header is the whole of when that is. It does not touch the header:
+	# losing the in-flight work means the item is left at the stage it last
+	# stopped at, and abandoning the item itself is `close`.
+	#
+	# IT DISPOSES ITS OWN MARKER, always and first, which is what makes the
+	# crashed class above mean one thing. A marker whose chain is already gone is
+	# a CRASH, and this verb ends it too rather than refusing — it says which of
+	# the two it found, and the record and the row say it after that.
 	[ -f "$brief" ] || die "no work item '$slug' — expected .remit/work-items/$slug/brief.md"
 	[ -f "$marker" ] ||
-		die "nothing is running for '$slug' — there is no marker at .remit/work-items/$slug/.working. \`kill\` ends a chain in progress; at a stop there is nothing to end. To stop this item moving again, run: $ME park $slug"
+		die "nothing is running for '$slug' — there is no marker at .remit/work-items/$slug/.working. \`stop\` ends a chain in progress; at a stop there is nothing to end. To stop this item moving again, run: $ME park $slug"
 
-	kill_pid=$(marker_field pid)
-	case "$kill_pid" in '' | *[!0-9]*) kill_pid='' ;; esac
-	kill_raise=$(marker_field raise)
-	case "$kill_raise" in '' | *[!0-9]*) kill_raise='' ;; esac
-	kill_step=$(marker_field step)
-	[ -n "$kill_step" ] || kill_step='a step it did not record'
+	# ASKED BEFORE ANYTHING IS TAKEN AWAY, because it is the whole difference
+	# between the two things this verb can be doing.
+	stop_crashed=no
+	stop_was=$(crashed_note "$marker")
+	marker_alive "$marker" || stop_crashed=yes
+
+	stop_pid=$(marker_field pid)
+	case "$stop_pid" in '' | *[!0-9]*) stop_pid='' ;; esac
+	stop_raise=$(marker_field raise)
+	case "$stop_raise" in '' | *[!0-9]*) stop_raise='' ;; esac
+	stop_step=$(marker_field step)
+	[ -n "$stop_step" ] || stop_step='a step it did not record'
 	# The pair the RUN was holding, so that anything the practitioner wrote while
 	# it ran is still a change at his next resume.
 	AUTHORITY_REL=$(marker_field authority)
 	AUTHORITY_HASH=$(marker_field hash)
 
-	kill_host=$(marker_field host)
-	kill_ended='no resume was still alive at the pid in the marker'
-	if [ -n "$kill_host" ] && [ "$kill_host" != "$(this_host)" ]; then
+	stop_host=$(marker_field host)
+	stop_ended='no resume was still alive at the pid in the marker'
+	if [ -n "$stop_host" ] && [ "$stop_host" != "$(this_host)" ]; then
 		# The marker travelled here in a commit. Its pid names a process on
 		# another machine, and whatever holds that number HERE has nothing to do
 		# with remit — so nothing is signalled, and the clean-up below still runs.
-		kill_ended="the marker was written on $kill_host, not on this machine ($(this_host)), so no process here was signalled"
-		kill_pid=''
-		kill_raise=''
+		stop_ended="the marker was written on $stop_host, not on this machine ($(this_host)), so no process here was signalled"
+		stop_pid=''
+		stop_raise=''
 	fi
 
 	# THE LOCK GOES FIRST, before anything is signalled. A chain whose raise dies
@@ -3104,35 +3521,38 @@ kill)
 	# would escalate naming the seam — so the marker it re-reads is taken away
 	# first, and the chain reads its absence as his word rather than as a fault.
 	rm -f "$marker"
+	if [ "$stop_crashed" = yes ]; then
+		say "this chain had already $stop_was; \`stop\` ends it and disposes its marker."
+	fi
 
 	# THEN WHAT IT RAISED. A chain sits inside its raise for almost all of the
 	# time it is running, and a raise left alive would go on writing into the
 	# worktree this is about to discard — so the raised tree is ended, then the
 	# chain follows it out, and only then is the worktree touched.
-	kill_raised=$(end_raised "$kill_raise")
-	say "$kill_raised."
+	stop_raised=$(end_raised "$stop_raise")
+	say "$stop_raised."
 
-	if [ -n "$kill_pid" ] && [ "$kill_pid" != "$$" ] && kill -0 "$kill_pid" 2>/dev/null; then
-		if kill -TERM "$kill_pid" 2>/dev/null; then
-			kill_ended="TERM was sent to the resume at pid $kill_pid"
+	if [ -n "$stop_pid" ] && [ "$stop_pid" != "$$" ] && kill -0 "$stop_pid" 2>/dev/null; then
+		if kill -TERM "$stop_pid" 2>/dev/null; then
+			stop_ended="TERM was sent to the resume at pid $stop_pid"
 		else
-			kill_ended="the resume at pid $kill_pid could not be signalled from here"
+			stop_ended="the resume at pid $stop_pid could not be signalled from here"
 		fi
 	fi
-	say "$kill_ended."
+	say "$stop_ended."
 
 	# And it is WAITED FOR. A clean that raced a chain still running would report
 	# a discard it had not made. Where the chain outlasts the wait this says so
 	# rather than passing over it: what it writes from then on is not covered.
-	kill_left=''
-	kill_waited=0
-	while [ -n "$kill_pid" ] && [ "$kill_pid" != "$$" ] && kill -0 "$kill_pid" 2>/dev/null; do
-		if [ "$kill_waited" -ge 20 ]; then
-			kill_left=", and the chain at pid $kill_pid had NOT ended after ${kill_waited}s — anything it writes from here is NOT covered by that"
+	stop_left=''
+	stop_waited=0
+	while [ -n "$stop_pid" ] && [ "$stop_pid" != "$$" ] && kill -0 "$stop_pid" 2>/dev/null; do
+		if [ "$stop_waited" -ge 20 ]; then
+			stop_left=", and the chain at pid $stop_pid had NOT ended after ${stop_waited}s — anything it writes from here is NOT covered by that"
 			break
 		fi
 		sleep 1
-		kill_waited=$((kill_waited + 1))
+		stop_waited=$((stop_waited + 1))
 	done
 
 	# The tree. Discarding it is the whole of what he ruled — "killing an agent
@@ -3140,27 +3560,31 @@ kill)
 	# everything untracked is removed. What was committed and delivered earlier is
 	# a commit on the branch and is untouched.
 	WT=$(worktree_path)
-	kill_tree="there is no build worktree at $WT, so nothing was discarded"
+	stop_tree="there is no build worktree at $WT, so nothing was discarded"
 	if [ -e "$WT/.git" ]; then
 		if git -C "$WT" reset -q --hard HEAD >/dev/null 2>&1 && git -C "$WT" clean -qfd >/dev/null 2>&1; then
-			kill_tree="the build worktree at $WT was reset to its last commit and its untracked files removed"
+			stop_tree="the build worktree at $WT was reset to its last commit and its untracked files removed"
 		else
-			kill_tree="the build worktree at $WT could NOT be cleaned — its in-flight changes are still there"
+			stop_tree="the build worktree at $WT could NOT be cleaned — its in-flight changes are still there"
 		fi
 	fi
-	kill_tree="$kill_tree$kill_left"
-	say "$kill_tree."
+	stop_tree="$stop_tree$stop_left"
+	say "$stop_tree."
 
-	kill_stage=$(hdr "$brief" Stage)
+	stop_reason="stopped on the practitioner's word at $stop_step"
+	[ "$stop_crashed" = yes ] && stop_reason="stopped a crashed chain at $stop_step"
+	stop_stage=$(hdr "$brief" Stage)
 	{
-		printf -- '- %s\n' "$kill_raised"
-		printf -- '- %s\n' "$kill_ended"
-		printf -- '- %s\n' "$kill_tree"
-		printf -- '- stage: %s (UNTOUCHED — this is the stage it last stopped at)\n\n' "$kill_stage"
+		[ "$stop_crashed" = yes ] &&
+			printf -- '- the chain was NOT running when this ran: %s\n' "$stop_was"
+		printf -- '- %s\n' "$stop_raised"
+		printf -- '- %s\n' "$stop_ended"
+		printf -- '- %s\n' "$stop_tree"
+		printf -- '- stage: %s (UNTOUCHED — this is the stage it last stopped at)\n\n' "$stop_stage"
 		authority_lines
-	} | log_append "stopped — killed on the practitioner's word at $kill_step — $(now)"
-	say ".remit/work-items/$slug is at stage $kill_stage, and nothing is running on it."
-	commit_and_push "remit: $slug killed at $kill_step" ".remit/work-items/$slug"
+	} | log_append "stopped — $stop_reason — $(now)"
+	say ".remit/work-items/$slug is at stage $stop_stage, and nothing is running on it."
+	commit_and_push "remit: $slug $stop_reason" ".remit/work-items/$slug"
 	exit $?
 	;;
 
@@ -3168,16 +3592,27 @@ close)
 	# Closure is only ever the practitioner's instruction. Nothing here decides
 	# an item is finished; this makes their decision durable and complete.
 	[ -f "$brief" ] || die "no work item '$slug' — expected .remit/work-items/$slug/brief.md"
-	[ -f "$marker" ] && die "a resume of '$slug' is in progress — its marker is at .remit/work-items/$slug/.working"
 	[ -e "$itemarchive" ] && die "'$slug' is already archived at .remit/work-items/.archive/$slug — nothing changed"
+	# Asked here rather than left to the `put_header` inside `do_close`, which is
+	# where it would otherwise refuse — after the marker had gone.
+	require_title "$brief"
+	# LAST of the preconditions, because it WRITES — the reason is stated once,
+	# at `crash_take`.
+	crash_take ||
+		die "a resume of '$slug' is in progress — its marker is at .remit/work-items/$slug/.working"
 	# Read the delivery links before anything moves, so a bad input cannot leave
 	# an item half-closed.
 	delivery=''
 	[ -t 0 ] || delivery=$(tr -d '\015')
-	printf 'Closed on the practitioner'"'"'s word.\n' | log_append "ruling — close — $(now)"
+	{
+		printf 'Closed on the practitioner'"'"'s word.\n'
+		[ -n "$CRASH_NOTE" ] &&
+			printf '\n- a crashed chain'"'"'s marker was wiped by this closure: %s\n' "$CRASH_NOTE"
+	} | log_append "ruling — close — $(now)"
 	# NO STAMP. His word ends the work; it does not take it through the gate.
 	closing_stage=$(hdr "$brief" Stage)
 	do_close "the practitioner's word" "$delivery" ''
+	[ -n "$CRASH_NOTE" ] && say "crashed: $CRASH_NOTE. The marker is gone — archiving wiped it."
 	say "closed .remit/work-items/$slug — archived whole to .remit/work-items/.archive/$slug, at stage $closing_stage."
 	commit_and_push "remit: close $slug" ".remit/work-items/$slug" ".remit/work-items/.archive/$slug"
 	exit $?
@@ -3737,18 +4172,32 @@ migrate)
 resume)
 	rubrics_check
 	[ -f "$brief" ] || die "no work item '$slug' — expected .remit/work-items/$slug/brief.md"
-	[ -f "$marker" ] && die "a resume of '$slug' is already in progress — its marker is at .remit/work-items/$slug/.working. Remove it only when you know no resume is running."
 	att=$(hdr "$brief" Attention)
 	st=$(hdr "$brief" Stage)
 	valid_stage "$st" || die "'$slug' has no readable **Stage:** line — nothing here infers one"
 	valid_attention "$att" || die "'$slug' has no readable **Attention:** line — nothing here infers one"
 	[ "$st" = closed ] && die "'$slug' is closed. Closed work has left every view; nothing resumes it."
+	# Asked here rather than left to the `put_header` this run may reach, which
+	# is where it would otherwise refuse — after the marker had gone.
+	require_title "$brief"
 
 	resolve_authority
 	case "$AUTHORITY" in
 	AMBIGUOUS) die "'$slug' names more than one **Current phase:** — the smallest ruling that unsticks this is which one" ;;
 	"DANGLING "*) die "'$slug' points at a phase file that is not there: ${AUTHORITY#DANGLING }" ;;
 	esac
+
+	# THE ONE VERB THAT CONTINUES A CRASHED RUN. A marker whose chain is running
+	# here still refuses a second resume; one whose chain is gone is the crash
+	# the board has been showing him, and picking it up is what he ruled this
+	# verb does. It is never automatic — he ran this command.
+	#
+	# LAST of the preconditions, because it WRITES — the reason is stated once,
+	# at `crash_take`. Everything above it only READS, so a resume that cannot
+	# run leaves the crash on the board for the next glance; and the marker this
+	# one wipes is replaced by its own on the very next line.
+	crash_take ||
+		die "a resume of '$slug' is already in progress — its marker is at .remit/work-items/$slug/.working, and the chain it names is running on this machine."
 
 	marker_write starting
 	trap 'marker_release; cleanup' EXIT
@@ -3796,6 +4245,37 @@ resume)
 		say "amended: \`$AUTHORITY_REL\` is not what this item last stopped with. Stage: $amend_from -> new."
 		[ -n "$PR_DRAFT_NOTE" ] && say "$PR_DRAFT_NOTE."
 		commit_step "remit: $slug amended — stage -> new" ".remit/work-items/$slug"
+	fi
+
+	# --- where this run goes back in ------------------------------------------
+	#
+	# AFTER the amendment above, and deliberately: an amendment puts the item
+	# back at `new`, and a round from the gate it used to be at is not a round
+	# gate 1 has any use for. Read from the stage as it now stands, so what he
+	# just wrote decides where the road back in leads.
+	case "$(hdr "$brief" Stage)" in
+	refined) resume_point accepted ;;
+	accepted) resume_point closed ;;
+	*) resume_point '' ;;
+	esac
+	RESUME_NOTE=$(resume_point_note)
+	if [ -n "$CRASH_NOTE" ] || [ -n "$RESUME_NOTE" ]; then
+		_rlabel='at the step the record names'
+		[ -n "$CRASH_NOTE" ] && _rlabel='after a crash'
+		{
+			[ -n "$CRASH_NOTE" ] &&
+				printf -- '- the marker this resume found was a crashed chain, and this run picked it up: %s\n' "$CRASH_NOTE"
+			if [ -n "$RESUME_NOTE" ]; then
+				printf -- '- %s\n' "$RESUME_NOTE"
+			else
+				printf -- '- the record names no round for this run to continue, so it begins at its gate'"'"'s first round\n'
+			fi
+			printf '\n'
+			authority_lines
+		} | log_append "resumed — $_rlabel — $(now)"
+		[ -n "$CRASH_NOTE" ] && say "crashed: $CRASH_NOTE. Only \`resume\` continues one, and this is that resume."
+		[ -n "$RESUME_NOTE" ] && say "resuming: $RESUME_NOTE."
+		commit_step "remit: $slug resumed — $_rlabel" ".remit/work-items/$slug"
 	fi
 
 	STOP=''
@@ -3930,8 +4410,13 @@ in the stage it is in, for the practitioner, whatever else was cited there."
 			;;
 		refined)
 			mark_step "the move into accepted"
+			# A run that EVALUATED a delivery it did not itself make opened no
+			# pull request, so the one the record names is the one this move
+			# flips. Nothing is guessed: no delivery recorded, nothing to flip.
+			pr_from_record
 			if [ -n "$PR_NUM" ]; then
 				command -v gh >/dev/null 2>&1 || escalate "cannot act: gh"
+				build_worktree || escalate "cannot act: could not prepare the build worktree"
 				checks_green "$PR_NUM" || escalate "$CHECKS_ERR"
 				out=$(cd "$WT" && gh pr ready "$PR_NUM" 2>&1) ||
 					escalate "cannot act: gh pr ready — $(printf '%s' "$out" | tr '\n' ' ')"
@@ -3945,10 +4430,7 @@ in the stage it is in, for the practitioner, whatever else was cited there."
 			mark_step "the merge into closed"
 			# The pull request is read back from the record when this resume did
 			# not open it — nothing here guesses which one carries the item.
-			if [ -z "$PR_NUM" ]; then
-				PR_URL=$(nocr "$log" | sed -n 's|^## delivery — \(https://[^ ]*\) — .*|\1|p' | sed -n '$p')
-				PR_NUM=$(printf '%s\n' "$PR_URL" | sed -n 's|.*/\([0-9][0-9]*\)$|\1|p')
-			fi
+			pr_from_record
 			[ -n "$PR_NUM" ] ||
 				escalate "cannot act: no pull request is recorded for this item, and nothing here guesses which one carries it"
 			build_worktree || escalate "cannot act: could not prepare the build worktree"
