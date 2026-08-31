@@ -9,7 +9,7 @@ stay with the person who owns their consequences. It is two POSIX scripts and fi
 no service, no database, no daemon. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.2.10. Early, and in use.**
+**Version 0.3.0. Early, and in use.**
 
 ## One piece of work, start to finish
 
@@ -112,11 +112,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.2.10` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.3.0` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.2.10 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.0 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:
@@ -145,7 +145,7 @@ The installer adds:
 | `.remit/hooks/no-agent-tool.sh` | The agent-tool guard: one script, registered by every harness here that has a pre-tool hook. |
 | `.github/hooks/remit-no-agent-tool.json` | Copilot CLI's registration of that guard. |
 | `.claude/settings.json` | Claude Code's registration of it, **offered**: created when absent; when the file is yours it is kept and the block to merge is printed. |
-| `.remit/` | The empty work location: `work-items/`, `field-reports/`, and `rules/` with the one rubric remit ships. |
+| `.remit/` | The work location, with no work item in it: `work-items/`, `field-reports/`, and `rules/` holding the rubrics remit ships. An upgrade migrates those rubric by rubric rather than file by file: it adds, changes and removes only its own, keeps every rubric you wrote or edited, and reports what it did to each. Where you and remit have both changed the same shipped rubric, remit's wording wins. |
 | `.remit/.install/manifest` | A record of the installed content and version. |
 
 It does not install `.remit/settings.json`, the registry of which harnesses and models a

@@ -1,24 +1,17 @@
 #!/bin/sh
 # remit-invoke — the one AI seam: a fresh context, in a named harness, with a
-# brief, in a worktree, returning its text.
+# brief, in a worktree, returning its text. It is the primitive `bin/remit`
+# calls at every arrow of the chain that needs a model, and the only place in
+# remit that starts one.
 #
 #   sh bin/remit-invoke <role> <slug> <worktree>
 #       [--harness <claude|codex|pi|devin|copilot|native>] [--model <id>]
 #       [--effort <level>] [--provider <name>] [--sandbox <mode>]
-#       [--allowed-tools <spec>] [--exclude-tools <spec>]
-#       [--final-message <file>]
+#       [--allowed-tools <spec>] [--exclude-tools <spec>] [--final-message <file>]
 #
 #       role in research | build | evaluate | repair-brief
 #
-#   sh bin/remit-invoke --probe-host
-#       reads this host and prints what is on it; raises nothing
-#
-# This is the primitive `bin/remit` calls at every arrow of the chain that needs
-# a model, and it is the only place in remit that starts one. The harness
-# adapters, the model verification and the containment here came from the
-# dispatch wrapper remit used to ship, which bundled invocation with delivery;
-# the invocation half is here, the delivery half is `bin/remit`'s, and the
-# wrapper itself is gone.
+#   sh bin/remit-invoke --probe-host    reads this host; raises nothing
 #
 # ==============================================================================
 # THE CONTRACT — the seam's other end is `bin/remit`'s header, which states the
@@ -29,14 +22,16 @@
 #   stdout      the context's final text, and NOTHING else. Every word this
 #               script says about what it did goes to stderr, because stdout is
 #               the seam's payload and `bin/remit` writes it into the record.
-#   stderr      this script's own narration and whatever the harness said —
-#               including the HEARTBEAT below, which is the only thing this
-#               script says while the CLI is running.
+#   stderr      this script's own narration and whatever the harness said,
+#               including the heartbeat — the only thing said while the CLI runs.
 #   provenance  `key: value` lines written to the file named by
 #               `REMIT_PROVENANCE`. The keys are below.
 #   progress    the run directory's path, written to the file named by
-#               `REMIT_PROGRESS` the moment that directory exists — before
-#               anything is raised. See THE RUN IS VISIBLE WHILE IT RUNS below.
+#               `REMIT_PROGRESS` the moment that directory exists and before
+#               anything is raised, so a watcher can find it in time to tail
+#               `<run directory>/progress` — where the heartbeat also lands.
+#               `REMIT_HEARTBEAT=<n>` is its interval in seconds; default 30,
+#               `0` silences it. Neither channel changes what stdout carries.
 #   exit 0      the context ran. Exit is COMPLETION, not success.
 #   exit 2      usage; a registry that is absent, malformed, or does not carry
 #               the seat asked for; a registered seat that is not available on
@@ -48,21 +43,36 @@
 #   exit 7      the containment canary failed: copilot's containment did not
 #               demonstrably hold, so no context was raised.
 #
+# THE PROVENANCE KEYS. `bin/remit` reads `session:`, `model:` and `harness:`;
+# the rest are for the record, and an unknown key is ignored, never an error.
+#
+#   role: harness: session:  what ran, where, and the run id the harness reports
+#   seat:          `registered` (the registry's `defaults` decided it) or
+#                  `override` (a flag did — checked against the registry too)
+#   registry:      the digest of the registry AS READ, with its algorithm
+#   model:         THE MODEL AS SERVED where the run reports it; otherwise the id
+#                  ASKED FOR with ` (asked)` on the end and a `model-note:`
+#                  naming the channel that carried nothing. Never a guess.
+#   model-check:   how the id was verified before the run, or why it was not
+#   boundary:      `<user|container|none> — attested by <header|export|disclosed>`:
+#                  codex is `user` by its run header, every other seat `none`.
+#                  Nothing here ever writes `attested by canary`.
+#   boundary-note: what that line does NOT establish
+#   effort: scrub: run-log: cost: harness-version: sandbox: permission-mode:
+#   note:          anything the run could not be read back for
+#
 # ==============================================================================
 # THE REGISTRY — `.remit/settings.json`, AND WHAT IT DECIDES
 # ==============================================================================
 #
-# Every seat this script raises comes from a registry the practitioner wrote.
-# Ruled 2026-08-23: "the specific sub-agents being reached for must match what
-# are registered and available … if codex is uninstalled and my default
-# evaluator is codex, the bin/sh should fail — end of story." There is no
-# standing default here any more, and there is no fallback: `roles.md` and the
-# Sonnet substitution both retired with that ruling.
+# Every seat comes from a registry the practitioner wrote. Ruled 2026-08-23:
+# "the specific sub-agents being reached for must match what are registered and
+# available … if codex is uninstalled and my default evaluator is codex, the
+# bin/sh should fail — end of story." No standing default, and no fallback.
 #
-# THE FILE. `REMIT_SETTINGS`, or `<repo root of the current directory>/.remit/
-# settings.json` when that is unset. Absent, unreadable or empty REFUSES every
-# raise (exit 2). It is JSON and it is read with `jq`; without `jq` this script
-# refuses rather than guessing at a parse.
+# THE FILE is `REMIT_SETTINGS`, or `<repo root of the current directory>/.remit/
+# settings.json`. Absent, unreadable or empty REFUSES every raise (exit 2). It
+# is JSON, read with `jq`; without `jq` this script refuses rather than guess.
 #
 #   {
 #     "harnesses": {
@@ -79,315 +89,148 @@
 #     }
 #   }
 #
-# Nothing else is allowed at either level. A harness not listed is UNREGISTERED;
-# a model not listed for its harness is UNREGISTERED; a role with no `defaults`
-# entry has no seat. THE SHAPE IS CHECKED ON READ and a malformed file refuses
-# EVERYTHING rather than half-applying: a JSON syntax error is reported with
-# `jq`'s own message, which names the line; a shape error names the key. This is
-# `rubrics_check`'s rule in `bin/remit`, applied to the registry.
-#
-# `defaults.draft` is refused BY NAME. The role retired on 2026-08-23 and a
-# registry that still seats it is told why rather than left guessing.
+# Nothing else is allowed at either level: an unknown key, a key that is not one
+# of the four roles, and a harness or model the registry does not carry are each
+# refused BY NAME. THE SHAPE IS CHECKED ON READ, and a malformed file refuses
+# EVERYTHING rather than half-applying — a syntax error reported with `jq`'s own
+# message, which names the line, and a shape error naming the key.
 #
 # RESOLUTION, STRICT. Flags override the defaults, and an override is checked
 # against the registry exactly as a default is:
 #
-#   --harness H --model M    H must be registered and M registered for H.
-#   --harness H              H must be registered; the model is that role's
-#                            default when its default sits on H, and otherwise
-#                            there is nothing registered saying which model this
-#                            role takes on H, so the raise is refused.
+#   --harness H --model M    H registered, and M registered for H.
+#   --harness H              H registered; the model is the role's default when
+#                            that default sits on H — otherwise nothing
+#                            registered says which model this role takes there,
+#                            and the raise is refused.
 #   --model M                the harness is the role's default when that default
 #                            registers M; failing that, the one registered
-#                            harness that carries M. Registered by none refuses
-#                            as unregistered, by more than one refuses as
-#                            ambiguous and names them. This is the practitioner's
-#                            "use sol" case: it resolves when sol is registered
-#                            and fails loudly when it is not.
+#                            harness carrying M. Carried by none refuses as
+#                            unregistered; by more than one, as ambiguous,
+#                            naming them.
 #   neither                  the role's `defaults` entry, whole.
 #
 # Anything unregistered is exit 2, `not registered in .remit/settings.json`.
 #
-# THEN AVAILABILITY, and it is a separate question with a separate answer. A
-# registered seat whose CLI is not on this host, whose CLI is not authenticated
-# where the CLI reports authentication, or whose model id the CLI rejects where
-# the CLI carries a catalogue, is exit 2, `registered but not available: <why>`.
-# NEVER A FALLBACK, NEVER A SUBSTITUTE — including for the evaluator, whose seat
-# being absent now means the evaluation does not run at all.
+# THEN AVAILABILITY, a separate question with a separate answer: a registered
+# seat whose CLI is not on this host, is not authenticated where the CLI reports
+# authentication, or whose model id the CLI rejects where the CLI carries a
+# catalogue, is exit 2, `registered but not available: <why>`. NEVER A FALLBACK
+# AND NEVER A SUBSTITUTE — including for the evaluator, whose seat being absent
+# means the evaluation does not run at all.
 #
-# `--harness native` is the one raise that resolves no seat, because it raises
-# nothing: it records a context the CALLING harness already had, whose text is on
-# disk, and whose model the caller names. It still needs a registry it can read —
-# "a malformed registry refuses everything" has no exception for the raise that
-# raises nothing — and its `seat:` is `override`.
+# `--harness native` resolves no seat because it raises nothing: it records a
+# context the CALLING harness already had, whose text is on disk and whose model
+# the caller names. It still needs a registry it can read, and its seat is
+# `override`.
 #
-# MODEL VERIFICATION is done through the channel each CLI actually has, and
-# where a CLI has none this script says so rather than claiming a check it did
-# not make:
-#
-#   pi       `pi --list-models` is read and the exact id must be in it. Pi
-#            accepts an unknown id SILENTLY and answers with something else, so
-#            an id that is not in the catalogue refuses the raise (exit 2). This
-#            is the check lifted from the wrapper, unchanged.
-#   devin    the CLI validates the id itself, pre-flight, in about a second and
-#            before any ACU is spent, and prints the catalogue when it refuses
-#            (`.remit/.archive/devin-first-class/probe-results.md`, item 11). No
-#            catalogue call is made here; the recorded reason says which.
-#   copilot  an unknown model id and an unsupported effort are each refused
-#            pre-flight by the CLI, in seconds, with nothing billed
-#            (`.remit/copilot-first-class/probe-results.md`).
-#   codex    ships NO model catalogue: `codex --help` has none and `codex doctor`
-#            reports only the model already configured. So a codex id is NOT
-#            verified before the run; what the run header reports afterwards is
-#            the model that actually served it, and that is what the provenance
-#            carries.
-#   claude   ships no model catalogue either, and the same applies.
-#
-# `model-check:` in the provenance says which of those applied, every time. An
-# unverified id is never reported as a verified one.
-#
-# ==============================================================================
-# THE PROVENANCE SIDECAR
-# ==============================================================================
-#
-# Written to `REMIT_PROVENANCE`, one `key: value` per line. `bin/remit` reads
-# `session:`, `model:` and `harness:`; everything else is for the record and for
-# a reader, and an unknown key is ignored rather than being an error.
-#
-#   role:            the role this raise was for
-#   harness:         claude | codex | pi | devin | copilot | native
-#   seat:            `registered` when the registry's own `defaults` entry for
-#                    this role decided it, `override` when a `--harness` or
-#                    `--model` on the command line did. An override is checked
-#                    against the registry too, so both words mean registered —
-#                    they differ only in which line of it was read.
-#   registry:        the digest of `.remit/settings.json` AS READ at raise time,
-#                    with the algorithm that made it, so a record can be held
-#                    against the registry it was raised under
-#   model:           THE MODEL AS SERVED where the run reports it. Where no
-#                    channel reports it, the id that was ASKED FOR, with
-#                    ` (asked)` on the end and a `model-note:` saying which
-#                    channel carried nothing. Never a guess either way.
-#   model-check:     how the id was verified before the run, or why it was not
-#   session:         the run id the harness reports, or absent
-#   boundary:        `<user|container|none> — attested by <header|export|disclosed>`
-#                    as the read-boundary design's R5 fixes it:
-#                      codex     user — attested by header      (its run header's
-#                                sandbox line is read back and must agree)
-#                      devin     none — attested by export      (Windows outside
-#                                WSL: its OS sandbox is unsupported and is never
-#                                passed; the export is read back where present)
-#                      claude    none — attested by disclosed
-#                      pi        none — attested by disclosed
-#                      copilot   none — attested by disclosed
-#                      native    none — attested by disclosed
-#                    THIS PHASE BUILDS NO CANARY AND NO CONTAINER. `container`
-#                    and the boundary canary are the read-boundary item's build;
-#                    nothing here ever writes `attested by canary`.
-#   boundary-note:   what the line above does not establish
-#   effort:          the reasoning effort passed, where the CLI has that control
-#   scrub:           the names on the environment allow-list, and nothing else
-#   run-log:         where the run's own output was kept
-#   cost:            what the harness reported this run cost, where it reports it
-#   harness-version: where the CLI reports one
-#   sandbox:         codex's run-header sandbox line, verbatim
-#   permission-mode: devin's permission mode as the export reports it
-#   note:            anything the run could not be read back for
+# MODEL VERIFICATION goes through the channel each CLI actually has: pi's
+# catalogue here, devin's and copilot's own pre-flight refusal, and — for codex
+# and claude, which ship no catalogue — none at all, the run's own report being
+# what the provenance then carries. `model-check:` says which applied every
+# time, and an unverified id is never reported as a verified one.
 #
 # ==============================================================================
 # THE ENVIRONMENT — WHAT IS SCRUBBED, WHAT IS PASSED, AND WHAT THAT CANNOT DO
 # ==============================================================================
 #
 # Every context, for every role, on every harness, is started with `env -i` and
-# an ALLOW-LIST. Nothing else crosses. This is the one rule that holds even
-# where the boundary is `none`, because it is remit's own process doing the
-# launch (the read-boundary design's R3).
+# an ALLOW-LIST. Nothing else crosses. This holds even where the boundary is
+# `none`, because it is remit's own process doing the launch.
 #
-# What crosses, and why:
-#
-#   PATH                     a context needs its tools. Passed as the
-#                            coordinator's.
+#   PATH                     a context needs its tools; the coordinator's.
 #   HOME                     a SCRATCH directory made for this raise and removed
 #                            after it — never the practitioner's home.
-#   TMPDIR, TEMP, TMP        THE ONE WRITABLE SCRATCH ROOT this seat gets: a
-#                            directory INSIDE THE RUN'S WORKTREE, made before
-#                            the context starts and removed when it exits. The
-#                            worktree is the one place every sandbox we raise
-#                            into can write; a temp path under the
-#                            coordinator's own profile is not, because a
+#   TMPDIR, TEMP, TMP        THE ONE WRITABLE SCRATCH ROOT this seat gets, and
+#                            it is INSIDE THE RUN'S WORKTREE: the one directory
+#                            every sandbox we raise into can write, since a
 #                            sandboxed seat runs as another account and is
-#                            refused there. All three names carry the same
-#                            directory so that a POSIX tool, a Windows one and
-#                            `mktemp` all land in it.
+#                            refused under the coordinator's own profile. All
+#                            three names carry the same directory, so a POSIX
+#                            tool, a Windows one and `mktemp` all land in it.
 #   LANG, LC_ALL, LC_CTYPE   locale, where the coordinator has them.
 #   SYSTEMROOT, COMSPEC,     Windows needs these to start a process at all.
-#   PATHEXT, SYSTEMDRIVE     SYSTEMDRIVE earns its place by an incident rather
-#                            than by theory: without it a raised Windows CLI
-#                            resolved a shell path against an undefined
-#                            variable and created a literal, unexpanded
+#   PATHEXT, SYSTEMDRIVE     SYSTEMDRIVE earns its place by incident: without it
+#                            a raised Windows CLI created a literal, unexpanded
 #                            `%SystemDrive%/ProgramData/...` tree in the
-#                            worktree's CWD, which the delivery seam then
-#                            staged and committed. It is a drive letter,
-#                            never a credential, and it is the same class
-#                            as SYSTEMROOT.
-#   the harness's own        so that a CLI whose credentials and settings live in
-#   config variable          the practitioner's real home can still find them
-#                            under a scratch HOME. One per harness:
-#                              claude    CLAUDE_CONFIG_DIR  -> <real home>/.claude
-#                              codex     CODEX_HOME         -> <real home>/.codex
-#                              pi        PI_CODING_AGENT_DIR-> <real home>/.pi/agent
-#                              copilot   COPILOT_HOME       -> <real home>/.copilot
+#                            worktree, which the delivery seam then committed.
+#   the harness's own        so a CLI whose credentials live in the real home
+#   config variable          can still find them under a scratch HOME:
+#                              claude    CLAUDE_CONFIG_DIR   -> <home>/.claude
+#                              codex     CODEX_HOME          -> <home>/.codex
+#                              pi        PI_CODING_AGENT_DIR -> <home>/.pi/agent
+#                              copilot   COPILOT_HOME        -> <home>/.copilot
 #                              devin     APPDATA, LOCALAPPDATA (Windows) — devin
-#                                        has NO config-directory variable; its
-#                                        only override is `--config`, which
-#                                        REPLACES the user config rather than
-#                                        layering with it and drops a `-p` run
-#                                        into interactive onboarding, so the
-#                                        wrapper never passed it and neither does
-#                                        this. Its state lives under those two.
-#   GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS   copilot only. Without it repo hooks
+#                                        has NO config-directory variable, and
+#                                        its `--config` REPLACES the user config
+#                                        rather than layering with it, so it is
+#                                        never passed.
+#   GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS   copilot only: without it repo hooks
 #                            do not load in prompt mode at all, and the
-#                            equivalent flag does NOT satisfy the gate.
+#                            equivalent flag does not satisfy the gate.
 #
-# Each of those five variable names is the shipped build's own, read from its own
-# `--help` on 2026-08-23 (`CLAUDE_CONFIG_DIR` from the shipped `claude` binary,
-# which carries it 35 times; the other four are documented by their CLI).
-#
-# A CONFIG DIRECTORY IS A PATH, NOT A CREDENTIAL, and nothing else is passed:
-# no API key, no token, no `GITHUB_TOKEN`, no `ANTHROPIC_API_KEY`, no
-# `COPILOT_GITHUB_TOKEN`, no proxy credential. A context never runs git or gh —
-# the delivery seam does that, as the coordinator — so no token belongs in a
-# context's environment at all.
+# A CONFIG DIRECTORY IS A PATH, NOT A CREDENTIAL, and nothing else is passed: no
+# API key, no token, no `GITHUB_TOKEN`, no `ANTHROPIC_API_KEY`, no proxy
+# credential. A context never runs git or gh — the delivery seam does that, as
+# the coordinator — so no token belongs in a context's environment at all.
 #
 # WHAT THE SCRUB CANNOT DO, said rather than implied away:
 #
-#   * It cannot stop a CLI reading the practitioner's own configuration. Claude
-#     Code and Copilot keep credentials in the OS keychain or credential store
-#     and their settings under the real home; pointing their config variable at
-#     that home is exactly what lets them authenticate, and a context raised
-#     there can read whatever those files say. The scrub bounds the ENVIRONMENT.
-#     It is not a read boundary, and no line here should be read as one.
+#   * It cannot stop a CLI reading the practitioner's own configuration.
+#     Pointing a harness's config variable at the real home is exactly what lets
+#     it authenticate, and a context raised there can read whatever those files
+#     say. The scrub bounds the ENVIRONMENT; it is not a read boundary, and no
+#     line here should be read as one.
 #   * pi takes its provider credentials from environment variables
-#     (`ANTHROPIC_API_KEY`, `AWS_*`, `PI_KEY` and the rest). Those are tokens and
-#     they are NOT passed. A pi seat whose credentials live only in an exported
-#     variable will find none under this scrub; one whose credentials are stored
-#     under `PI_CODING_AGENT_DIR` will work. That is the rule doing its job
-#     rather than a defect, and which of the two holds on a given host is what
-#     the pi assertion in `t/integration/remit-invoke-live.sh` establishes.
-#   * It says nothing about what the process can READ from the filesystem. That
-#     is the boundary line above, and on this host only codex has one.
-#   * The PLATFORM adds a few names of its own that remit neither passes nor can
-#     prevent. On Git Bash, `env -i /bin/sh -c env` prints `MSYSTEM`, `WINDIR`
-#     and `SYSTEMROOT` on an environment this script emptied — the MSYS runtime
-#     injects them into every process it starts. They are paths and a platform
-#     name, never a credential, and they are named here so that reading the
-#     allow-list against a real raise does not look like a leak.
+#     (`ANTHROPIC_API_KEY`, `AWS_*`, `PI_KEY` and the rest). Those are tokens
+#     and are NOT passed, so a pi seat whose credentials live only in an
+#     exported variable will find none. That is the rule doing its job.
+#   * It says nothing about what a process can READ from the filesystem. That is
+#     the boundary line above, and on this host only codex has one.
+#   * The PLATFORM adds names remit neither passes nor can prevent: on Git Bash,
+#     `env -i /bin/sh -c env` still prints `MSYSTEM`, `WINDIR` and `SYSTEMROOT`.
+#     They are paths and a platform name, never a credential, and they are named
+#     here so that reading the allow-list against a real raise is not read as a
+#     leak.
 #
 # ==============================================================================
-# THE RUN IS VISIBLE WHILE IT RUNS
+# THE HONESTY RULES
 # ==============================================================================
 #
-# A raise is minutes long and this script is silent for nearly all of it: the
-# raised harness's output goes to files in the run directory, and every other
-# line here is said before the CLI starts or after it exits. Two channels exist
-# so that a caller is not blind for the duration. Neither changes what the seam
-# RETURNS — stdout is still the context's final text and nothing else, and the
-# raised context's own exploration still never crosses to the caller.
-#
-#   REMIT_PROGRESS=<path>   the run directory's path is written to that file the
-#                           moment the directory exists, before the briefing is
-#                           composed and before anything is raised. The path
-#                           itself carries this process's pid, so a watcher
-#                           cannot guess it and this is the only way to find it
-#                           in time to tail it. Written for a raise that gets as
-#                           far as making a run directory; a refusal before that
-#                           point writes nothing, because nothing ran.
-#   REMIT_HEARTBEAT=<n>     while the CLI is running, one line every <n> seconds
-#                           on this script's own stderr AND appended to
-#                           `<run directory>/progress`. Default 30; `0` silences
-#                           it. It says the role, the harness and the elapsed
-#                           seconds, and nothing about what the context is doing
-#                           — this script does not know, and the raised harness's
-#                           stderr is deliberately NOT teed through: on devin that
-#                           channel carries agent prose, and the caller never
-#                           reads a context's exploration.
-#
-# The heartbeat has two destinations because a caller may be on either of two
-# roads. Running this script directly, its stderr is the caller's; running it
-# through `bin/remit`, that stderr is captured — see that script's header, which
-# owns what it does with it — and `<run directory>/progress` is the channel that
-# survives. `REMIT_PROGRESS` is how anything finds that directory.
-#
-# What the CALLER owes when it raises this script is stated once in `AGENTS.md`,
-# under "A raised context is visible while it runs". Read it there; it is not
-# restated here.
-#
-# ==============================================================================
-# WHAT EACH ROLE IS TOLD
-# ==============================================================================
-#
-# The briefing this script composes carries, in order: what the role may and may
-# not do; what it returns; the authority (`REMIT_AUTHORITY`, reproduced in full);
-# the must-fix, when one is going back; the bar, for the roles that AUTHOR —
-# `REMIT_STANDARDS`, the `fix` section of the gate the work is heading into and
-# nothing else from that file; and — for `evaluate` and no other role — the
-# gate's rubric file from `REMIT_RUBRICS`, reproduced WHOLE, with the four
-# citation shapes. One gate's evaluator is never handed another gate's file, an
-# author is never handed a whole gate file, and a judge is never handed the
-# author's derived half of one. Why the split falls there is `bin/remit`'s header.
-#
-# The limits are the law's, not this script's invention: a builder authors a tree
-# and runs no git or pull-request command (Tech Design rule 5); an evaluator
-# judges and does not repair, accept, merge or close (S12); every role works
-# inside the authority it was given and never widens it (S11).
-#
-# ==============================================================================
-# THE HONESTY RULES, LIFTED WITH THE ADAPTERS
-# ==============================================================================
-#
-# Each of these is a probed failure mode of a shipped CLI, evidenced in this
-# repository's probe records. They arrived with the adapters and none of them is
-# relaxed here.
+# Each is a probed failure mode of a shipped CLI, evidenced in this repository's
+# probe records. None of them is relaxed here.
 #
 #   * Exit signals COMPLETION, not success. A CLI can exit 0 with every task
-#     command denied. Nothing here reads success from an exit code.
-#   * Pi accepts a wrong model id silently and answers anyway, so a pi raise is
-#     refused unless the exact id is in `pi --list-models`. That catalogue is a
-#     COLUMN TABLE — `provider  model  context …` under a header row of those
-#     names — and pi takes `--model` as `provider/id` or as a bare id, so both
-#     forms are read out of it and the registered id must equal one of them
-#     WHOLE. A substring of a line is not a match: a prefix of a real id would
-#     otherwise pass a check whose entire purpose is that pi will not fail on it.
-#   * The sandbox codex was ASKED for is not always the one it ran under. The
-#     run HEADER BLOCK is the truth — the lines between codex's own banner and
-#     the separator closing it, which exist before any builder text does — and it
-#     is read back after exit. A confirmed downgrade is exit 6; a header that
-#     cannot be read is reported UNCONFIRMED and claims no boundary at all.
-#   * Devin's exit code distinguishes only "the CLI refused to start" from "a run
-#     happened". A run whose every tool call was denied exits 0 with no final
-#     message and nothing on stderr, so a devin run is judged from its ATIF
-#     export. Its containment is enforced by TERMINATION, not refusal: a denied
-#     call cancels the batch it was issued in and the run stops there, which is
-#     why the allow list is everything a context reaches for rather than the
-#     minimum that sounds prudent.
-#   * Copilot reports NOTHING about the permissions that actually applied, in any
-#     channel, so there is no read-back to make. What exists instead is a canary:
-#     a cheap throwaway run under the exact configuration the context will get,
-#     which must run an ordinary command, author an ordinary in-tree file of real
-#     source, and be BLOCKED on a wrapped `git`. Anything else refuses the raise
-#     (exit 7). A hook that fails to load fails OPEN, silently, which is the
-#     whole reason the canary exists.
-#   * There is NO enforced read boundary on claude, pi, copilot or devin here.
-#     Every provenance line says so rather than implying one. A worktree path arm
-#     was built into the copilot hook and WITHDRAWN — ruled 2026-08-22 — because
-#     inspecting command text is the wrong mechanism for a read boundary; the
-#     right one is where the context RUNS.
-#   * An absent capability is reported before anything is invoked. Nothing is
-#     ever substituted.
+#     command denied; nothing here reads success from an exit code.
+#   * Pi accepts a wrong model id silently, so the registered id must appear
+#     WHOLE in `pi --list-models` — as that table's `provider/id` or as the bare
+#     id. A substring of a real id is not a match.
+#   * The sandbox codex was ASKED for is not always the one it ran under, so its
+#     run HEADER BLOCK is read back after exit. A confirmed downgrade is exit 6;
+#     a header that cannot be read is reported UNCONFIRMED and claims nothing.
+#   * Devin's exit code distinguishes only "the CLI refused to start" from "a
+#     run happened", so a devin run is judged from its ATIF export. Its
+#     containment is enforced by TERMINATION, not refusal, which is why its
+#     allow list is everything a context reaches for.
+#   * Copilot reports NOTHING about the permissions that actually applied, in
+#     any channel, so there is no read-back to make. What exists instead is a
+#     canary: a cheap throwaway run under the exact configuration the context
+#     will get, which must run an ordinary command, author an ordinary in-tree
+#     file, and be BLOCKED on a wrapped `git`. Anything else refuses the raise
+#     (exit 7) — a hook that fails to load fails OPEN, silently.
+#   * There is NO enforced read boundary on claude, pi, copilot or devin here,
+#     and every provenance line says so rather than implying one.
+#   * An absent capability is reported before anything is invoked, and nothing
+#     is ever substituted.
+#
+# WHAT EACH ROLE IS TOLD — its limits, what it returns, the authority, the
+# must-fix going back, the bar for the roles that AUTHOR, and the gate's rubric
+# file for `evaluate` and no other role — is composed below out of law that
+# `bin/remit`'s header owns and this one does not restate.
 #
 # The fake harnesses in `t/lib/fake-harness.sh` are SYNTHETIC and say so; the
-# live assertions in `t/integration/remit-invoke-live.sh` are what re-check these
-# shapes against the CLIs that ship.
+# live assertions in `t/integration/remit-invoke-live.sh` are what re-check
+# these shapes against the CLIs that ship.
 
 set -u
 
@@ -411,7 +254,7 @@ usage:
       each says about its account, and what any of them will list as models —
       and prints one tab-separated record per harness on stdout. It raises
       nothing, bills nothing and reads no registry. `remit setup` proposes a
-      registry from it; the record's fields are in this script's header.
+      registry from it; the record's fields are at `--probe-host` below.
 
 Raises ONE fresh context in a named harness, with a briefing composed from the
 role's limits and the authority in REMIT_AUTHORITY, in the worktree given, and
@@ -425,9 +268,6 @@ way. A harness or model the registry does not carry is refused, and so is a
 registered seat whose CLI is absent, unauthenticated or rejects the id. There is
 no standing default and there is no fallback: if the seat is not there, the raise
 does not happen.
-
-`draft` is RETIRED and is refused by name: the practitioner's ruling of
-2026-08-23 took it out of the chain, because nothing but him writes a brief.
 
 --harness native raises nothing: the context was the calling harness's own
 sub-agent and --final-message carries what it returned.
@@ -546,6 +386,31 @@ if [ "${1:-}" = --probe-host ]; then
 fi
 
 # ==============================================================================
+# ONE PATH NAMESPACE
+# ==============================================================================
+#
+# The rule, and why the drive-lettered spelling is the one that travels, is
+# `ONE PATH NAMESPACE` in `bin/remit` — read it there. It applies harder on this
+# side of the seam than on that one: every path below is handed to a CLI that is
+# not an MSYS program, and `/c/Users/...` is a name only the MSYS shell that
+# produced it can open. A seat told its scratch is at `/tmp/...` is a seat told
+# nothing.
+#
+# `cygpath` is the authority; where there is none there is one spelling and this
+# is the identity function.
+CYGPATH=$(command -v cygpath 2>/dev/null) || CYGPATH=''
+one_namespace() { # $1 an absolute path -> it, in the spelling everything resolves
+	if [ -n "$CYGPATH" ]; then
+		_ns=$("$CYGPATH" -m "$1" 2>/dev/null)
+		if [ -n "$_ns" ]; then
+			printf '%s\n' "$_ns"
+			return 0
+		fi
+	fi
+	printf '%s\n' "$1"
+}
+
+# ==============================================================================
 # arguments
 # ==============================================================================
 
@@ -578,9 +443,6 @@ done
 
 case "$ROLE" in
 research | build | evaluate | repair-brief) ;;
-# RETIRED, and refused by name rather than as an unknown word, so that anything
-# still asking for it is told why it is gone rather than left guessing at a typo.
-draft) die "the 'draft' role was retired by the gate-1 ruling, 2026-08-23: no fresh context drafts or rewrites a brief — the practitioner writes it, and the gate into \`refined\` is research-if-asked then evaluate. Nothing here will author one" ;;
 *) die "unknown role '$ROLE' — the roles are research, build, evaluate and repair-brief" ;;
 esac
 
@@ -589,7 +451,7 @@ case "$SLUG" in
 esac
 
 [ -d "$WT" ] || die "no such worktree: $WT"
-WT=$(CDPATH= cd -- "$WT" && pwd -P)
+WT=$(one_namespace "$(CDPATH= cd -- "$WT" && pwd -P)")
 
 ROUND=${REMIT_ROUND:-1}
 AUTHORITY=${REMIT_AUTHORITY:-}
@@ -597,6 +459,8 @@ RUBRICS=${REMIT_RUBRICS:-}
 STANDARDS=${REMIT_STANDARDS:-}
 MUSTFIX=${REMIT_MUSTFIX:-}
 PROVFILE=${REMIT_PROVENANCE:-}
+RUNS=${REMIT_RUNS:-}
+RUNS_NAMING=${REMIT_RUNS_NAMING:-}
 
 # One gate's evaluator is never handed another gate's standards, and no other
 # role is handed any. A rubric file arriving for a role that does not judge is a
@@ -691,9 +555,7 @@ def nonempty: type == "string" and length > 0;
       elif ($r.defaults | type) != "object" then
         [E("`defaults` is a \($r.defaults | type), not an object")]
       else
-        [ $r.defaults | keys[] | select(. == "draft")
-          | E("`defaults.draft` seats a role that retired on 2026-08-23: nothing but the practitioner writes a brief, so no fresh context drafts one and there is no seat to register for it") ]
-      + [ $r.defaults | keys[] | . as $k | select($k != "draft") | select(($ROLES | index($k)) == null)
+        [ $r.defaults | keys[] | . as $k | select(($ROLES | index($k)) == null)
           | E("`defaults.\($k)` is not a role remit has — those are research, build, evaluate and repair-brief") ]
       + [ $ROLES[] | . as $k | select(($r.defaults | has($k)) | not)
           | E("`defaults.\($k)` is missing — every role takes a seat the practitioner registered, and a role with none can raise nothing") ]
@@ -1060,7 +922,10 @@ command -v env >/dev/null 2>&1 ||
 # the run directory, the scratch home, and the environment allow-list
 # ==============================================================================
 
-RUNDIR=${TMPDIR:-/tmp}/$ME-$SLUG-$ROLE-$$
+# ONE PATH NAMESPACE, above: `$SCRUB_HOME` under this directory is handed to the
+# seat as `HOME`, and the coordinator's `TMPDIR` on Git Bash is `/tmp` — a mount
+# point, not a directory anything but this shell can find.
+RUNDIR=$(one_namespace "${TMPDIR:-/tmp}")/$ME-$SLUG-$ROLE-$$
 mkdir -p "$RUNDIR" || die "cannot create the run directory $RUNDIR"
 OUTFILE="$RUNDIR/stdout"
 ERRFILE="$RUNDIR/stderr"
@@ -1070,7 +935,10 @@ BRIEF="$RUNDIR/briefing"
 ATIF="$RUNDIR/atif.json"
 ENVLIST="$RUNDIR/envlist"
 
-REAL_HOME=${HOME:-}
+# The coordinator's own home, only ever used to compose the harness config
+# directories below — each of which is handed to the harness's CLI, so it goes
+# across in the spelling that CLI can open.
+REAL_HOME=$(one_namespace "${HOME:-}")
 SCRUB_HOME="$RUNDIR/home"
 mkdir -p "$SCRUB_HOME" || die "cannot create the scratch home under $RUNDIR"
 
@@ -1268,9 +1136,7 @@ role_limits() {
 		printf -- '- You NEVER run `bin/remit` or `bin/remit-invoke`, and you never run `git`\n'
 		printf '  or `gh` to CHANGE anything — nothing that writes, stages, pushes,\n'
 		printf '  comments, merges or closes. READING is not that and is fine: `git show`,\n'
-		printf '  `git diff`, `git log`, and `gh pr checks` and `gh run view` for the checks\n'
-		printf '  the rubrics below make you rest on. A judgement cannot rest on a check\n'
-		printf '  nobody is allowed to read.\n'
+		printf '  `git diff`, `git log`.\n'
 		printf -- '- A finding is a FACT with its evidence, never a task. You do not classify\n'
 		printf '  findings by consequence: only a rubric below can accept a finding or make\n'
 		printf '  one a must-fix, and every such use cites the rubric and the evidence.\n'
@@ -1279,14 +1145,11 @@ role_limits() {
 		printf '  time. There is one copy of that law and the rubric file is it; a copy\n'
 		printf '  here would be one more thing to keep true and the first to go stale.\n'
 		printf '  Read it there and judge by it.\n'
-		printf -- '- FINDING THE CHECK a rubric points you at: `.github/workflows/` is where\n'
-		printf '  the checks are defined and where each job is named for the shell and the\n'
-		printf '  platform it runs — including the platform your sandbox cannot reach,\n'
-		printf '  which from a Windows host is dash on Linux. Find the job for the platform\n'
-		printf '  in question, read its result, and cite it by the name it reports. A proof\n'
-		printf '  you can neither read a finished check for nor find kept output of is\n'
-		printf '  reported as UNRUN — not as passed, and not as somebody else'\''s word\n'
-		printf '  that it passed.\n'
+		printf -- '- A PROOF YOU CANNOT SEE RUN is reported as UNRUN — never as passed, and\n'
+		printf '  never on somebody else'\''s word that it passed. What you have to judge by\n'
+		printf '  is the repository, the delivery and the kept output of the runs that were\n'
+		printf '  kept for you; continuous integration is the repository'\''s business and\n'
+		printf '  none of yours.\n'
 		printf -- '- EVERYTHING YOU WRITE GOES IN ONE PLACE: `%s`, which is what `TMPDIR`,\n' "$SCRUB_TMP"
 		printf '  `TEMP` and `TMP` name in your environment. Your clone of this repository,\n'
 		printf '  any fixture, any scratch file. It is inside the worktree because that is\n'
@@ -1320,6 +1183,41 @@ role_limits() {
 	esac
 }
 
+# WHERE KEPT OUTPUT GOES, said to the roles that write it and to the roles that
+# read it, and said to neither when the chain named no home. The naming line is
+# `bin/remit`'s and is reproduced without being read, and what closure does with
+# what a role keeps is POINTED AT there too — this script states none of that
+# law, because a second wording of it here is a wording that can contradict the
+# code, and once did.
+runs_section() {
+	[ -n "$RUNS" ] || return 0
+	printf '\n## Where kept output goes\n\n'
+	case "$ROLE" in
+	build | research)
+		printf 'Output you are required to KEEP — a test run, a tier, a proof somebody after\n'
+		printf 'you has to be able to read — goes in\n\n'
+		printf '  %s\n\n' "$RUNS"
+		printf 'That directory is the work item'\''s own, it already exists, and it is the ONE\n'
+		printf 'place anything you keep survives this run — what you leave anywhere else is\n'
+		printf 'gone before the next context looks for it. Do not commit it and do not stage\n'
+		printf 'it: it is held out of git for you, and what becomes of it when the item closes\n'
+		printf 'is `KEPT OUTPUT HAS A HOME` in `bin/remit`'\''s header, which is the one place\n'
+		printf 'that is stated.\n\n'
+		[ -n "$RUNS_NAMING" ] && printf 'How to name what you put there: %s\n' "$RUNS_NAMING"
+		printf '\nIt is not a scratch directory and it is not where you work. Put there what\n'
+		printf 'a reader would need to believe you, and nothing else.\n'
+		;;
+	evaluate | repair-brief)
+		printf 'The output kept by the contexts that worked on this item is in\n\n'
+		printf '  %s\n\n' "$RUNS"
+		printf 'That is where a proof somebody claims to have run is either legible or\n'
+		printf 'absent. READ it. You write nothing there and you remove nothing from it.\n'
+		[ -n "$RUNS_NAMING" ] && printf '\nWhat a file there is named, so you can tell one run from another: %s\n' "$RUNS_NAMING"
+		;;
+	esac
+	return 0
+} # end runs_section
+
 role_returns() {
 	case "$ROLE" in
 	build) printf 'Your final message. It is recorded as the delivery'\''s returned text, quoted\nand not endorsed. The tree you authored is the delivery; the message says what\nyou did, what you could not do, and what you left undone.\n' ;;
@@ -1348,6 +1246,7 @@ role_returns() {
 	role_limits
 	printf '\n## What you return\n\n'
 	role_returns
+	runs_section
 	if [ -n "$AUTHORITY" ]; then
 		printf '\n## Your authority — `%s`, reproduced in full\n\n' "$AUTHORITY"
 		printf 'This is the whole of what you were given. It is not a summary of something\n'

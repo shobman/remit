@@ -1,0 +1,1738 @@
+#!/bin/sh
+# remit-exposure — what the work put ON the practitioner, in words, per session.
+#
+#   sh bin/remit-exposure stop                     < a Claude Code `Stop` payload
+#   sh bin/remit-exposure status [--segment]       < a Claude Code `statusLine` payload
+#   sh bin/remit-exposure scan <harness> [--session <id>] [--home <dir>]
+#   sh bin/remit-exposure today [--item <slug>]
+#   sh bin/remit-exposure session <id>
+#   sh bin/remit-exposure trend [--weeks <n>]
+#
+# Two channels, and they are NEVER added together:
+#
+#   said   the words the practitioner typed. Only his keystrokes: on Claude Code,
+#          a transcript `user` entry whose `promptSource` is `typed`. Text that
+#          was queued, injected by the system, or accepted from a suggestion is
+#          not his and is never counted as his. What plays that part on each of
+#          the other four harnesses, and where it cannot, is the table below.
+#   told   the words written back at him IN THE CONVERSATION — the assistant's
+#          own chat text, and nothing else. NOT a sub-agent's words (a Claude
+#          Code sidechain entry is excluded by name), not thinking, not tool
+#          calls or their results, not a line of code, not a document written to
+#          disk. What a sub-agent said to its coordinator never reached him; what
+#          the coordinator then said to him did, and that is what is counted.
+#          This is the whole reason the status line labels the channel `Agents`
+#          rather than anything wider, and it is stated here and nowhere else.
+#
+# It is EXPOSURE, not effort. It counts language crossing the boundary, and says
+# nothing about what any of it cost to think. A one-word ruling that took a week
+# scores one. That is the honest limit of the measure and it is not dressed up.
+#
+# A WORD is a whitespace-separated token — what `wc -w` counts, and nothing
+# cleverer. Punctuation, code fences and markdown are counted as they fall,
+# because any tidier rule would be a judgement about what "really" counts, and
+# a judgement is what this measure refuses to make.
+#
+# ==============================================================================
+# THE RECORD — stated here, and nowhere else
+# ==============================================================================
+#
+# One file per session, append-only, written by `stop` and by `scan` and by
+# nothing else in remit. Many open sessions are many files.
+#
+#   `.remit/exposure/<harness>-<session_id>.tsv`   every harness, claude among
+#                                                  them: claude, codex,
+#                                                  copilot, pi, devin
+#
+# EVERY HARNESS IS NAMED, and Claude Code is named exactly as the other four
+# are. There is no bare form and no default. A reader takes the harness from the
+# FILENAME PREFIX and from nothing else, so a reader can see which harness a
+# line came from without a seventh field the record does not have — and so that
+# Claude Code is established by evidence rather than by the absence of anybody
+# else's name.
+#
+# A `.tsv` IN THAT DIRECTORY WHOSE NAME CARRIES NO RECOGNISED PREFIX is not a
+# record this script can attribute, and it is not treated as one. It is counted
+# into NO number anywhere — not `today`, not its `by` line, not `trend` — and
+# every reader that meets one SAYS SO on its own output, naming the file. Not
+# folded into a harness's column, because that would be a guess; not passed over
+# in silence either, because a total that quietly left a file out reads as a
+# total that had nothing to leave out. Which prefixes are recognised is
+# `HARNESS_NAMES`, stated once at the code and not restated here.
+#
+# Those files are the record, and they are the only thing any reader reads.
+# `scan` also keeps a bookmark per session under `.remit/exposure/.bookmarks/`,
+# which is its own working state and not a record of anything — `scan_base`
+# says what it is for and why it cannot be a field of the line.
+#
+# SIX tab-separated fields, per line:
+#
+#   <iso-local-time>  when the line was appended, `%Y-%m-%dT%H:%M:%S%z`, LOCAL
+#   <said>            words typed by him in this delta
+#   <told>            words written at him in this delta
+#   <cursor-after>    how far into the harness's own record this line read. A
+#                     BYTE OFFSET wherever that record is one appended file —
+#                     Claude Code, codex, copilot and pi. Devin's record is a
+#                     SQLite database and has no bytes to point at, so its
+#                     cursor is the highest `message_nodes.row_id` consumed.
+#                     One field, one meaning — "the position this line read up
+#                     to" — and its unit is the harness's, stated here.
+#   <cwd>             the directory the harness reported, verbatim
+#   <gitBranch|->     the branch the harness reported, or `-` where it reports
+#                     none (copilot, pi and devin record no branch at all)
+#
+# Both channels sit on ONE line, so "this turn" is a real pair — the delta that
+# one `Stop` saw — rather than two numbers from two events that may not pair up.
+# Nothing is derived at capture: `cwd` and `gitBranch` are recorded as the
+# harness reported them. Attribution to a work item is a READ-TIME derivation
+# and is stated as such wherever it is offered (`today --item`).
+#
+# ==============================================================================
+# THE ITEMS IN FLIGHT — a second file, one line a day, stated here and nowhere
+# else
+# ==============================================================================
+#
+#   `.remit/exposure/.in-flight.tsv`     one per repository, append-only
+#
+# THREE tab-separated fields, per line:
+#
+#   <iso-local-time>  when the line was appended, `%Y-%m-%dT%H:%M:%S%z`, LOCAL
+#   <active|->        work items whose attention is `active`
+#   <escalated|->     work items whose attention is `escalated`
+#
+# The two counts are kept apart for the same reason the two channels are: they
+# are two states of one person's attention, and adding them would name a third
+# thing nobody ruled on. A `-` in either is a day whose count COULD NOT BE
+# TAKEN, and it is a value the readers show as `-` rather than as a zero.
+#
+# WHERE THE COUNT COMES FROM, and nothing here derives it. It is `remit list`'s
+# own answer: `<primary worktree>/bin/remit list` is run in that worktree and
+# its rows are counted by their attention column. Nothing in this script infers
+# how many items are in flight from the exposure lines, from the branches on
+# them, or from anything else it holds — the list is the work surface's own
+# projection of the practitioner's attention, and a second opinion computed out
+# of a measurement OF him would be a different number wearing the same name.
+# Whatever the list declines to list, for whatever reason it gives on its own
+# stderr, is not counted here either: this is the list's count, not a count of
+# its own.
+#
+# ONCE A DAY, ON THE FIRST WRITE OF THE DAY. Every path in this script that
+# appends to the record — `stop`, and `scan` — offers the day's count before it
+# returns, and appends one only where that day has no line yet. So the count
+# rides on writes that were already happening: there is no hook to add, and no
+# harness is left out of it, because the four that have no hook reach it
+# through `scan`.
+#
+# WHAT THAT COSTS, said plainly: the line is a SNAPSHOT taken at the day's
+# first recorded write. It is not a maximum, not a mean, and not the state of
+# affairs at close of play; an item admitted after it is written appears in
+# tomorrow's line. The alternative — rewriting the day's line as the number
+# moved — puts a read-modify-write on a file that many concurrent sessions
+# append to, and a torn line is a worse record than a stale one.
+#
+# A DAY WHOSE COUNT COULD NOT BE TAKEN STILL GETS ITS LINE, carrying `-` in
+# both counts, and the reason goes to stderr once. Not skipped, for the reason
+# `scan`'s resynchronisation line is not skipped: a day nobody could count and
+# a day nobody worked are different facts, and only a written line tells them
+# apart. It also stops the attempt — and the complaint — repeating every turn
+# for the rest of the day, which is what a record that is never pushed at
+# anybody requires.
+#
+# TWO SESSIONS CAN RACE for the first write of a day and both append. Nothing
+# locks. The readers take the FIRST line any date has and say how many days a
+# week's number came from, so a duplicate moves no number.
+#
+# The name begins with a dot so that the glob which finds session files —
+# `*.tsv` — cannot pick it up and read three fields as six. It is a record and
+# `trend` reads it; the dot is about the glob and about nothing else.
+#
+# THE DELTA, and the flush assumption — `stop`, on Claude Code. Each run reads
+# the transcript from the offset its own last line recorded and consumes
+# COMPLETE LINES ONLY: a JSONL file caught mid-write leaves a partial last line,
+# and the offset stops before it, so the next `Stop` picks it up. A `Stop` that
+# fires before the final assistant entry is written therefore under-counts once
+# and the next line catches up. Whether Claude Code ever does that is a live
+# fact about the harness, not an arithmetic one: it is asserted in
+# `t/integration/remit-exposure-claude.sh`, and no unit test claims it.
+# If the transcript is ever SHORTER than the recorded offset — replaced,
+# truncated, compacted — this resynchronises to the new end of file and counts
+# nothing for that turn, rather than counting the whole file a second time.
+#
+# THE DELTA — `scan`, on the other four. None of those four has a hook that
+# fires at the end of a turn (see the table below), so nothing can be counted
+# incrementally as it happens; `scan` is asked for, and when it is asked it
+# RECOUNTS the harness's whole record for a session and appends the difference
+# against what this repository has already recorded for it. That is a different
+# arithmetic from `stop`'s and it is chosen deliberately: a scan may run once a
+# day or once a month, the file it reads may have been rewritten or compacted
+# between runs, and a subtraction against a total is right in every one of those
+# cases where an offset walk is not. Two consequences, both intended:
+#
+#   * `scan` appends NO LINE when nothing has changed. `stop` writes one line
+#     per turn because a turn happened; a scan that found nothing has nothing
+#     to say, and a file of zero-rows would bury the turns that were real.
+#   * A line written by `scan` is a stretch of session, not a turn. Its
+#     parenthesised delta in the status line is therefore "since the last
+#     scan", not "this turn". Only Claude Code's line is a turn, because only
+#     Claude Code has the hook that makes one.
+#
+#   * A COUNT THAT WENT DOWN — a harness record truncated, rotated or replaced
+#     since the last scan — is recorded as a zero delta, never as a negative,
+#     on a RESYNCHRONISATION LINE, with the cursor where the record now ends.
+#     `stop` does the same thing when a transcript is shorter than its own
+#     offset, and for the same reason.
+#
+#     THE TWO CHANNELS ARE JUDGED SEPARATELY, because they do not always come
+#     from the same file. Codex reads `said` from one `history.jsonl` shared by
+#     every session and `told` from the session's own rollout, so the shape a
+#     rotation actually arrives in is `said` down and `told` up in the SAME
+#     scan. The channel that went backwards carries zero; the other carries its
+#     growth, which is the only way those words are ever recorded at all.
+#
+#     The line is written, not skipped, because the record should show that a
+#     rotation happened underneath it: a session that went quiet and a session
+#     whose log was rotated are different facts, and only one of them leaves a
+#     line. A zero-zero line means this and only this, on a scanned harness:
+#     `scan` appends nothing at all when nothing changed, so it has no other
+#     way to write one. (`stop`'s files are its own, and a turn where nobody
+#     said anything legitimately records zero and zero there.)
+#
+#     WHAT THE NEXT SCAN COUNTS, and it is only the growth. A recount needs
+#     the totals the harness's record held when this repository last read it,
+#     and after a rotation that is NOT the sum of what has been recorded — the
+#     record still remembers words the harness has thrown away. So the pair is
+#     kept as a BOOKMARK beside the record, and moved at the resynchronisation
+#     to what the rotated record still holds. A session rotated down to 5 said
+#     which then types 4 more words records +4: the 4 that are new, and not
+#     one of the 5 that survived and were counted the first time. Where a
+#     record has no bookmark — one written before there were any — the base
+#     falls back to the sum of the deltas since the last resynchronisation
+#     line, which is exactly right until the first rotation. `scan_base` and
+#     `scan_mark` are where both live, and what the bookmark is not is said
+#     there.
+#
+# ==============================================================================
+# WIRING — the lines the practitioner may add to his Claude Code settings
+# ==============================================================================
+#
+# Nothing here writes them. `install.sh` prints exactly the block below and no
+# document restates it; adding any of them is his act. `install.sh` DOES offer
+# one write of its own — `.remit/exposure/` into the target's `.gitignore` — and
+# that offer, and what it does when he has changed his mind, is stated in
+# `install.sh` and not restated here.
+#
+# wiring:begin
+#   A `Stop` hook, so each completed turn is recorded:
+#     "hooks": { "Stop": [ { "hooks": [ { "type": "command",
+#       "command": "sh \"$CLAUDE_PROJECT_DIR/bin/remit-exposure\" stop" } ] } ] }
+#
+#   A status-line segment, if nothing else owns that bar:
+#     "statusLine": { "type": "command",
+#       "command": "sh \"$CLAUDE_PROJECT_DIR/bin/remit-exposure\" status" }
+#
+#   WHERE A SCRIPT OF YOUR OWN ALREADY OWNS THE BAR, it is that script piping
+#   the SAME stdin JSON it was given to `status --segment`, and appending what
+#   comes back. `--segment` prints its own leading separator, so the line is an
+#   append and nothing else moves. In PowerShell — a `claude-statusline.ps1`
+#   that has already read stdin into $json and built $bar:
+#
+#     $seg = $json | & sh "$env:CLAUDE_PROJECT_DIR/bin/remit-exposure" status --segment
+#     if ($LASTEXITCODE -eq 0 -and $seg) { $bar += $seg }
+#
+#   In sh, the same shape — the payload is read once and given to both:
+#
+#     payload=$(cat)
+#     bar=$(printf '%s' "$payload" | your-existing-status-line)
+#     seg=$(printf '%s' "$payload" | sh "$CLAUDE_PROJECT_DIR/bin/remit-exposure" status --segment)
+#     printf '%s%s\n' "$bar" "$seg"
+#
+#   The guard matters: on a session with nothing recorded, or with no `jq` to
+#   read the payload, `--segment` prints NOTHING and your bar is exactly what it
+#   was. An absent segment is the intended failure — a bar segment that invented
+#   a number would be worse than a bar segment that is not there.
+# wiring:end
+#
+# ==============================================================================
+# EVERY HARNESS — what each exposes, what it cannot, and what `scan` reads
+# ==============================================================================
+#
+# Probed on the practitioner's Windows host, 2026-08-23, on claude 2.1.241,
+# codex-cli 0.148.0, Copilot CLI 1.0.80, devin 3000.4.25 and pi 0.84.2. Each
+# per-harness test in `t/integration/` re-establishes this against the version
+# actually installed and NAMES that version, so a harness that changes its
+# shapes fails a test rather than silently zeroing a count.
+#
+# CLAUDE CODE — a hook, `Stop`. `said`: `user` entries with
+#   `promptSource == "typed"`. `told`: non-sidechain `assistant` text blocks.
+#   cwd and branch: on every transcript entry. This is the only harness with a
+#   turn-end hook, and so the only one whose record is a record of TURNS.
+#   It is also the only one of the five that marks a prompt DELIVERED BY A
+#   PROGRAM as such: `promptSource` takes `typed`, `queued`, `system`,
+#   `suggestion_accepted` and `sdk`, and `sdk` is what a `claude -p` raise
+#   writes — so a brief remit sends to a Claude Code worker is excluded by the
+#   same `== "typed"` test that excludes a queued message. Which of those
+#   values a machine can still show is re-established on the day it runs by
+#   `t/integration/remit-exposure-claude.sh`, which is why no count of
+#   transcripts is written down here to go stale. Copilot and devin have no
+#   such field, which is exactly the limit stated against each of them below.
+#   AND A SESSION HE WAS NEVER IN RECORDS NOTHING AT ALL: `entrypoint` on the
+#   transcript entries separates a session someone sat at (`cli`) from one a
+#   program raised (`sdk-cli`), and `stop` refuses the second outright. Why —
+#   and what it costs when it does not — is at the check itself in `cmd_stop`,
+#   and is not restated here.
+#
+# CODEX — no usable hook, and a scan of two files.
+#   `notify` is codex's only turn-end callback and it is ONE command in
+#   `config.toml`, not a list: claiming it would displace whatever the
+#   practitioner already has there. remit does not take a slot it cannot
+#   share, so codex is scanned.
+#   `said`: `~/.codex/history.jsonl` — `{session_id, text, ts}` — which is
+#   codex's own record of what was TYPED, and is the exact counterpart of
+#   `promptSource == "typed"`. Established by contrast, not by assumption: on
+#   this host every rollout whose `session_meta.originator` is `codex-tui` has
+#   its prompts in that file, and every rollout whose originator is
+#   `codex_exec` — the shape of every context remit itself raises — has put
+#   nothing into it at all. A prompt piped into `codex exec` is therefore never
+#   counted as his. That contrast is re-counted on the day it runs by
+#   `t/integration/remit-exposure-codex.sh`, which is why no count of rollouts
+#   is written down here to go stale.
+#   `told`: the rollout's `response_item/message` entries with
+#   `role: "assistant"`, `output_text` blocks. NOT `developer` and NOT `user` —
+#   codex delivers `<environment_context>`, `<user_instructions>`, AGENTS.md
+#   and the plugin list as `role: "user"`, so counting that role would count
+#   the harness's own furniture as his words.
+#   cwd and branch: `session_meta.cwd` and `session_meta.git.branch`.
+#   Cursor: the rollout's byte size.
+#
+# PI — no hook at all (`pi --help` offers none), and a scan of one file.
+#   `said`: `message` entries with `role: "user"`, `text` blocks. Pi has no
+#   `promptSource`-equivalent, and it does not need one HERE:
+#   `bin/remit-invoke` raises every pi context with `--no-session`, so a
+#   context remit raised writes no session file at all, and every file under
+#   `~/.pi/agent/sessions/` is an interactive one. That is mechanical, and it
+#   is the reason this counts a plain `role: user` and calls it his. Someone
+#   who raises pi WITHOUT `--no-session` breaks it, and no field on the entry
+#   would catch them at it; that is the honest limit and it is not dressed up.
+#   `told`: `role: "assistant"`, `text` blocks — not `thinking`, not `toolCall`.
+#   cwd: the `session` header. Branch: pi records none, so `-`.
+#   Cursor: the session file's byte size.
+#
+# COPILOT CLI — no hook (`copilot --help` offers none), and a scan of one file.
+#   `told`: `assistant.message` events, `.data.content`.
+#   `said`: `user.message` events, `.data.content`, EXCEPT those carrying a
+#   `.data.source` key. Copilot gives an ordinary user message no `source` at
+#   all; the one exception found when the shape was surveyed reads
+#   `source: "skill-resume-work"` and holds thousands of characters a skill
+#   injected — the survey's own counts are not written down here, for the same
+#   reason codex's are not.
+#   The presence of the key is therefore the discriminator, and it is used as a
+#   whitelist of the shape that IS his rather than as a blacklist of source
+#   names, which would rot the first time a new one appeared.
+#   AND THIS IS STILL THE ONE PLACE THE MEASURE CANNOT KEEP ITS OWN PROMISE.
+#   Excluding injected messages is not the same as separating a message typed
+#   at a prompt from one delivered by `-p`, and copilot carries no field that
+#   does. Every ordinary `user.message` the survey saw reads
+#   `delivery: "idle"`, whether it was typed or piped, so there is not even a
+#   contrast to learn a second discriminator from. A copilot context that remit
+#   raised in this repository therefore has ITS BRIEF counted as `said`. That
+#   is stated, it is not corrected here, and `scan copilot` says it on stderr
+#   every time it runs, so the number is never read as clean.
+#   cwd: `workspace.yaml` beside the events file — not `session.start`, which
+#   carries none. Branch: copilot records none, so `-`.
+#   Cursor: `events.jsonl`'s byte size.
+#
+# DEVIN — no hook, and a scan of a SQLite database.
+#   Devin keeps `sessions.db` under its CLI state directory:
+#   `sessions{id, working_directory}`, `prompt_history{session_id, content,
+#   is_shell}` and `message_nodes{session_id, row_id, chat_message}`, the last
+#   holding `{role, content}` JSON. `said`: `prompt_history` rows with
+#   `is_shell = 0`. `told`: `message_nodes` whose `chat_message.role` is
+#   `assistant`. cwd: `sessions.working_directory`. Branch: none, so `-`.
+#   Cursor: the highest `row_id` consumed, because a database has no bytes.
+#   THE READER. A database is not a file this can `tail`, and POSIX sh cannot
+#   open one. `node` can — `node:sqlite`, Node 22.5 and up — and `node` is
+#   already something `bin/remit-invoke` will accept before it raises a devin
+#   context at all, so `scan devin` asks for nothing new. Without it, or on an
+#   older node, `scan devin` exits 3 naming exactly what is missing and reads
+#   nothing. The database is COPIED to scratch and read there, never opened in
+#   place: a scan must not lock or disturb the store the CLI is using.
+#   The same limit as copilot's applies to `said`: devin's `prompt_history`
+#   holds a `-p` prompt exactly as it holds a typed one, so a devin context
+#   remit raised has its brief counted as his. Said on stderr, every run.
+#
+# WHICH SESSIONS A SCAN READS. Only those whose recorded cwd still resolves to
+# THIS repository — the same `--git-common-dir` the record itself lives at, so
+# a linked worktree counts and another repository does not. A session whose
+# directory is gone cannot be resolved and is skipped, and every scan reports
+# how many it skipped and why. `--session <id>` overrides the filter: a named
+# session is read wherever it ran.
+#
+# WHAT NONE OF THEM DOES
+#
+#   * No machine-side token count — that is the companion item's.
+#   * No `handed`, `changed` or `watched` — later phases, and nothing here
+#     captures one. `trend` nevertheless carries a `watched` column, and it is
+#     empty: the SHAPE of the view is settled now, so that when the channel
+#     arrives it arrives as a column of its own and is never added into `said`
+#     or into `told`. Reserving the column builds no capture and claims none.
+#   * No threshold, no warning, no nudge. Nothing is pushed at the person: the
+#     status line is a glance and `today`/`session`/`trend` are asked for.
+#   * NO SCORE, and `trend` is where that bites hardest. It divides a week's
+#     channel by that week's items in flight because that ratio is the whole
+#     question, and it stops there: no target, no ranking, no arrow, no verdict
+#     on whether a number moving is good. What the numbers mean is the
+#     practitioner's to say, and nothing here attributes a trend in them to AI,
+#     to remit, or to any other cause.
+#   * `stop` never writes to stdout. A hook that talks pollutes the transcript
+#     it is measuring.
+#
+# Exit codes:
+#   0  done
+#   2  usage — an unknown subcommand, or an argument missing
+#   3  a capability is absent, or one that is present did not finish. `stop`,
+#      `status` and `scan` can all reach it: each reads JSON and `jq` is not on
+#      PATH, or `scan devin` needs a `node` with `node:sqlite` and there is
+#      none — and `stop` also exits 3 when `jq` IS there and fails on the delta
+#      anyway, because a count it could not make must not be written down as a
+#      zero. In every case NOTHING WAS WRITTEN, the refusal names what is
+#      missing or what did not finish, and — for `stop` — the offset is left
+#      where it was, so the next turn reads the same bytes rather than losing
+#      them. Why that matters is at `count_words`.
+#      `today`, `session` and `trend` read the record's own lines, which are
+#      not JSON; they need no `jq` and never exit 3.
+#   4  nothing to record, or nothing to report — no repository to write into, a
+#      payload that carried no session, a session a PROGRAM raised rather than
+#      a person, a session with no file, a harness with no state directory on
+#      this host. Said on stderr.
+#
+# A non-zero exit from a `Stop` hook is reported by Claude Code and does not
+# block the turn; every failure here is non-blocking by construction.
+
+set -u
+
+ME=remit-exposure
+say() { printf '%s: %s\n' "$ME" "$1" >&2; }
+die() { say "$1"; exit "${2:-2}"; }
+
+usage() {
+	printf 'usage: sh bin/%s stop                 < a Claude Code Stop hook payload\n' "$ME" >&2
+	printf '       sh bin/%s status [--segment]   < a Claude Code statusLine payload\n' "$ME" >&2
+	printf '       sh bin/%s scan <harness> [--session <id>] [--home <dir>]\n' "$ME" >&2
+	printf '           harness: %s\n' "$HARNESSES" >&2
+	printf '       sh bin/%s today [--item <slug>]\n' "$ME" >&2
+	printf '       sh bin/%s session <id>\n' "$ME" >&2
+	printf '       sh bin/%s trend [--weeks <n>]\n' "$ME" >&2
+	exit 2
+}
+
+# The four harnesses `scan` reads, named once. Claude Code is not among them:
+# it has a `Stop` hook, and `stop` is how its record is written.
+HARNESSES='codex copilot pi devin'
+
+# The five harnesses a RECORD FILENAME may name, and the only prefixes any
+# reader recognises. TWO VARIABLES, not one, because the two jobs are different
+# facts: every harness's record carries its name, and `claude` is as much a
+# prefix as the rest — but `scan claude` must stay an error, because Claude Code
+# captures through its `Stop` hook and a scan of it would be a second, different
+# record of the same session. One list serving both would have to lie about one
+# of them, so there are two, and `cmd_scan` refuses `claude` by name.
+HARNESS_NAMES="claude $HARNESSES"
+
+# The harness a record belongs to, read from its name and from nothing else.
+# rc 1 and no output where the name carries no recognised prefix: such a file is
+# counted into no number anywhere and is named to the reader instead, which is
+# stated at the top of this file and is not restated here.
+harness_of() { # $1 a basename with `.tsv` already stripped -> harness, or rc 1
+	for _hk in $HARNESS_NAMES; do
+		case "$1" in "$_hk"-*) printf '%s\n' "$_hk"; return 0 ;; esac
+	done
+	return 1
+}
+
+# What every reader says when it met one. Written once so that `today` and
+# `trend` cannot come to say different things about the same directory.
+unnamed_note() { # $1 how many  $2 their names, space-separated  $3 the directory
+	[ "${1:-0}" -gt 0 ] || return 0
+	printf '  NOTE: %d file(s) in %s carry no recognised harness prefix and were counted\n' "$1" "$3"
+	printf '  into NOTHING above:%s\n' "$2"
+	printf '  A record is named <harness>-<session>.tsv, harness one of: %s. A file that is\n' "$HARNESS_NAMES"
+	printf '  not is left out rather than attributed to a harness nobody can establish.\n'
+}
+
+# --- the one JSON reader ------------------------------------------------------
+# jq or nothing. `bin/remit-invoke` refuses a harness whose JSON it cannot read
+# rather than guessing at it, and this refuses on the same principle: a status
+# line that invented a number would be worse than a status line that is absent.
+need_jq() {
+	command -v jq >/dev/null 2>&1 ||
+		die "jq is not on PATH — a Claude Code payload and its transcript are JSON, and nothing here could read them; nothing was read and nothing was written" 3
+}
+
+# The one text-extracting filter, written once and used for both channels: an
+# entry's message content, whether it is a bare string or an array of blocks.
+JQ_TEXT='(.message // {})
+	| if type=="object" then (.content // empty) else empty end
+	| if type=="string" then .
+	  elif type=="array" then (.[] | select(type=="object" and .type=="text") | .text // empty)
+	  else empty end'
+
+# --- where the record lives ---------------------------------------------------
+# One exposure directory per REPOSITORY, at its primary worktree — resolved
+# through `--git-common-dir`, so a session running in a linked worktree writes
+# beside every other session's file rather than into a tree that will be
+# removed. That is what makes `today --item work/<slug>` able to see the lines
+# a delivery worktree produced.
+#
+# REMIT_EXPOSURE_DIR overrides it outright. It is the seam the unit tests use so
+# that no test ever writes into the practitioner's own work location.
+exposure_dir() { # $1 a directory to resolve from -> the path, or empty + rc 1
+	if [ -n "${REMIT_EXPOSURE_DIR:-}" ]; then
+		printf '%s\n' "$REMIT_EXPOSURE_DIR"
+		return 0
+	fi
+	_from=$(native_path "$1")
+	[ -d "$_from" ] || return 1
+	_common=$(CDPATH= cd -- "$_from" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null) || return 1
+	[ -n "$_common" ] || return 1
+	_common=$(CDPATH= cd -- "$_from" 2>/dev/null && CDPATH= cd -- "$_common" 2>/dev/null && pwd -P) || return 1
+	printf '%s/.remit/exposure\n' "$(dirname -- "$_common")"
+}
+
+# A path as the shell here can use it. Claude Code reports a Windows `cwd` with
+# backslashes (`C:\path\to\repo`); Git Bash needs `C:/path/to/repo`, and a
+# backslash left in place is read as an escape and the path is lost. Only
+# a drive-lettered path is touched, so a POSIX path is never rewritten.
+native_path() {
+	case "$1" in
+	[A-Za-z]:\\*) printf '%s\n' "$1" | tr '\\' '/' ;;
+	*) printf '%s\n' "$1" ;;
+	esac
+}
+
+# A field that cannot break the record it is written into.
+tsv_safe() { printf '%s' "$1" | tr '\011\012\015' '   '; }
+
+# --- the items in flight ------------------------------------------------------
+# What this file holds, where its count comes from, why it is taken once a day
+# on a write that was happening anyway, and why a day nobody could count still
+# gets a line, is stated at the top of this file and is not restated here.
+INFLIGHT=.in-flight.tsv
+
+# The repository's PRIMARY worktree, resolved the same way and for the same
+# reason `exposure_dir` resolves the place the record lives: a session in a
+# linked delivery worktree must count the work surface that will outlive it,
+# and read that worktree's own `bin/remit` rather than whichever copy happens
+# to sit beside the tree it is working in.
+primary_root() { # $1 a directory to resolve from -> the primary worktree, rc 1
+	_pf=$(native_path "$1")
+	[ -d "$_pf" ] || return 1
+	_pc=$(CDPATH= cd -- "$_pf" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null) || return 1
+	[ -n "$_pc" ] || return 1
+	_pc=$(CDPATH= cd -- "$_pf" 2>/dev/null && CDPATH= cd -- "$_pc" 2>/dev/null && pwd -P) || return 1
+	dirname -- "$_pc"
+}
+
+# rc 0 a count was appended   1 the day already had its line, nothing done
+# rc 2 the day's line was appended carrying `-`, and the reason said on stderr
+# rc 3 nothing could be appended at all, and the reason said on stderr
+inflight_record() { # $1 exposure-dir  $2 a directory to resolve the repository from
+	_if=$1/$INFLIGHT
+	_day=$(date +%Y-%m-%d)
+	if [ -f "$_if" ] &&
+		awk -F'\t' -v d="$_day" '
+			index($1, d) == 1 { found = 1 }
+			END { exit found ? 0 : 1 }' "$_if"; then
+		return 1
+	fi
+	_why=''
+	_act=-
+	_esc=-
+	_pr=$(primary_root "$2") ||
+		_why="there is no Git repository at $2, so no work surface to count"
+	if [ -z "$_why" ]; then
+		_rl=$_pr/bin/remit
+		if [ ! -f "$_rl" ]; then
+			_why="there is no $_rl to ask"
+		else
+			# THE LIST'S OWN ANSWER. Its exit status is the whole discriminator:
+			# a list that ran is believed, including when it lists nothing,
+			# because no items in flight is a real and reportable count. A list
+			# that did not run yields no number, and none is guessed at.
+			if _lo=$(CDPATH= cd -- "$_pr" 2>/dev/null && sh "$_rl" list 2>/dev/null); then
+				_ct=$(printf '%s\n' "$_lo" | awk -F'\t' '
+					$1 == "active" { a++ }
+					$1 == "escalated" { e++ }
+					END { printf "%d %d\n", a + 0, e + 0 }')
+				_act=${_ct%% *}
+				_esc=${_ct##* }
+			else
+				_why="\`remit list\` did not finish in $_pr"
+			fi
+		fi
+	fi
+	printf '%s\t%s\t%s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$_act" "$_esc" >>"$_if" || {
+		say "cannot append to $_if — today's count of items in flight was not recorded"
+		return 3
+	}
+	if [ -n "$_why" ]; then
+		say "today's count of items in flight could not be taken: $_why. The day's line records that, carrying '-' in both counts, and no number was guessed at"
+		return 2
+	fi
+	return 0
+}
+
+# --- said and told, from one delta -------------------------------------------
+# A COUNT THAT COULD NOT BE MADE IS NOT A ZERO, and this is the whole reason
+# these two are written the long way. `jq` is a third party: it can be killed,
+# run out of memory, or one day stop accepting an input it accepts now, and
+# every one of those arrives here as an empty stdout that `wc -w` turns into a
+# clean-looking 0. A zero is not a neutral answer in this record — it is the
+# claim that nothing was said, indistinguishable from a quiet turn — and
+# because `stop` advances its offset past bytes it believes it has counted,
+# words lost to a silent failure are lost for good rather than picked up by the
+# next turn. FOUND LIVE: one line of a real session's record on this host reads
+# 0 said, 0 told across 20,495 bytes that hold 19 words of assistant text, and
+# recounting those same bytes with this same script gives 19. Which third party
+# failed that night cannot now be established; that the failure had no way to
+# announce itself can be, and is what is fixed here.
+#
+# So the pair below prints a count and returns 0 only where `jq` ITSELF exited
+# 0, and returns 1 having printed nothing where it did not. A malformed line is
+# not a failure and never reaches this: `fromjson? // empty` skips it and jq
+# exits 0 — this is about jq not finishing, never about input it can read.
+# What `stop` does with the refusal is at the call, because that is where the
+# offset lives.
+count_words() { # $1 file  $2 the selects that pick the channel -> count, rc 1 if jq failed
+	_cw=$(jq -R -r "fromjson? // empty
+		| select(type==\"object\")
+		| $2
+		| $JQ_TEXT" "$1" 2>/dev/null) || return 1
+	printf '%s\n' "$_cw" | wc -w | tr -d ' '
+}
+
+count_said() { # $1 a file of complete JSONL entries -> a word count
+	count_words "$1" 'select(.type=="user")
+		| select(.isSidechain != true)
+		| select(.promptSource == "typed")'
+}
+
+count_told() { # $1 a file of complete JSONL entries -> a word count
+	count_words "$1" 'select(.type=="assistant")
+		| select(.isSidechain != true)'
+}
+
+# --- the abbreviation the status line wears ----------------------------------
+# 1240 -> 1.2k, 8420 -> 8.4k, 999 -> 999. Integer arithmetic only: there is no
+# floating point in POSIX sh and a status line is not worth an awk.
+abbrev() { # $1 a count -> a short string
+	_n=$1
+	if [ "$_n" -lt 1000 ]; then
+		printf '%s\n' "$_n"
+	elif [ "$_n" -lt 1000000 ]; then
+		_t=$(((_n + 50) / 100))
+		printf '%s.%sk\n' "$((_t / 10))" "$((_t % 10))"
+	else
+		_t=$(((_n + 50000) / 100000))
+		printf '%s.%sM\n' "$((_t / 10))" "$((_t % 10))"
+	fi
+}
+
+# ==============================================================================
+# stop — the only writer
+# ==============================================================================
+cmd_stop() {
+	need_jq
+	_payload=$(mktemp 2>/dev/null) || _payload=${TMPDIR:-/tmp}/$ME-stop-$$
+	cat >"$_payload"
+	_sid=$(jq -r '.session_id // empty' "$_payload" 2>/dev/null)
+	_cwd=$(jq -r '.cwd // empty' "$_payload" 2>/dev/null)
+	_tp=$(jq -r '.transcript_path // empty' "$_payload" 2>/dev/null)
+	rm -f "$_payload"
+
+	[ -n "$_sid" ] || { say "the payload on stdin carried no session_id — nothing recorded"; exit 4; }
+	case "$_sid" in
+	*[!A-Za-z0-9._-]*) say "session_id is not a plain name ($_sid) — nothing recorded"; exit 4 ;;
+	esac
+
+	_dir=$(exposure_dir "${_cwd:-.}") ||
+		{ say "no Git repository at ${_cwd:-the current directory} — nothing recorded"; exit 4; }
+	mkdir -p "$_dir" || { say "cannot create $_dir — nothing recorded"; exit 4; }
+	_file=$_dir/claude-$_sid.tsv
+
+	_off=0
+	if [ -f "$_file" ]; then
+		_off=$(awk -F'\t' '{ last = ($4 ~ /^[0-9]+$/) ? $4 : 0 } END { print last + 0 }' "$_file")
+		[ -n "$_off" ] || _off=0
+	fi
+
+	_tpn=$(native_path "$_tp")
+
+	# A SESSION HE WAS NEVER IN records nothing at all. Claude Code stamps every
+	# transcript entry with `entrypoint`: `cli` for a session someone sat at,
+	# and something else — `sdk-cli` on this host — for one a program raised,
+	# which is what every context `bin/remit-invoke` raises is. `said` is
+	# already safe there, because such a session's prompt arrives as
+	# `promptSource: "sdk"` and is not `typed`; `told` is NOT, and without this
+	# a worker's whole output would be counted as words written AT HIM when it
+	# was written at remit. Found live, on this host, by running `stop` against
+	# a real worker transcript: `My words: 0 · Agents: 336`, and not one of
+	# those 336 words ever reached him.
+	# Absence is not evidence: a transcript whose first entry carries no
+	# `entrypoint` at all is recorded as before, rather than being refused on a
+	# field that may simply have gone.
+	if [ -n "$_tpn" ] && [ -f "$_tpn" ]; then
+		# The FIRST entry that carries the field, not the first entry: a
+		# transcript can open with `queue-operation` entries that have no
+		# `entrypoint` at all, and reading only line 1 would find nothing and
+		# record a worker session as his. A couple of hundred lines is far more
+		# than any observed preamble and costs one `head`.
+		_entry=$(head -n 200 "$_tpn" 2>/dev/null |
+			jq -R -r 'fromjson? // empty | select(type=="object") | .entrypoint // empty' 2>/dev/null |
+			sed '/^$/d' | sed -n 1p)
+		if [ -n "$_entry" ] && [ "$_entry" != cli ]; then
+			say "session $_sid was raised by a program (entrypoint: $_entry), not sat at — nothing recorded, because none of its words crossed the boundary to anybody"
+			exit 4
+		fi
+	fi
+
+	_said=0
+	_told=0
+	_branch=-
+	if [ -n "$_tpn" ] && [ -f "$_tpn" ]; then
+		_size=$(wc -c <"$_tpn" | tr -d ' ')
+		if [ "$_size" -lt "$_off" ]; then
+			# The transcript is shorter than what this session already read:
+			# it was replaced or truncated. Resynchronise to its end rather
+			# than count it a second time.
+			_off=$_size
+		fi
+		_work=$(mktemp -d 2>/dev/null) || _work=${TMPDIR:-/tmp}/$ME-$$
+		mkdir -p "$_work" || { say "cannot make a scratch directory — nothing recorded"; exit 4; }
+		_raw=$_work/raw
+		_delta=$_work/delta
+		tail -c "+$((_off + 1))" "$_tpn" >"$_raw" 2>/dev/null || : >"$_raw"
+		# COMPLETE LINES ONLY. `wc -l` counts newlines, so `head -n` that many
+		# lines is exactly the part of the delta that is whole; a partial last
+		# line is left for the next Stop, and the offset stops before it.
+		_lines=$(wc -l <"$_raw" | tr -d ' ')
+		if [ "${_lines:-0}" -gt 0 ]; then
+			head -n "$_lines" "$_raw" >"$_delta"
+		else
+			: >"$_delta"
+		fi
+		_consumed=$(wc -c <"$_delta" | tr -d ' ')
+		# THE COUNTS FIRST, THE OFFSET AFTER, and no line at all where a count
+		# could not be made. `count_said` and `count_told` refuse rather than
+		# return a zero they did not establish (the reason is at their own
+		# definition and is not restated here). A refusal here must not become
+		# a line: a 0 would be read as a quiet turn, and advancing the offset
+		# past bytes nobody counted would put those words beyond the reach of
+		# every later Stop. So the offset is left exactly where the last line
+		# put it, nothing is appended, and the next Stop reads these same bytes
+		# again — which is the catch-up this design already promises for a turn
+		# that fired early, applied to the one failure that could otherwise
+		# swallow words silently.
+		_countfail=''
+		_said=$(count_said "$_delta") || _countfail=said
+		if [ -z "$_countfail" ]; then
+			_told=$(count_told "$_delta") || _countfail=told
+		fi
+		if [ -n "$_countfail" ]; then
+			rm -rf "$_work"
+			say "the $_countfail count over $_consumed byte(s) of $_tpn could not be made — jq did not finish. Nothing was written, and the offset stands at $_off, so the next Stop reads those bytes again"
+			exit 3
+		fi
+		_off=$((_off + _consumed))
+		_b=$(jq -R -r 'fromjson? // empty | select(type=="object") | .gitBranch // empty' "$_delta" 2>/dev/null |
+			sed '/^$/d' | tail -n 1)
+		[ -n "$_b" ] && _branch=$_b
+		rm -rf "$_work"
+	else
+		say "no transcript at ${_tp:-<none>} — the line records the turn and counts nothing"
+	fi
+
+	printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+		"$(date +%Y-%m-%dT%H:%M:%S%z)" "${_said:-0}" "${_told:-0}" "$_off" \
+		"$(tsv_safe "$_cwd")" "$(tsv_safe "$_branch")" >>"$_file" ||
+		{ say "cannot append to $_file — nothing recorded"; exit 4; }
+
+	# THE DAY'S COUNT RIDES ON THE TURN THAT WAS ALREADY BEING RECORDED, and it
+	# is offered after the turn's own line, never before: the exposure line is
+	# what this hook exists for and nothing about a count of items may cost it.
+	# Whatever comes back, this exits 0 — the turn WAS recorded, and a hook that
+	# reported failure over a second thing it also does would say the first one
+	# had not happened.
+	inflight_record "$_dir" "${_cwd:-.}" || :
+	exit 0
+}
+
+# ==============================================================================
+# status — one segment, from ONE session's file
+# ==============================================================================
+#
+# TWO FORMS, one arithmetic. The default is remit's own wording, for a bar
+# remit owns outright. `--segment` is the practitioner's wording, for the bar
+# he already owns: it carries its own leading separator so it can be APPENDED
+# to a line another script built, and its labels are his — `My words` for what
+# he typed, `Agents` for what the assistant said back to him in the chat. Why
+# `Agents` and not something wider is stated once at the top of this file.
+#
+# The forms differ in ONE more way, deliberately. With no record at all for
+# this session — no hook wired, or no turn finished yet — the default prints
+# `said 0 · told 0` (a bar that is entirely remit's should still say something)
+# and `--segment` prints NOTHING (a bar that is his should not gain a segment
+# claiming he has said nothing, when the truth is that nothing is being
+# recorded). Both exit 0: a status line is not the place to fail.
+cmd_status() {
+	_seg=no
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--segment) _seg=yes; shift ;;
+		-*) die "unknown option: $1" ;;
+		*) die "status takes no positional argument: $1" ;;
+		esac
+	done
+	need_jq
+	_payload=$(mktemp 2>/dev/null) || _payload=${TMPDIR:-/tmp}/$ME-status-$$
+	cat >"$_payload"
+	_sid=$(jq -r '.session_id // empty' "$_payload" 2>/dev/null)
+	_cwd=$(jq -r '.cwd // empty' "$_payload" 2>/dev/null)
+	rm -f "$_payload"
+
+	_file=''
+	if [ -n "$_sid" ]; then
+		_dir=$(exposure_dir "${_cwd:-.}") || _dir=''
+		[ -n "$_dir" ] && _file=$_dir/claude-$_sid.tsv
+	fi
+
+	# This session's file and no other. `today` sums across files; a status line
+	# never does, because a number in the bar that silently included another
+	# session would be read as this one's.
+	if [ -z "$_file" ] || [ ! -f "$_file" ]; then
+		[ "$_seg" = yes ] || printf 'said 0 · told 0\n'
+		exit 0
+	fi
+	_sums=$(awk -F'\t' '
+		{ s += ($2 ~ /^[0-9]+$/) ? $2 : 0; t += ($3 ~ /^[0-9]+$/) ? $3 : 0
+		  ls = ($2 ~ /^[0-9]+$/) ? $2 : 0; lt = ($3 ~ /^[0-9]+$/) ? $3 : 0; n++ }
+		END { printf "%d %d %d %d %d\n", s + 0, t + 0, ls + 0, lt + 0, n + 0 }' "$_file")
+	_said=${_sums%% *}
+	_rest=${_sums#* }
+	_told=${_rest%% *}
+	_rest=${_rest#* }
+	_dsaid=${_rest%% *}
+	_rest=${_rest#* }
+	_dtold=${_rest%% *}
+	_n=${_rest#* }
+	if [ "${_n:-0}" -eq 0 ]; then
+		[ "$_seg" = yes ] || printf 'said 0 · told 0\n'
+		exit 0
+	fi
+	if [ "$_seg" = yes ]; then
+		# His format, verbatim: two spaces, a pipe, two spaces, then the pair.
+		printf '  |  My words: %s (+%s) · Agents: %s (+%s)\n' \
+			"$(abbrev "$_said")" "$_dsaid" "$(abbrev "$_told")" "$_dtold"
+	else
+		printf 'said %s (+%s) · told %s (+%s)\n' \
+			"$(abbrev "$_said")" "$_dsaid" "$(abbrev "$_told")" "$_dtold"
+	fi
+	exit 0
+}
+
+# ==============================================================================
+# scan — the other four harnesses
+# ==============================================================================
+# What each harness exposes, what it cannot, and why a scan rather than a hook
+# is stated at the top of this file and is not restated here.
+#
+# Unlike `stop`, `scan` TALKS: it was asked for, so it reports what it read,
+# what it skipped and why, and every limit that applies to the numbers it just
+# wrote. The one thing it will not do is print a number it could not establish.
+
+SCAN_TMP=''
+scan_cleanup() { [ -n "$SCAN_TMP" ] && rm -rf "$SCAN_TMP"; }
+
+# The directory the harnesses keep their state under. `--home` overrides it, and
+# that override is the seam every per-harness test uses, so that no test reads
+# the practitioner's own sessions and no test needs his machine to run.
+SCAN_HOME=''
+
+# The repository this record belongs to, as its git common dir. A session is
+# THIS repository's when its own cwd resolves to the same one — which is true
+# for a linked worktree and false for another repository, both of which are what
+# is wanted.
+REPO_COMMON=''
+resolve_common() { # $1 a directory -> its git common dir, absolute
+	_d=$(native_path "$1")
+	[ -d "$_d" ] || return 1
+	_c=$(CDPATH= cd -- "$_d" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null) || return 1
+	[ -n "$_c" ] || return 1
+	(CDPATH= cd -- "$_d" 2>/dev/null && CDPATH= cd -- "$_c" 2>/dev/null && pwd -P) || return 1
+}
+
+# --- the counters, one per harness, each named for what it reads --------------
+# A word is `wc -w`, everywhere, exactly as it is for `stop`.
+words() { wc -w | tr -d ' '; }
+
+# AND `jq | words` LOSES THE ONE THING THAT SAYS THE COUNT IS REAL: a pipeline
+# reports its LAST command's status, and `wc -w` is perfectly happy to count
+# nothing at all. So every counting read a scan makes goes through this instead
+# — it prints a count and returns 0 only where `jq` ITSELF exited 0, and
+# returns 1 having printed nothing where it did not. Why a zero must never
+# stand in for a count that was not made is at `count_words`, which is `stop`'s
+# side of the same fact, and is not restated here.
+#
+# WHAT A SCAN DOES WITH THE REFUSAL is not what `stop` does, and the difference
+# is the arithmetic. `stop` walks an offset forward, so an uncounted stretch
+# would be stepped over and lost; it therefore writes no line at all and leaves
+# the offset where it was. A scan RECOUNTS a whole record every time it runs,
+# so a session left out of this run is read again, in full, by the next one.
+# The safe answer here is therefore to skip that session — writing nothing,
+# moving no bookmark — and to say so on stderr with every other skip. Nothing
+# is lost by waiting; a zero would have been lost for good.
+jq_words() { # $@ -> jq's own arguments -> a word count, rc 1 if jq failed
+	_jw=$(jq "$@" 2>/dev/null) || return 1
+	printf '%s\n' "$_jw" | words
+}
+
+# --- enumeration --------------------------------------------------------------
+# Each `enum_<harness>` appends rows to $1, one per session it could read:
+#
+#   <sid>	<said-total>	<told-total>	<cursor>	<cwd>	<branch>
+#
+# TOTALS, not deltas — the whole of what the harness's record holds for that
+# session. Turning a total into a line of the record is `scan_apply`'s, so the
+# subtraction is written once and every harness gets the same one.
+
+enum_codex() { # $1 rows-file  $2 home
+	_rows=$1 _home=$2
+	_sd=$_home/.codex/sessions
+	_hist=$_home/.codex/history.jsonl
+	[ -d "$_sd" ] || { say "no codex sessions directory at $_sd — nothing to scan"; return 4; }
+	[ -f "$_hist" ] ||
+		say "no $_hist — codex's record of what was TYPED is not there, so every said below is 0, which is a missing file and not a quiet session"
+	find "$_sd" -type f -name 'rollout-*.jsonl' -print >"$SCAN_TMP/list" 2>/dev/null || : >"$SCAN_TMP/list"
+	while IFS= read -r _f; do
+		[ -f "$_f" ] || continue
+		# Three lines, not `@tsv`: jq's @tsv escapes a backslash, and a Windows
+		# cwd is full of them — `C:\path` would reach the record as `C:\\path`,
+		# which is not what the harness said. No field here can hold a newline.
+		jq -R -r 'fromjson? // empty | select(type=="object") | select(.type=="session_meta")
+			| (.payload.id // ""), (.payload.cwd // ""), (.payload.git.branch // "-")' \
+			"$_f" 2>/dev/null | sed -n 1,3p >"$SCAN_TMP/meta"
+		[ -s "$SCAN_TMP/meta" ] || continue
+		_sid=$(sed -n 1p "$SCAN_TMP/meta")
+		_cwd=$(sed -n 2p "$SCAN_TMP/meta")
+		_br=$(sed -n 3p "$SCAN_TMP/meta")
+		[ -n "$_sid" ] || continue
+		scan_wanted "$_sid" "$_cwd" || continue
+		_said=0
+		if [ -f "$_hist" ]; then
+			_said=$(jq_words -R -r --arg s "$_sid" \
+				'fromjson? // empty | select(type=="object") | select(.session_id == $s) | .text // empty' \
+				"$_hist") || { scan_uncounted "$_sid" said; continue; }
+		fi
+		_told=$(jq_words -R -r 'fromjson? // empty | select(type=="object")
+			| select(.type=="response_item")
+			| select(.payload.type=="message" and .payload.role=="assistant")
+			| .payload.content[]? | select(.type=="output_text") | .text // empty' \
+			"$_f") || { scan_uncounted "$_sid" told; continue; }
+		_cur=$(wc -c <"$_f" | tr -d ' ')
+		printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_sid" "$_said" "$_told" "$_cur" \
+			"$(tsv_safe "$_cwd")" "$(tsv_safe "${_br:--}")" >>"$_rows"
+	done <"$SCAN_TMP/list"
+	return 0
+}
+
+enum_copilot() { # $1 rows-file  $2 home
+	_rows=$1 _home=$2
+	_ss=$_home/.copilot/session-state
+	[ -d "$_ss" ] || { say "no copilot session-state directory at $_ss — nothing to scan"; return 4; }
+	for _d in "$_ss"/*/; do
+		[ -d "$_d" ] || continue
+		_sid=$(basename -- "${_d%/}")
+		_ev=${_d%/}/events.jsonl
+		[ -f "$_ev" ] || continue
+		# cwd is in workspace.yaml, beside the events file. `session.start`
+		# carries none — which is why this reads the yaml and not the events.
+		_cwd=$(sed -n 's/^cwd:[[:space:]]*//p' "${_d%/}/workspace.yaml" 2>/dev/null | sed -n 1p)
+		scan_wanted "$_sid" "$_cwd" || continue
+		# A `user.message` carrying `.data.source` was put there by something
+		# other than the person, so its absence is the discriminator. What was
+		# observed and why the key's presence is used as a whitelist rather
+		# than its value as a blacklist is at COPILOT CLI in this file's
+		# header, and is not restated here.
+		_said=$(jq_words -R -r 'fromjson? // empty | select(type=="object")
+			| select(.type=="user.message") | select(.data | has("source") | not)
+			| .data.content // empty' "$_ev") || { scan_uncounted "$_sid" said; continue; }
+		_told=$(jq_words -R -r 'fromjson? // empty | select(type=="object")
+			| select(.type=="assistant.message") | .data.content // empty' "$_ev") ||
+			{ scan_uncounted "$_sid" told; continue; }
+		_cur=$(wc -c <"$_ev" | tr -d ' ')
+		printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_sid" "$_said" "$_told" "$_cur" \
+			"$(tsv_safe "$_cwd")" '-' >>"$_rows"
+	done
+	return 0
+}
+
+enum_pi() { # $1 rows-file  $2 home
+	_rows=$1 _home=$2
+	_sd=$_home/.pi/agent/sessions
+	[ -d "$_sd" ] || { say "no pi sessions directory at $_sd — nothing to scan"; return 4; }
+	find "$_sd" -type f -name '*.jsonl' -print >"$SCAN_TMP/list" 2>/dev/null || : >"$SCAN_TMP/list"
+	while IFS= read -r _f; do
+		[ -f "$_f" ] || continue
+		# The `session` entry is looked for rather than assumed to be the first
+		# line: which line it sits on is not a promise pi has made.
+		# Two lines, not `@tsv` — see the note in enum_codex.
+		jq -R -r 'fromjson? // empty | select(type=="object") | select(.type=="session")
+			| (.id // ""), (.cwd // "")' "$_f" 2>/dev/null | sed -n 1,2p >"$SCAN_TMP/meta"
+		[ -s "$SCAN_TMP/meta" ] || continue
+		_sid=$(sed -n 1p "$SCAN_TMP/meta")
+		_cwd=$(sed -n 2p "$SCAN_TMP/meta")
+		[ -n "$_sid" ] || continue
+		scan_wanted "$_sid" "$_cwd" || continue
+		_said=$(jq_words -R -r 'fromjson? // empty | select(type=="object")
+			| select(.type=="message" and .message.role=="user")
+			| .message.content[]? | select(.type=="text") | .text // empty' "$_f") ||
+			{ scan_uncounted "$_sid" said; continue; }
+		_told=$(jq_words -R -r 'fromjson? // empty | select(type=="object")
+			| select(.type=="message" and .message.role=="assistant")
+			| .message.content[]? | select(.type=="text") | .text // empty' "$_f") ||
+			{ scan_uncounted "$_sid" told; continue; }
+		_cur=$(wc -c <"$_f" | tr -d ' ')
+		printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_sid" "$_said" "$_told" "$_cur" \
+			"$(tsv_safe "$_cwd")" '-' >>"$_rows"
+	done <"$SCAN_TMP/list"
+	return 0
+}
+
+# Devin's record is a SQLite database, so this is the one harness POSIX sh
+# cannot read on its own. The database is copied to scratch first — with its
+# -wal and -shm, or the most recent writes would be invisible — and read there,
+# so a scan never locks or disturbs the store the CLI is using.
+DEVIN_DB=''
+find_devin_db() { # $1 home -> sets DEVIN_DB, rc 1 if none
+	for _c in \
+		"$1/AppData/Roaming/devin/cli/sessions.db" \
+		"$1/.local/share/devin/cli/sessions.db" \
+		"$1/Library/Application Support/devin/cli/sessions.db" \
+		"$1/.config/devin/cli/sessions.db"; do
+		[ -f "$_c" ] && { DEVIN_DB=$_c; return 0; }
+	done
+	return 1
+}
+
+enum_devin() { # $1 rows-file  $2 home
+	_rows=$1 _home=$2
+	find_devin_db "$_home" ||
+		{ say "no devin sessions.db under $_home — nothing to scan"; return 4; }
+	command -v node >/dev/null 2>&1 ||
+		die "devin's record is a SQLite database at $DEVIN_DB and no 'node' is on PATH to read it; POSIX sh cannot open one, nothing was read and nothing was written" 3
+	mkdir -p "$SCAN_TMP/devin" || return 4
+	cp "$DEVIN_DB" "$SCAN_TMP/devin/sessions.db" || { say "cannot copy $DEVIN_DB"; return 4; }
+	for _x in -wal -shm; do
+		[ -f "$DEVIN_DB$_x" ] && cp "$DEVIN_DB$_x" "$SCAN_TMP/devin/sessions.db$_x"
+	done
+	cat >"$SCAN_TMP/devin/read.js" <<'DEVINJS'
+// Emits one TSV row per session: sid, said, told, cursor, cwd, branch.
+// `said` is prompt_history with is_shell = 0 — devin's own record of what was
+// entered. `told` is message_nodes whose chat_message.role is "assistant".
+// The cursor is the highest row_id seen for the session: a database has no
+// bytes to point at, and row_id is the only monotonic thing on the table.
+let sqlite;
+try { sqlite = require('node:sqlite'); } catch (e) {
+  process.stderr.write('no node:sqlite in this node (' + process.version + '); node 22.5 or newer is needed\n');
+  process.exit(3);
+}
+const words = (t) => (typeof t === 'string' ? t.trim().split(/\s+/).filter(Boolean).length : 0);
+let db;
+try { db = new sqlite.DatabaseSync(process.argv[2], { readOnly: true }); } catch (e) {
+  process.stderr.write('cannot open the copied database: ' + e.message + '\n');
+  process.exit(4);
+}
+const rows = db.prepare('select id, working_directory from sessions').all();
+for (const s of rows) {
+  const sid = String(s.id || '');
+  if (!sid) continue;
+  let said = 0;
+  for (const r of db.prepare('select content from prompt_history where session_id = ? and is_shell = 0').all(sid)) {
+    said += words(r.content);
+  }
+  let told = 0, cursor = 0;
+  for (const r of db.prepare('select row_id, chat_message from message_nodes where session_id = ?').all(sid)) {
+    if (r.row_id > cursor) cursor = r.row_id;
+    let m;
+    try { m = JSON.parse(r.chat_message); } catch (e) { continue; }
+    if (m && m.role === 'assistant') told += words(m.content);
+  }
+  const cwd = String(s.working_directory || '').replace(/[\t\r\n]/g, ' ');
+  process.stdout.write([sid, said, told, cursor, cwd, '-'].join('\t') + '\n');
+}
+DEVINJS
+	node --no-warnings "$SCAN_TMP/devin/read.js" "$SCAN_TMP/devin/sessions.db" \
+		>"$SCAN_TMP/devin-rows" 2>"$SCAN_TMP/devin-err"
+	_rc=$?
+	if [ "$_rc" = 3 ]; then
+		die "devin's record is a SQLite database and this node cannot read it: $(sed -n 1p "$SCAN_TMP/devin-err"); nothing was read and nothing was written" 3
+	elif [ "$_rc" != 0 ]; then
+		say "could not read $DEVIN_DB: $(sed -n 1p "$SCAN_TMP/devin-err")"
+		return 4
+	fi
+	while IFS= read -r _row; do
+		[ -n "$_row" ] || continue
+		_sid=$(printf '%s\n' "$_row" | cut -f1)
+		_cwd=$(printf '%s\n' "$_row" | cut -f5)
+		scan_wanted "$_sid" "$_cwd" || continue
+		printf '%s\n' "$_row" >>"$_rows"
+	done <"$SCAN_TMP/devin-rows"
+	return 0
+}
+
+# --- which sessions a scan reads ---------------------------------------------
+# Counters, so a scan can say what it left out rather than presenting what it
+# found as everything there was.
+SKIP_OTHER=0
+SKIP_GONE=0
+SKIP_UNCOUNTED=0
+SCAN_WANT=''
+
+# A session whose count could not be made. It is left out of this scan whole —
+# no row, so no line and no bookmark — and said out loud, because a session
+# that quietly stopped appearing would look exactly like one that went quiet.
+# Why leaving it out loses nothing is at `jq_words`.
+scan_uncounted() { # $1 sid  $2 the channel that could not be counted
+	SKIP_UNCOUNTED=$((SKIP_UNCOUNTED + 1))
+	say "session $1 skipped: the $2 count could not be made — jq did not finish. Nothing was written for it and no bookmark moved, so the next scan reads it whole"
+}
+
+scan_wanted() { # $1 sid  $2 cwd -> 0 to read it
+	if [ -n "$SCAN_WANT" ]; then
+		[ "$1" = "$SCAN_WANT" ]
+		return $?
+	fi
+	if [ -z "$2" ]; then
+		SKIP_GONE=$((SKIP_GONE + 1))
+		return 1
+	fi
+	_c=$(resolve_common "$2") || { SKIP_GONE=$((SKIP_GONE + 1)); return 1; }
+	if [ "$_c" = "$REPO_COMMON" ]; then
+		return 0
+	fi
+	SKIP_OTHER=$((SKIP_OTHER + 1))
+	return 1
+}
+
+# --- the bookmark -------------------------------------------------------------
+# The totals the harness's record held for a session when this repository last
+# read it. `scan` recounts a whole record and appends the difference, so it has
+# to have that pair; the record's six fields are a delta and a cursor and no
+# total, and a seventh field is not this phase's to add. So the pair is `scan`'s
+# own bookmark, kept beside the record in a dot-directory — which is exactly
+# what the cursor field already is for `stop`, put in the one place two numbers
+# will fit. `<harness>-<session>.tsv` stays the only thing `today` and `session`
+# can see.
+#
+# It is NOT a second record and nothing reports from it. Lose one and the next
+# scan falls back to the record, which gives the right base in every case but
+# one — a session whose record the harness rotated — and that case over-counts
+# by what survived the rotation rather than losing anything.
+bookmark_dir() { printf '%s/.bookmarks\n' "$1"; }
+
+scan_base() { # $1 exposure-dir  $2 harness  $3 sid  $4 record-file -> "said told"
+	# NO RECORD, NO BASE. A record deleted by hand is a deliberate act and the
+	# session starts again from zero; a bookmark left behind must not silently
+	# swallow the recount that follows.
+	if [ ! -f "$4" ]; then
+		printf '0 0\n'
+		return 0
+	fi
+	_bm=$(bookmark_dir "$1")/$2-$3
+	if [ -f "$_bm" ]; then
+		_bs=$(cut -s -f1 "$_bm" 2>/dev/null | sed -n 1p)
+		_bt=$(cut -s -f2 "$_bm" 2>/dev/null | sed -n 1p)
+		case "${_bs:-x}${_bt:-x}" in
+		*[!0-9]* | '') ;;                       # not two plain numbers: fall through
+		*) printf '%s %s\n' "$_bs" "$_bt"; return 0 ;;
+		esac
+	fi
+	# NO BOOKMARK — a record written before there were any, or one whose
+	# bookmark was lost. The sum of the deltas since the last resynchronisation
+	# line, which is what this did before bookmarks and is exactly right up to
+	# the first rotation. A line counts as a resynchronisation only if BOTH
+	# channels are a written zero: a half-written line left by a crash
+	# mid-append has fields that are not numbers at all, and it contributes
+	# nothing rather than throwing the base away.
+	awk -F'\t' '
+		$2 ~ /^0+$/ && $3 ~ /^0+$/ { s = 0; t = 0; next }
+		{ s += ($2 ~ /^[0-9]+$/) ? $2 : 0
+		  t += ($3 ~ /^[0-9]+$/) ? $3 : 0 }
+		END { printf "%d %d\n", s + 0, t + 0 }' "$4"
+}
+
+scan_mark() { # $1 exposure-dir  $2 harness  $3 sid  $4 said-total  $5 told-total
+	_bd=$(bookmark_dir "$1")
+	mkdir -p "$_bd" 2>/dev/null || return 1
+	# Written whole and moved into place, so a scan interrupted mid-write
+	# leaves the previous bookmark rather than half of a new one.
+	_tmp=$_bd/.$2-$3.new
+	printf '%s\t%s\n' "$4" "$5" >"$_tmp" 2>/dev/null || { rm -f "$_tmp"; return 1; }
+	mv -f "$_tmp" "$_bd/$2-$3" 2>/dev/null || { rm -f "$_tmp"; return 1; }
+	return 0
+}
+
+# --- turning a total into a line ----------------------------------------------
+cmd_scan() {
+	[ $# -ge 1 ] || die "scan needs a harness: $HARNESSES"
+	_harness=$1
+	shift
+	_known=no
+	for _h in $HARNESSES; do [ "$_harness" = "$_h" ] && _known=yes; done
+	case "$_harness" in
+	claude | claude-code)
+		die "claude code is not scanned: it has a Stop hook, and its record is written by \`$ME stop\`. \`install.sh\` prints the hook line" ;;
+	esac
+	[ "$_known" = yes ] || die "no such harness: $_harness (scan reads: $HARNESSES)"
+
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--session) [ $# -ge 2 ] || die "--session needs an id"; SCAN_WANT=$2; shift 2 ;;
+		--home) [ $# -ge 2 ] || die "--home needs a directory"; SCAN_HOME=$2; shift 2 ;;
+		-*) die "unknown option: $1" ;;
+		*) die "scan takes no second positional argument: $1" ;;
+		esac
+	done
+	need_jq
+
+	_home=${SCAN_HOME:-$HOME}
+	[ -n "$_home" ] || die "no home directory to look under — pass --home" 4
+	[ -d "$_home" ] || die "no such directory: $_home" 4
+
+	_dir=$(exposure_dir .) || die "not inside a Git repository — there is nowhere to write the record" 4
+	REPO_COMMON=$(resolve_common .) ||
+		die "not inside a Git repository — a scan matches a session's own cwd against this repository, and there is none" 4
+	mkdir -p "$_dir" || die "cannot create $_dir" 4
+
+	SCAN_TMP=$(mktemp -d 2>/dev/null) || SCAN_TMP=${TMPDIR:-/tmp}/$ME-scan-$$
+	mkdir -p "$SCAN_TMP" || die "cannot make a scratch directory" 4
+	trap scan_cleanup EXIT INT TERM
+
+	_rows=$SCAN_TMP/rows
+	: >"$_rows"
+	"enum_$_harness" "$_rows" "$_home"
+	_erc=$?
+	if [ "$_erc" = 4 ]; then
+		scan_cleanup
+		exit 4
+	fi
+
+	_when=$(date +%Y-%m-%dT%H:%M:%S%z)
+	_wrote=0
+	_same=0
+	_read=0
+	_resync=0
+	printf 'scan — %s, under %s\n' "$_harness" "$_home"
+	while IFS= read -r _row; do
+		[ -n "$_row" ] || continue
+		_read=$((_read + 1))
+		_sid=$(printf '%s\n' "$_row" | cut -f1)
+		_ts=$(printf '%s\n' "$_row" | cut -f2)
+		_tt=$(printf '%s\n' "$_row" | cut -f3)
+		_cur=$(printf '%s\n' "$_row" | cut -f4)
+		_cwd=$(printf '%s\n' "$_row" | cut -f5)
+		_br=$(printf '%s\n' "$_row" | cut -f6)
+		case "$_sid" in
+		*[!A-Za-z0-9._-]*)
+			say "session id is not a plain name ($_sid) — skipped, nothing recorded for it"
+			continue ;;
+		esac
+		_file=$_dir/$_harness-$_sid.tsv
+		# THE BASE — the totals the harness's record held when this repository last
+		# read it, which is what a recount has to subtract. It comes from this
+		# session's BOOKMARK where there is one and from the record itself where
+		# there is not; both are `scan_base`'s, and why there is a bookmark at all
+		# is at the top of this file and is not restated here.
+		_base=$(scan_base "$_dir" "$_harness" "$_sid" "$_file")
+		_had_s=${_base%% *}
+		_had_t=${_base##* }
+		# EITHER CHANNEL BELOW ITS BASE — the record was rotated, truncated or
+		# replaced. The channels are judged SEPARATELY, because they do not always
+		# come from the same file: codex reads `said` from one `history.jsonl` shared
+		# by every session and `told` from the session's own rollout, so the shape a
+		# rotation actually arrives in is `said` down and `told` up in the SAME scan.
+		# A channel that went down carries zero, never a negative; a channel that
+		# grew carries its growth, whatever became of the other one.
+		_ds=0
+		_dt=0
+		_back=no
+		if [ "$_ts" -lt "$_had_s" ]; then _back=yes; else _ds=$((_ts - _had_s)); fi
+		if [ "$_tt" -lt "$_had_t" ]; then _back=yes; else _dt=$((_tt - _had_t)); fi
+		# THE RESYNCHRONISATION LINE, stated at the top of this file.
+		if [ "$_back" = yes ]; then
+			printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_when" "$_ds" "$_dt" "$_cur" \
+				"$(tsv_safe "$_cwd")" "$(tsv_safe "${_br:--}")" >>"$_file" ||
+				{ say "cannot append to $_file"; continue; }
+			# The bookmark moves to what the rotated record STILL HOLDS, so the next
+			# scan counts what the session goes on to add and re-counts none of the
+			# words that survived the rotation.
+			scan_mark "$_dir" "$_harness" "$_sid" "$_ts" "$_tt" ||
+				say "cannot write the bookmark for $_sid — the next scan will count what its record still holds a second time"
+			_wrote=$((_wrote + 1))
+			_resync=$((_resync + 1))
+			printf '  resynced   %s  (its record holds said %s, told %s — below the said %s, told %s recorded here; said +%s, told +%s counted, and the next scan counts only what it grows past said %s, told %s)\n' \
+				"$_sid" "$_ts" "$_tt" "$_had_s" "$_had_t" "$_ds" "$_dt" "$_ts" "$_tt"
+			continue
+		fi
+		if [ "$_ds" -eq 0 ] && [ "$_dt" -eq 0 ]; then
+			_same=$((_same + 1))
+			# The bookmark is written even here: a record whose lines were all
+			# written before bookmarks existed gets one at the first scan that
+			# reads it, rather than waiting for its session to say something more.
+			scan_mark "$_dir" "$_harness" "$_sid" "$_ts" "$_tt" || :
+			printf '  unchanged  %s  (said %s, told %s already recorded)\n' "$_sid" "$_had_s" "$_had_t"
+			continue
+		fi
+		printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_when" "$_ds" "$_dt" "$_cur" \
+			"$(tsv_safe "$_cwd")" "$(tsv_safe "${_br:--}")" >>"$_file" ||
+			{ say "cannot append to $_file"; continue; }
+		scan_mark "$_dir" "$_harness" "$_sid" "$_ts" "$_tt" ||
+			say "cannot write the bookmark for $_sid — if its record is ever rotated, what survived will be counted twice"
+		_wrote=$((_wrote + 1))
+		printf '  recorded   %s  said +%s  told +%s  -> %s\n' \
+			"$_sid" "$_ds" "$_dt" "$(basename -- "$_file")"
+	done <"$_rows"
+
+	printf '  %s session(s) of this repository read; %s line(s) appended, %s already up to date.\n' \
+		"$_read" "$_wrote" "$_same"
+
+	# THE DAY'S COUNT, on the four harnesses that have no hook. It rides here
+	# for exactly the reason it rides on `stop` there: this is a path that was
+	# already writing to the record, so no harness needs one of its own. A scan
+	# talks, so it says which of the four things happened; `stop` is silent and
+	# says only the one thing that went wrong.
+	inflight_record "$_dir" .
+	case $? in
+	0) printf '  and today'\''s count of items in flight was taken and recorded.\n' ;;
+	1) printf '  today'\''s count of items in flight was already recorded; one line a day.\n' ;;
+	*) printf '  today'\''s count of items in flight is not a number this run could take — see above.\n' ;;
+	esac
+	if [ "$_resync" -gt 0 ]; then
+		printf '  %s of those line(s) resynchronised a record the harness had rotated,\n' "$_resync"
+		printf '  truncated or replaced since the last scan. Each counted nothing on\n'
+		printf '  the channel that went backwards, and what that record still holds is\n'
+		printf '  not counted a second time.\n'
+	fi
+	if [ -n "$SCAN_WANT" ]; then
+		printf '  --session %s was named, so no cwd filter applied.\n' "$SCAN_WANT"
+		[ "$_read" -eq 0 ] &&
+			printf '  Nothing under %s carries that session id.\n' "$_home"
+	else
+		printf '  %s session(s) skipped: another repository. %s skipped: no cwd recorded, or\n' \
+			"$SKIP_OTHER" "$SKIP_GONE"
+		printf '  the directory it ran in is gone, so it could not be matched to a repository.\n'
+	fi
+	# A count that could not be made is reported wherever it happened, named or
+	# filtered — `--session` narrows which sessions are read, never whether a
+	# failure to read one is mentioned.
+	[ "$SKIP_UNCOUNTED" -gt 0 ] &&
+		printf '  %s session(s) skipped because a count could not be made. Nothing was\n  written for them; the next scan reads them whole.\n' \
+			"$SKIP_UNCOUNTED"
+	# The limit that applies to the numbers just written, said every time they
+	# are written. Which harnesses it applies to, and why, is at the top of this
+	# file; this is the reminder, not the second home.
+	case "$_harness" in
+	copilot | devin)
+		printf '  NOTE: %s records a prompt delivered by -p exactly as it records one typed at\n' "$_harness"
+		printf '  a prompt, and carries no field that tells them apart. Any said above that came\n'
+		printf '  from a context remit raised is a BRIEF, not his words. Read it that way.\n'
+		;;
+	esac
+	scan_cleanup
+	SCAN_TMP=''
+	exit 0
+}
+
+# ==============================================================================
+# today — per channel, across every session, only today's lines
+# ==============================================================================
+cmd_today() {
+	_item=''
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--item) [ $# -ge 2 ] || die "--item needs a slug"; _item=$2; shift 2 ;;
+		-*) die "unknown option: $1" ;;
+		*) die "today takes no positional argument: $1" ;;
+		esac
+	done
+	_dir=$(exposure_dir .) || die "not inside a Git repository — there is no exposure record to read" 4
+	_day=$(date +%Y-%m-%d)
+	_want=''
+	[ -n "$_item" ] && _want=work/$_item
+
+	# A FILE WHOSE NAME NAMES NO HARNESS is not read at all, and is named to the
+	# reader below instead. The rule and the reason are at the top of this file.
+	set --
+	_unnamed=''
+	_unnamed_n=0
+	for _f in "$_dir"/*.tsv; do
+		[ -f "$_f" ] || continue
+		if harness_of "$(basename -- "$_f" .tsv)" >/dev/null; then
+			set -- "$@" "$_f"
+		else
+			_unnamed_n=$((_unnamed_n + 1))
+			_unnamed="$_unnamed $(basename -- "$_f")"
+		fi
+	done
+	if [ $# -eq 0 ]; then
+		printf 'exposure — today %s (local time)\n' "$_day"
+		printf '  said  0\n  told  0\n'
+		printf '  from  nothing recorded: no recognised session file in %s\n' "$_dir"
+		unnamed_note "$_unnamed_n" "$_unnamed" "$_dir"
+		exit 0
+	fi
+
+	# Per channel. The two are printed on their own lines and are never added:
+	# there is no total here and there is not meant to be one.
+	_out=$(awk -F'\t' -v day="$_day" -v want="$_want" '
+		index($1, day) != 1 { next }
+		want != "" && $6 != want { next }
+		{ s += $2; t += $3; n++; if (!(FILENAME in seen)) { seen[FILENAME] = 1; f++ } }
+		END { printf "%d %d %d %d\n", s + 0, t + 0, n + 0, f + 0 }' "$@")
+	_said=${_out%% *}
+	_rest=${_out#* }
+	_told=${_rest%% *}
+	_rest=${_rest#* }
+	_turns=${_rest%% *}
+	_files=${_rest#* }
+
+	if [ -n "$_item" ]; then
+		printf 'exposure — today %s (local time), item %s\n' "$_day" "$_item"
+	else
+		printf 'exposure — today %s (local time)\n' "$_day"
+	fi
+	printf '  said  %s\n' "$_said"
+	printf '  told  %s\n' "$_told"
+	printf '  from  %s line(s) in %s session(s)\n' "$_turns" "$_files"
+
+	# Which harnesses those lines came from, taken from the filenames and not
+	# from a seventh field the record does not have. It is printed because the
+	# two kinds of line do not mean the same thing: a Claude Code line is one
+	# TURN, written by a hook as it happened; a line from any of the other four
+	# is a STRETCH since that harness was last scanned. Summing them per channel
+	# is right — they are all words that crossed the boundary today — but
+	# counting the LINES as if they were all turns would not be.
+	_by=''
+	for _f in "$@"; do
+		_b=$(basename -- "$_f" .tsv)
+		_n=$(awk -F'\t' -v day="$_day" -v want="$_want" '
+			index($1, day) != 1 { next }
+			want != "" && $6 != want { next }
+			{ n++ } END { print n + 0 }' "$_f")
+		[ "${_n:-0}" -gt 0 ] || continue
+		_h=$(harness_of "$_b") || continue
+		_by="$_by$_h $_n
+"
+	done
+	if [ -n "$_by" ]; then
+		printf '  by    %s\n' "$(printf '%s' "$_by" |
+			awk '{ c[$1] += $2 } END { s = ""
+				for (h in c) s = s (s == "" ? "" : "; ") h " " c[h]
+				print s }')"
+		printf '        a claude line is one TURN, written by its Stop hook as it happened; a\n'
+		printf '        line from any other harness is a STRETCH since that harness was last\n'
+		printf '        scanned. The word counts add; the lines do not mean the same thing.\n'
+	fi
+	if [ -n "$_item" ]; then
+		printf '  only lines whose branch is %s. A line from the primary tree, or from any\n' "$_want"
+		printf '  other branch, is UNATTRIBUTED and is not counted here.\n'
+		# AND THE ZERO THAT IS NOT A QUIET DAY. Attribution to an item is done
+		# on the branch field, and only claude and codex record a branch at all
+		# — pi, copilot and devin carry none and this script writes `-` for
+		# them (stated once against each harness in this file's header). A `-`
+		# can never equal `work/<slug>`, so those three are not merely absent
+		# from an item's numbers today: they cannot appear in an item's numbers
+		# EVER. The sentence above tells a reader that some lines went
+		# elsewhere; it does not tell them that three of the five harnesses are
+		# structurally invisible here, and a reader not told that reads their
+		# zero as silence. Everywhere else this script refuses to let a number
+		# be read as clean, so it refuses here too, and counts what it dropped.
+		printf '  AND pi, copilot and devin can never be attributed at all: those three record\n'
+		printf '  no branch, so every line of theirs carries `-` in that field and matches no\n'
+		printf '  item. Their absence here is not evidence that they were quiet.\n'
+		_blind=''
+		_bn=0
+		for _f in "$@"; do
+			_b=$(basename -- "$_f" .tsv)
+			_n=$(awk -F'\t' -v day="$_day" '
+				index($1, day) != 1 { next }
+				$6 == "-" { n++ } END { print n + 0 }' "$_f")
+			[ "${_n:-0}" -gt 0 ] || continue
+			_h=$(harness_of "$_b") || continue
+			_bn=$((_bn + _n))
+			_blind="$_blind$_h $_n
+"
+		done
+		if [ "$_bn" -gt 0 ]; then
+			printf '  today %s such line(s) were dropped by this filter: %s\n' "$_bn" \
+				"$(printf '%s' "$_blind" |
+					awk '{ c[$1] += $2 } END { s = ""
+						for (h in c) s = s (s == "" ? "" : "; ") h " " c[h]
+						print s }')"
+		fi
+	fi
+	unnamed_note "$_unnamed_n" "$_unnamed" "$_dir"
+	exit 0
+}
+
+# ==============================================================================
+# session — the table
+# ==============================================================================
+cmd_session() {
+	[ $# -ge 1 ] || die "session needs a session id"
+	_sid=$1
+	_dir=$(exposure_dir .) || die "not inside a Git repository — there is no exposure record to read" 4
+	# EVERY record carries its harness in front, claude's included. He names a
+	# session, not a filename, so each recognised prefix is tried and the
+	# harness is reported back rather than demanded of him.
+	_file=''
+	_from=''
+	for _h in $HARNESS_NAMES; do
+		if [ -f "$_dir/$_h-$_sid.tsv" ]; then
+			_file=$_dir/$_h-$_sid.tsv
+			_from=$_h
+		fi
+	done
+	if [ -z "$_file" ] || [ ! -f "$_file" ]; then
+		_tried=''
+		for _h in $HARNESS_NAMES; do _tried="$_tried $_h-$_sid.tsv"; done
+		die "no exposure recorded for session $_sid (looked in $_dir, for:$_tried)" 4
+	fi
+	if [ "$_from" = claude ]; then _from='Claude Code'; fi
+
+	printf 'exposure — session %s (%s)\n' "$_sid" "$_from"
+	printf '  %-26s %8s %8s  %s\n' 'when' 'said' 'told' 'branch'
+	# A line means a turn on Claude Code, where a hook made it; on the other four
+	# it means a stretch of session between two scans. The word for a row is
+	# therefore the harness's, and it is not called a turn where it is not one.
+	if [ "$_from" = 'Claude Code' ]; then _row='turn'; else _row='scan'; fi
+	awk -F'\t' -v row="$_row" '
+		{ printf "  %-26s %8s %8s  %s\n", $1, $2, $3, ($6 == "" ? "-" : $6); s += $2; t += $3; n++ }
+		END {
+			printf "  %-26s %8d %8d\n", "total", s + 0, t + 0
+			printf "  %d %s(s). The two channels are separate and are not added.\n", n + 0, row
+		}' "$_file"
+	exit 0
+}
+
+# ==============================================================================
+# trend — exposure per item, and items in flight, side by side, by week
+# ==============================================================================
+#
+# The question this exists to let one person ask of their own work: is the
+# exposure an item costs going down while the number of items being carried
+# goes up? Both halves are printed and neither is folded into the other. What
+# the answer means, and whether it is a good thing, is not this script's to say
+# and is not said anywhere in the output.
+#
+# A WEEK RUNS MONDAY TO SUNDAY, in local time, and the row is labelled with the
+# Monday. The arithmetic below is calendar arithmetic done in awk rather than
+# by shelling out to `date`, because the only `date` that could do it takes a
+# GNU extension that dash on a stock Linux box does not have — and a report
+# that silently buckets a fortnight into one row on one of the two shells this
+# is required to pass on would be worse than none.
+TREND_CAL='
+	# Days since 1970-01-01, and back again — the civil-calendar pair, exact
+	# for every date this record can hold. Every division is truncated with
+	# int(), which is floor for the years a record of this can carry.
+	function dfc(y, m, d,   yy, era, yoe, doy, doe) {
+		yy = y - (m <= 2 ? 1 : 0)
+		era = int(yy / 400)
+		yoe = yy - era * 400
+		doy = int((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + d - 1
+		doe = yoe * 365 + int(yoe / 4) - int(yoe / 100) + doy
+		return era * 146097 + doe - 719468
+	}
+	function cfd(z,   era, doe, yoe, y, doy, mp, d, m) {
+		z += 719468
+		era = int(z / 146097)
+		doe = z - era * 146097
+		yoe = int((doe - int(doe / 1460) + int(doe / 36524) - int(doe / 146096)) / 365)
+		y = yoe + era * 400
+		doy = doe - (365 * yoe + int(yoe / 4) - int(yoe / 100))
+		mp = int((5 * doy + 2) / 153)
+		d = doy - int((153 * mp + 2) / 5) + 1
+		m = mp + (mp < 10 ? 3 : -9)
+		if (m <= 2) y += 1
+		return sprintf("%04d-%02d-%02d", y, m, d)
+	}
+	# The Monday on or before a YYYY-MM-DD. 1970-01-01 was a Thursday, which is
+	# where the 4 comes from; an unparseable date returns "" and is dropped
+	# rather than bucketed somewhere it does not belong.
+	function weekstart(s,   y, m, d, z, w) {
+		if (s !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) return ""
+		y = substr(s, 1, 4) + 0; m = substr(s, 6, 2) + 0; d = substr(s, 9, 2) + 0
+		if (y < 1970 || m < 1 || m > 12 || d < 1 || d > 31) return ""
+		z = dfc(y, m, d)
+		w = (z + 4) % 7
+		if (w < 0) w += 7
+		return cfd(z - ((w + 6) % 7))
+	}
+'
+cmd_trend() {
+	_weeks=0
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--weeks)
+			[ $# -ge 2 ] || die "--weeks needs a number"
+			case "$2" in *[!0-9]* | '') die "--weeks takes a whole number of weeks, not '$2'" ;; esac
+			[ "$2" -ge 1 ] || die "--weeks takes at least 1 week, not $2"
+			_weeks=$2
+			shift 2
+			;;
+		-*) die "unknown option: $1" ;;
+		*) die "trend takes no positional argument: $1" ;;
+		esac
+	done
+	_dir=$(exposure_dir .) || die "not inside a Git repository — there is no exposure record to read" 4
+	_inf=$_dir/$INFLIGHT
+
+	# ONE STREAM, TWO SOURCES, tagged so one pass over it can keep them apart:
+	# `E` is an exposure line from a session file — any harness's, because words
+	# that crossed the boundary are words either way — and `F` is a day's count
+	# of items in flight. Only the first ten characters of the time field are
+	# taken, which is the local date the line was written on.
+	#
+	# A FILE WHOSE NAME NAMES NO HARNESS goes into neither source. `trend` has
+	# no harness column, so there is nowhere here to show one as itself; it is
+	# left out of every number and named below, which is the same rule `today`
+	# applies and is stated once at the top of this file.
+	_unnamed=''
+	_unnamed_n=0
+	set --
+	for _f in "$_dir"/*.tsv; do
+		[ -f "$_f" ] || continue
+		if harness_of "$(basename -- "$_f" .tsv)" >/dev/null; then
+			set -- "$@" "$_f"
+		else
+			_unnamed_n=$((_unnamed_n + 1))
+			_unnamed="$_unnamed $(basename -- "$_f")"
+		fi
+	done
+	_feed=$(
+		for _f in "$@"; do
+			awk -F'\t' '{ printf "E\t%s\t%s\t%s\n", substr($1, 1, 10), $2, $3 }' "$_f"
+		done
+		[ -f "$_inf" ] &&
+			awk -F'\t' '{ printf "F\t%s\t%s\t%s\n", substr($1, 1, 10), $2, $3 }' "$_inf"
+	)
+	printf 'exposure — trend by week, Monday to Sunday, local time\n'
+	if [ -z "$_feed" ]; then
+		printf '  nothing recorded: no recognised session file and no count of items in flight in %s\n' "$_dir"
+		unnamed_note "$_unnamed_n" "$_unnamed" "$_dir"
+		exit 0
+	fi
+
+	printf '%s\n' "$_feed" | awk -F'\t' -v limit="$_weeks" "$TREND_CAL"'
+	$1 == "E" {
+		w = weekstart($2)
+		if (w == "") next
+		wk[w] = 1
+		said[w] += ($3 ~ /^[0-9]+$/) ? $3 : 0
+		told[w] += ($4 ~ /^[0-9]+$/) ? $4 : 0
+	}
+	# ONE DAY, ONE COUNT. Two sessions can race for the first write of a day and
+	# both append; the first line a date has is the one that stands, so a
+	# duplicate moves no number here.
+	$1 == "F" {
+		w = weekstart($2)
+		if (w == "") next
+		wk[w] = 1
+		if ($2 in seenday) next
+		seenday[$2] = 1
+		if ($3 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/) {
+			act[w] += $3; esc[w] += $4; days[w]++
+		} else {
+			blind[w]++
+		}
+	}
+	END {
+		n = 0
+		for (w in wk) keys[++n] = w
+		for (i = 2; i <= n; i++) {
+			k = keys[i]; j = i - 1
+			while (j >= 1 && keys[j] > k) { keys[j + 1] = keys[j]; j-- }
+			keys[j + 1] = k
+		}
+		start = 1
+		if (limit > 0 && n > limit) start = n - limit + 1
+		fmt = "  %-12s %8s %10s %8s %10s %8s %7s %10s %5s\n"
+		printf fmt, "week", "said", "said/item", "told", "told/item", "watched", "active", "escalated", "days"
+		blindtotal = 0
+		for (i = start; i <= n; i++) {
+			w = keys[i]
+			d = days[w] + 0
+			blindtotal += blind[w] + 0
+			s = said[w] + 0
+			t = told[w] + 0
+			if (d > 0) {
+				a = act[w] / d
+				e = esc[w] / d
+				af = sprintf("%.1f", a)
+				ef = sprintf("%.1f", e)
+				df = d
+			} else {
+				a = 0
+				af = "-"; ef = "-"; df = "-"
+			}
+			# NO DIVISION BY A NUMBER THAT WAS NOT ESTABLISHED. A week with no
+			# day counted, or a week the list said carried nothing at all, has
+			# no per-item figure and says so rather than printing a number.
+			if (d > 0 && a > 0) {
+				sf = sprintf("%.1f", s / a)
+				tf = sprintf("%.1f", t / a)
+			} else {
+				sf = "-"; tf = "-"
+			}
+			printf fmt, w, s, sf, t, tf, "-", af, ef, df
+		}
+		if (start > 1)
+			printf "  %d earlier week(s) are on record and are not shown here: --weeks %d was asked for.\n", start - 1, limit
+		if (blindtotal > 0)
+			printf "  %d day(s) in these weeks carry no count: the list could not be read that day, and\n  a `-` was recorded rather than a zero. They are left out of `active` and `days`.\n", blindtotal
+	}'
+
+	printf '\n'
+	printf '  said and told are separate channels and are never added to each other. `watched`\n'
+	printf '  is a third and nothing captures it yet, so the column reads `-`. The column is here\n'
+	printf '  so that when it does arrive it arrives beside them and not inside them. What that\n'
+	printf '  channel is worth, and what to call it, is not this view to say.\n'
+	printf '\n'
+	printf '  `active` and `escalated` are how many work items carried that attention, averaged\n'
+	printf '  over the days of the week that have a count, and `days` is how many days that was.\n'
+	printf '  The figure for a day comes from `remit list` and from nothing else, taken once on\n'
+	printf '  that day. Nothing here derives a count of items from the exposure lines above it.\n'
+	printf '\n'
+	printf '  `said/item` and `told/item` divide the week total of one channel by `active`. That\n'
+	printf '  is the whole of what this view computes. There is no total, no score, no target,\n'
+	printf '  and no claim about what causes a number to move.\n'
+	if [ "$_unnamed_n" -gt 0 ]; then
+		printf '\n'
+		unnamed_note "$_unnamed_n" "$_unnamed" "$_dir"
+	fi
+	exit 0
+}
+
+# --- dispatch -----------------------------------------------------------------
+[ $# -ge 1 ] || usage
+_cmd=$1
+shift
+case "$_cmd" in
+stop) [ $# -eq 0 ] || die "stop takes no argument"; cmd_stop ;;
+status) cmd_status "$@" ;;
+scan) cmd_scan "$@" ;;
+today) cmd_today "$@" ;;
+session) cmd_session "$@" ;;
+trend) cmd_trend "$@" ;;
+-h | --help) usage ;;
+*) printf '%s: unknown subcommand: %s\n' "$ME" "$_cmd" >&2; usage ;;
+esac

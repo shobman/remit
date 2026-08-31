@@ -51,8 +51,9 @@
 # `.remit/` root; the practitioner's rubrics sit beside the work in
 # `.remit/rules/`. That folder is READ here and its FORM is checked here. Its
 # CONTENT is written only by the retro convention, on the practitioner's ruling;
-# the one thing this script ever writes there is the empty shape, once, and only
-# when asked — `remit rules init`, which `remit migrate` also runs.
+# the one thing this script ever writes there of its own is the shipped shape,
+# once, and only when asked — `remit rules init`, which `remit migrate` also
+# runs. What that shape holds is `rubrics_shipped` below, and nowhere else.
 #
 # Durability rule: change -> commit [-> push]. Exit 3 means committed locally
 # and the remote has NOT accepted it.
@@ -75,7 +76,7 @@
 #       `until` if one is given, then moves the item ONE GATE AT A TIME as far as
 #       that `until` reaches, or as far as a `promote` rubric a gate's evaluator
 #       cited carries it, and never past a `hold` one cited, a must-fix that
-#       still stands, or a `**Depends on:**` work item that has not closed —
+#       still stands, or a `**Depends on:**` work item that does not satisfy —
 #       then prints the row `list` would show, and why it stopped.
 #       `--park` here attaches to the `--until` beside it, and means exactly what
 #       it means at `new`: run to that stop and rest there. It is refused on its
@@ -102,9 +103,15 @@
 #   remit report new <name>      file a field report from stdin
 #   remit report close <name>    archive it to `field-reports/.archive/`
 #   remit rules init             lay down `.remit/rules/` — the three gate files
-#                                — with the one rubric remit ships and nothing
+#                                — with the rubrics remit ships and nothing
 #                                else. Idempotent, and it NEVER overwrites a file
 #                                that is already there.
+#   remit rules ship|seed|read|apply
+#                                the payload-only four: what ships, laying the
+#                                shape down in a named directory, reading what a
+#                                directory's gate files carry, and applying an
+#                                edit list to them. No repository, no commit —
+#                                `install.sh`'s migration is what drives them.
 #   remit setup [--write]        read this host, and PROPOSE a registry for it on
 #                                stdout. Bare it writes nothing; `--write` saves
 #                                the proposal itself, atomically, having read the
@@ -176,7 +183,7 @@
 # carried it past what the practitioner said, and it rests here), `hold: <id>`
 # (a rubric the gate's evaluator cited stopped it here for his eyes), `fix:
 # <id>` (a rubric the gate's evaluator cited is the must-fix still standing),
-# `depends on: <the work item the line names that has not closed, or what it
+# `depends on: <the work item the line names that does not satisfy it, or what it
 # left unreadable>`, `<n> fails`, `same must-fix twice`, `cannot act: <what>`, `authority changed`
 # (it changed while the chain was running — THE AUTHORITY LOCK below), `stopped
 # on the practitioner's word at <step>`, `stopped a crashed chain at <step>`,
@@ -223,18 +230,41 @@
 # before a build, saying so — the form is gone, and reading one as a slug would
 # resolve a name nothing here has.
 #
-# WHAT SATISFIES ONE: the named item's **Stage:** reads `closed`, and nothing
-# else does. Its stage is read from its own brief, wherever that brief now sits —
-# in `.remit/work-items/<slug>/` while it is in flight, in
+# WHAT SATISFIES ONE. Ruled by him, 2026-08-25: "a dependency is satisfied when
+# the named item's delivery is merged, however it closed." TWO ways, and no
+# third. FIRST, the named item's **Stage:** reads `closed` — only the closing
+# gate stamps that, and it stamps it because the work went through that gate.
+# SINCE 2026-08-30 THIS MECHANISM MERGES NOTHING (THE DELIVERY SEAM below), so a
+# `closed` stage is the gate's word and not a witnessed merge; where a dependent
+# needs the merge itself, the second way below is what witnesses one. SECOND,
+# the item is ARCHIVED and every delivery
+# its record names is MERGED: his word can end an item at the stage it had
+# reached, and one whose pull requests all landed has given the dependent
+# everything it was waiting for. Nothing else satisfies.
+#
+# Its stage is read from its own brief, wherever that brief now sits — in
+# `.remit/work-items/<slug>/` while it is in flight, in
 # `.remit/work-items/.archive/<slug>/` once it is archived. ARCHIVING PRESERVES
-# THE STAGE and never stamps one: ruled by him the same day, "close it early,
+# THE STAGE and never stamps one: ruled by him 2026-08-24, "close it early,
 # abandon it, kill it, remove it — anything like that means archive it, leave
-# state as is", so an item archived at `new`, `refined` or `accepted` satisfies
-# NOTHING, and being in the archive is not being done. Only the closing gate
-# stamps `closed`, and it stamps it because the work went through the gate.
+# state as is". So being in the archive is still not being done — it is being
+# asked the second question — and an item IN FLIGHT below `closed` satisfies
+# nothing whatever its branch has done, because the work is not over.
+#
+# HOW "MERGED" IS WITNESSED, and why not by sha: the deliveries here are SQUASH
+# merged, so a recorded delivery commit is never an ancestor of `main` and
+# ancestry would call every merged delivery unmerged. The witness is the pull
+# request's own state — `gh pr view --json state` reading `MERGED` — asked of
+# EVERY distinct pull request the item's record names on a `## delivery —`
+# entry, because an item can deliver through more than one. Where its record
+# names no delivery at all, where a delivery entry names a commit and no pull
+# request, where `gh` is absent, or where a state cannot be read, THE DEPENDENCY
+# HOLDS and the reason says which of those it was. Refusing to guess is the
+# whole of what this check is for, and a hold is his to lift, never an
+# escalation.
 #
 # EVERY NAME ON THE LINE IS OBSERVED. A line naming three items lets a build
-# start only when all three have closed, and the first that has not is the one
+# start only when all three satisfy, and the first that does not is the one
 # the reason names.
 #
 # OMITTED MEANS NONE. Ruled by him, 2026-08-24: "it should be ok to be null or
@@ -345,6 +375,15 @@
 #   REMIT_ROUND       the round number in the author/evaluate loop; 1 first time
 #   REMIT_MUSTFIX     absolute path of a file holding the must-fix being sent
 #                     back, or empty on a first attempt
+#   REMIT_RUNS        absolute path of the KEPT-OUTPUT HOME this raise writes
+#                     into, already made and already ignoring itself. Handed to
+#                     every role: the ones that author keep their run output
+#                     there, and the ones that judge read it there. KEPT OUTPUT
+#                     HAS A HOME above is the law.
+#   REMIT_RUNS_NAMING one line of text: the name a kept run takes. It is passed
+#                     THROUGH the seam into the briefing verbatim, so that the
+#                     convention the sweep here keys on and the convention a
+#                     context is given are the same string and not two copies.
 #
 # WHAT THIS SCRIPT DOES WITH THE SEAM'S STDERR, because it decides what a caller
 # can see while a raise is running. Every invoke's stderr is captured to a file of
@@ -448,9 +487,9 @@
 # no check in a rubric: a rubric is a criterion a fresh context judges. This
 # script hands the gate's file to the evaluate role at that gate, reads back the
 # citation lines it returned (the seam contract above), and acts on those and on
-# nothing else. The only mechanical gate left in the whole chain is that the
-# repository's required checks are green — before `gh pr ready`, and again before
-# a merge.
+# nothing else. THERE IS NO MECHANICAL GATE LEFT IN THE CHAIN: the check-reading
+# one retired on 2026-08-30 with THE DELIVERY SEAM's ruling, and every gate is
+# now a rubric a fresh context judged.
 #
 # The one thing this script reads OUT of a gate file, beyond checking its form,
 # is whether the section a citation names carries the id it names — for all four
@@ -533,8 +572,8 @@
 #
 # WHY THEY ARE WRITTEN: they are the evidence a convention reads to say how long
 # a run it is about to start will take. THAT CONVENTION IS STATED IN ONE PLACE
-# AND THIS IS NOT IT — `install/skills/remit-resume/SKILL.md`, under "Before a
-# run that will take minutes — the leave line". Nothing here says what is said to
+# AND THIS IS NOT IT — `install/skills/remit-resume/SKILL.md`, under "The
+# leave line". Nothing here says what is said to
 # the practitioner, or how these seconds become it; this script writes the line
 # and stops.
 #
@@ -580,15 +619,77 @@
 # inside the git directory so that it is never part of any working tree and can
 # never be committed by accident. `REMIT_WORKTREE_DIR` overrides the parent.
 #
-# A pull request is flipped ready by `gh pr ready` when a delivery passes its
-# gate and the item is actually becoming `accepted`; it is merged only when the
-# closing gate has been asked and let it go. BOTH of those steps first read
-# `gh pr checks --required` and require every required check to have passed —
-# read here rather than left to branch protection, because the practitioner's own
-# bypass would otherwise let the mechanism through the gate. That is the ONLY
-# mechanical gate in the chain; everything else is a rubric a fresh context
-# judged. If `gh` is absent, that is recorded as `cannot act: gh` and the item
-# escalates. Nothing is pretended.
+# DELIVERY ENDS AT THE PULL REQUEST, and the LAST thing this script does to one
+# is flip it out of draft. Ruled by the practitioner, 2026-08-30: "CI/CD is not
+# remit's job … it's just about using sub-agents evaluating, and getting work
+# done through a mechanism to ensure state of my work." So:
+#
+#   * NOTHING HERE MERGES. There is no `gh pr merge` in this script and there is
+#     no step of the chain that wants one. The closing gate still runs — it is a
+#     rubric a fresh context judges, like the other two — and what it licenses is
+#     the CLOSURE of the item, never a merge. The pull request is left open for
+#     the host repository and for him.
+#   * NOTHING HERE READS A CHECK. Not `gh pr checks`, not `gh run view`, not a
+#     workflow file. Whether a suite is green, whether branch protection is
+#     satisfied and when a delivery lands are the host repository's business,
+#     and a mechanism that read them would be taking that repository's CI over.
+#   * `gh pr ready` STAYS, at the gate into `accepted` and nowhere else: a
+#     recorded passing verdict is what takes a delivery out of draft, and the
+#     flip is that verdict's visible signal rather than a reading of anything.
+#     If `gh` is absent, that is recorded as `cannot act: gh` and the item
+#     escalates. Nothing is pretended.
+#
+# THE ACCEPTED GATE IS THE GATE, full stop: a fresh evaluator's rubric verdict.
+# There is no mechanical gate left in the chain at all.
+#
+# ==============================================================================
+# KEPT OUTPUT HAS A HOME
+# ==============================================================================
+#
+# Admitted by the practitioner, 2026-08-25, after a builder's kept test output
+# vanished with the scratch this mechanism removes: "test outputs should preserve
+# in the work-item folder so they're archived, but not every single one… like
+# maybe on archive, we sweep all the test artifacts except the latest… now if we
+# have different named or shaped test suites, or something, the latest of each,
+# so we have one good example, the last one — that could be a sweep on close, and
+# it preserves it with the code in archive."
+#
+# THE HOME IS ONE FOLDER IN THE ITEM: `.remit/work-items/<slug>/runs/`. Not the
+# raise's scratch, which `bin/remit-invoke` removes; not the build worktree,
+# which a `stop` cleans and which no `close` ever reads.
+#
+# WHAT A RAISE IS TOLD is that same path RESOLVED INSIDE ITS OWN WORKTREE, and
+# that is the whole of the hop below. `bin/remit-invoke`'s header records that
+# the worktree is the one directory writable by every seat on every harness — a
+# sandboxed one runs as another account and is refused everywhere else — so a
+# raise writes where it can, and this script brings what it wrote home the moment
+# the raise returns. The `evaluate` raise is given the PRIMARY worktree, so for
+# it the two are one directory and the hop does not happen: it reads the builder's
+# kept output straight out of the home.
+#
+# NOTHING IS COMMITTED WHILE THE ITEM IS IN FLIGHT. A per-run commit would put
+# every superseded log into history forever, where no sweep can reach it. The
+# home is made ignoring ITSELF — a `.gitignore` whose single pattern is `*` —
+# which is the mechanism `bin/remit-invoke` uses on the raise's scratch and its
+# note there is the one copy of why it travels and a line in remit's own ignore
+# file would not. That one file holds the home out of the record commits here AND
+# out of the delivery seam's `git add -A` in the worktree, which carries no
+# pathspec at all.
+#
+# THE SWEEP IS AT CLOSE, and it is the moment the survivors are committed, riding
+# the archive move. For each distinct `<suite>.<shell>` the LAST run survives and
+# every earlier one is removed — removed, not un-staged, because it was never in
+# a commit. Then the home stops ignoring itself and the archive move carries what
+# is left into `.remit/work-items/.archive/<slug>/runs/`, where the next record
+# commit stages it with the rest of the item. An item that kept no run archives
+# exactly as it did before this existed.
+#
+# THE NAME A RUN TAKES is `runs_naming` below, stated there and nowhere else:
+# that sentence is what the sweep keys on and what a raise is handed, so there is
+# one copy of it. A file named any other way is ARCHIVED UNSWEPT — this sweep
+# removes only what it can key, because deleting evidence it does not understand
+# is the worse mistake. What it kept, what it removed and what it could not key
+# are all named in the `closed` entry of the record.
 #
 # ==============================================================================
 # THE THREE GATES
@@ -602,9 +703,10 @@
 #   refined -> accepted after the build and its delivery: everything in the work
 #                       item's folder, against the delivery.
 #                                                 REMIT_RUBRICS=rules/accepted.md
-#   accepted -> closed  BEFORE ANY MERGE, and with no build in front of it: the
-#                       whole folder, `log.md` and every evaluator's notes
-#                       included, against the item.  REMIT_RUBRICS=rules/closed.md
+#   accepted -> closed  with no build in front of it: the whole folder, `log.md`
+#                       and every evaluator's notes included, against the item.
+#                       It licenses the closure and nothing else — no merge
+#                       happens here or anywhere.  REMIT_RUBRICS=rules/closed.md
 #
 # A gate is ASKED when the practitioner's `until` reaches the stage beyond it, or
 # when its file carries a `promote` rubric that could carry the item there
@@ -659,8 +761,8 @@
 #   | accepted, stopped     | refused                    | a phase file; pointer  |
 #   |                       |                            | moves; stage new; the  |
 #   |                       |                            | pull request to draft  |
-#   | accepted, running     | ends before any merge;     | a queued phase, as     |
-#   |                       | stays accepted             | above                  |
+#   | accepted, running     | ends; stays accepted       | a queued phase, as     |
+#   |                       |                            | above                  |
 #   | escalated             | refused                    | brief edited -> stage  |
 #   |                       |                            | new                    |
 #   | closed                | refused                    | refused — a new item   |
@@ -828,10 +930,25 @@ usage:
   remit report close <name>  archive it to field-reports/.archive/
   remit rules init       lay down .remit/rules/ — refined.md, accepted.md,
                          closed.md — with the four section headings the
-                         practitioner writes his rubrics under, and the one
-                         rubric remit ships. Idempotent; it never overwrites a
-                         file that is already there, and it writes no rubric of
-                         its own beyond that one.
+                         practitioner writes his rubrics under, and the rubrics
+                         remit ships. Idempotent; it never overwrites a file that
+                         is already there, and it writes no rubric of its own
+                         beyond those.
+  remit rules ship       print the rubrics remit ships, one per line:
+                         <gate> <section> <id> <criterion>, tab separated
+  remit rules seed <dir> lay the shipped shape down in <dir>, creating only the
+                         files that are absent; prints their names. Commits
+                         nothing.
+  remit rules read <dir> print the rubrics <dir>'s gate files carry now, in the
+                         same four columns as `ship`
+  remit rules apply <dir>  apply the edit list on stdin — one
+                         <gate> <section> <id> add|set|del <text> per line — to
+                         <dir>'s gate files, touching nothing else in them, and
+                         print any `add` whose section heading is absent.
+                         The last four need no repository and change no work
+                         surface: they are how `install.sh` reads the shipped
+                         rubrics from their one home and migrates a target's,
+                         rubric by rubric.
   remit setup [--write]  read this host — which harness CLIs are here, what each
                          one says about its account and its models — and PROPOSE
                          a .remit/settings.json on stdout, with a report of what
@@ -883,6 +1000,25 @@ secs() {
 }
 nocr() { tr -d '\015' <"$1"; }
 
+# Make a directory, creating ONLY the components of it that are missing.
+#
+# Deliberately not `mkdir -p`: that walks the whole path from the root and
+# attempts every ancestor, including ones this script has no business creating.
+# Where such an ancestor cannot be created — a Windows drive root, C:/Users/<name>,
+# anything a sandbox holds read-only — `mkdir -p` reports `cannot create
+# directory ...: Permission denied` and takes the whole run down over a directory
+# that was never in the way. install.sh carries the same helper for the same
+# reason: the two are separate programs and neither can source the other. Every
+# directory this script makes goes through it — a verb the installer never runs
+# is still a verb a sandboxed test tier runs, and the call shape is unsafe in
+# both.
+ensure_dir() { # $1 a directory
+	[ -d "$1" ] && return 0
+	_parent=$(dirname "$1")
+	[ "$_parent" = "$1" ] || ensure_dir "$_parent" || return 1
+	mkdir "$1"
+}
+
 # --- argument parsing ---------------------------------------------------------
 [ $# -ge 1 ] || usage
 cmd=$1
@@ -895,6 +1031,8 @@ listing=active
 want_write=no
 report_cmd=''
 report_name=''
+rules_cmd=''
+rules_dir=''
 
 check_slug() {
 	case "$1" in
@@ -993,10 +1131,16 @@ setup)
 	[ $# -le 1 ] || usage
 	;;
 rules)
-	[ $# -eq 1 ] || usage
-	case "$1" in
-	init) ;;
-	*) die "the only thing this script writes in .remit/rules/ is its empty shape: \`$ME rules init\`. The rubrics themselves are the practitioner's, through a retro." ;;
+	rules_cmd=${1-}
+	case "$rules_cmd" in
+	init | ship)
+		[ $# -eq 1 ] || usage
+		;;
+	seed | read | apply)
+		[ $# -eq 2 ] || usage
+		rules_dir=$2
+		;;
+	*) die "the only thing this script writes of its own in .remit/rules/ is its shipped shape: \`$ME rules init\`. Every rubric beyond that is the practitioner's, through a retro." ;;
 	esac
 	;;
 migrate)
@@ -1010,29 +1154,251 @@ migrate)
 	;;
 esac
 
-# --- where we are, and whether we may write here ------------------------------
-root=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a Git repository"
+# ==============================================================================
+# ONE PATH NAMESPACE
+# ==============================================================================
+#
+# One directory on Windows has two names. Git Bash's own shell spells it
+# `/c/Users/...`; git, and every program that is not an MSYS one, spells it
+# `C:/Users/...`. On every other platform there is only one spelling and all of
+# this is an identity.
+#
+# THE NAME THAT TRAVELS IS THE DRIVE-LETTERED ONE, and that is the whole of the
+# decision here. `/c/...` is resolvable by exactly one thing — the MSYS shell
+# that produced it. `C:/...` is resolvable by that same shell AND by git AND by
+# a native Windows CLI AND by a sandboxed seat running under another account.
+# Every path this script derives from `$root` ends up crossing the seam: the
+# kept-output home a raise is told to write into, the worktree a raise is handed
+# as its workspace. Handing those over in a namespace only the coordinator's own
+# shell can read is handing over a path the far side cannot open.
+#
+# So the conversion happens ONCE, where a path is first resolved, and everything
+# downstream inherits it — never per call site at the seam, because a
+# normalisation applied at a hand-off is one somebody has to remember to apply at
+# the next hand-off, and this script has several.
+#
+# `cygpath` is the authority for the conversion because it is the shell's own
+# statement of where it has things mounted: `/tmp` is not `C:/tmp` and no string
+# rewrite would know that. Where there is no `cygpath` there is no second
+# spelling, and this is the identity function.
+CYGPATH=$(command -v cygpath 2>/dev/null) || CYGPATH=''
+one_namespace() { # $1 an absolute path -> it, in the spelling everything resolves
+	if [ -n "$CYGPATH" ]; then
+		_ns=$("$CYGPATH" -m "$1" 2>/dev/null)
+		if [ -n "$_ns" ]; then
+			printf '%s\n' "$_ns"
+			return 0
+		fi
+	fi
+	printf '%s\n' "$1"
+}
 
-# The work surface changes from one place only — the repository's primary
-# worktree. A linked worktree is a builder's territory; a state change made there
-# would race the primary view and could land on a work branch. In the primary
-# worktree the git dir and the common git dir are the same directory.
-git_dir=$(CDPATH= cd -- "$(git rev-parse --git-dir)" && pwd -P)
-common_dir=$(CDPATH= cd -- "$(git rev-parse --git-common-dir)" && pwd -P)
-# `setup` WITHOUT `--write` is the exception, and only because it changes
-# nothing: it reads the host, reads the registry that is there and prints a
-# proposal. Which worktree that is read from cannot make the answer different.
-# `setup --write` saves, and a save here would land in the linked worktree's own
-# `.remit/settings.json` while the primary — the one the practitioner reads and
-# commits — never saw it. So the flag is refused where every other change is.
-if [ "$git_dir" != "$common_dir" ] && { [ "$cmd" != setup ] || [ "$want_write" = yes ]; }; then
-	die "refusing to run from a linked worktree — the work surface changes only from the primary worktree at $(dirname "$common_dir")"
+# A directory that EXISTS, resolved: symlinks followed, then spelled the one way.
+# Returns non-zero, saying nothing, when it cannot be entered.
+resolve_dir() { # $1 a directory
+	_rd=$(CDPATH= cd -- "$1" 2>/dev/null && pwd -P) || return 1
+	one_namespace "$_rd"
+}
+
+# --- where we are, and whether we may write here ------------------------------
+# `rules ship`, `rules seed`, `rules read` and `rules apply` answer from this
+# script and a directory named on the command line. They read and write no work
+# surface, run no git, and commit nothing — so they need no repository at all,
+# and the installer runs them from wherever it was invoked, against a target it
+# has already checked itself. Every other verb here changes the work surface.
+PAYLOAD_ONLY=no
+if [ "$cmd" = rules ]; then
+	case "$rules_cmd" in ship | seed | read | apply) PAYLOAD_ONLY=yes ;; esac
+fi
+
+git_dir=''
+common_dir=''
+if [ "$PAYLOAD_ONLY" = yes ]; then
+	root=$(resolve_dir .) || die "cannot resolve the current directory"
+else
+	root=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a Git repository"
+
+	# ONE PATH NAMESPACE, stated above. `rev-parse` already answers in the spelling
+	# that travels; the `cd` is here for the symlinks, and the conversion after it
+	# is what keeps the answer in that spelling on a host whose shell would have
+	# handed back its own.
+	root=$(resolve_dir "$root") || die "cannot resolve the repository root at $root"
+
+	# The work surface changes from one place only — the repository's primary
+	# worktree. A linked worktree is a builder's territory; a state change made
+	# there would race the primary view and could land on a work branch. In the
+	# primary worktree the git dir and the common git dir are the same directory.
+	git_dir=$(resolve_dir "$(git rev-parse --git-dir)")
+	common_dir=$(resolve_dir "$(git rev-parse --git-common-dir)")
+	# `setup` WITHOUT `--write` is the exception, and only because it changes
+	# nothing: it reads the host, reads the registry that is there and prints a
+	# proposal. Which worktree that is read from cannot make the answer different.
+	# `setup --write` saves, and a save here would land in the linked worktree's own
+	# `.remit/settings.json` while the primary — the one the practitioner reads and
+	# commits — never saw it. So the flag is refused where every other change is.
+	if [ "$git_dir" != "$common_dir" ] && { [ "$cmd" != setup ] || [ "$want_write" = yes ]; }; then
+		die "refusing to run from a linked worktree — the work surface changes only from the primary worktree at $(dirname "$common_dir")"
+	fi
+fi
+
+# ==============================================================================
+# WHERE THE RECORD LIVES — the one indirection, resolved here and nowhere else
+# ==============================================================================
+#
+# THE RECORD is what this script itself authors: work items, their archive, the
+# kept run output inside them, and field reports. By default it lives in the
+# project repository, exactly as it always has. A practitioner whose working
+# state does not belong on the project remote points it elsewhere with
+# `.remit/settings.local.json` — per-user, gitignored, never shipped:
+#
+#     { "records": { "remote": "git@host:me/my-records.git",
+#                    "folder": "this-project",        (optional)
+#                    "clone":  "/where/the/clone/is"  (optional) } }
+#
+# `remote` ALONE turns personal mode on. `folder` defaults to the project
+# repository's own directory name, so one records repository holds many projects
+# side by side. `clone` defaults to `$HOME/.remit/records/<the remote's last path
+# segment, `.git` stripped>`, and `REMIT_RECORDS_HOME` moves that default's
+# parent. Where the clone is, is therefore either configured outright or derived
+# by the rule stated here — never searched for and never guessed.
+#
+# WHAT MOVES: `ITEMS` and `REPORTS` below, and nothing else. Every item path,
+# brief, log, marker, archive path and runs home in this script already derives
+# from those two, which is why this is ONE indirection and not thirty.
+#
+# WHAT STAYS WITH THE PROJECT, because it is installed payload and not record:
+# `.remit/rules/` (the installer lays the gate files down in the target, and a
+# gate must find them where they were laid), `.remit/settings.json` (the registry
+# — host configuration that `bin/remit-invoke` reads from the project root, and
+# that nothing here ever commits), `.remit/hooks/` and `.remit/.install/`. In a
+# shadow install those sit on disk excluded from git, so the project's history is
+# untouched either way.
+#
+# `$rec_root` is the git repository the record is committed in and `$rec_pfx` is
+# `$rec` spelled relative to it. Those two values exist for `commit_locked` and
+# for `marker_glob`, and are read nowhere else.
+rec=$root
+rec_root=$root
+rec_pfx=''
+RECORDS_REMOTE=''
+LOCALSETTINGS="$root/.remit/settings.local.json"
+
+# A FLAT READER, not a JSON parser: it lifts one string value out of the
+# `"records"` object, which the shape above makes a flat object of strings. It is
+# here rather than `jq` because `list`, `new`, `resume`, `park`, `stop`, `close`
+# and `report` run today with no `jq` at all, and knowing where the work is
+# written must not be the thing that finally makes `jq` a hard dependency.
+local_record_setting() { # $1 key -> its string value, or nothing
+	[ -f "$LOCALSETTINGS" ] || return 0
+	tr -d '\n\r\t' <"$LOCALSETTINGS" |
+		sed -n 's/.*"records"[[:space:]]*:[[:space:]]*{\([^}]*\)}.*/\1/p' |
+		sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
+		sed -n 1p
+}
+
+# ONE PATH NAMESPACE, the rule stated at `$root` above, applied here between what
+# git STORED and what the practitioner TYPED. `remote get-url` answers in git's
+# own spelling — on Windows a drive-lettered `C:/Users/...` even where the
+# pointer names the shell's `/c/Users/...` — and comparing those two as strings
+# would refuse a correct clone on one platform and not the other. A remote that
+# is a directory on this machine is therefore compared AS a directory; anything
+# that is not — every real URL — is compared as the string it is.
+same_remote() { # $1 $2 -> 0 when both name the same repository
+	[ "$1" = "$2" ] && return 0
+	_s1=${1#file://}
+	_s2=${2#file://}
+	[ "$_s1" = "$_s2" ] && return 0
+	{ [ -d "$_s1" ] && [ -d "$_s2" ]; } || return 1
+	_p1=$(resolve_dir "$_s1") || return 1
+	_p2=$(resolve_dir "$_s2") || return 1
+	[ "$_p1" = "$_p2" ]
+}
+
+[ "$PAYLOAD_ONLY" = yes ] || RECORDS_REMOTE=$(local_record_setting remote)
+if [ -n "$RECORDS_REMOTE" ]; then
+	_rfolder=$(local_record_setting folder)
+	[ -n "$_rfolder" ] || _rfolder=${root##*/}
+	case "$_rfolder" in
+	*/* | . | ..) die "records.folder in $LOCALSETTINGS must be one directory name, not '$_rfolder'" ;;
+	esac
+	_rclone=$(local_record_setting clone)
+	if [ -z "$_rclone" ]; then
+		_rbase=${RECORDS_REMOTE%/}
+		_rbase=${_rbase##*/}
+		_rbase=${_rbase%.git}
+		[ -n "$_rbase" ] ||
+			die "cannot derive a clone directory name from records.remote '$RECORDS_REMOTE' — name records.clone in $LOCALSETTINGS"
+		_rclone="${REMIT_RECORDS_HOME:-${HOME:-.}/.remit/records}/$_rbase"
+	fi
+
+	# MADE ONCE, and said out loud when it is made. A clone that is already there
+	# is checked against the remote it is supposed to be: a records home quietly
+	# pointing at somebody else's repository is the one failure here that would
+	# otherwise look exactly like success.
+	if [ -d "$_rclone/.git" ]; then
+		_rhave=$(git -C "$_rclone" remote get-url origin 2>/dev/null) || _rhave=''
+		same_remote "$_rhave" "$RECORDS_REMOTE" ||
+			die "the records clone $_rclone has origin '$_rhave', not the records.remote '$RECORDS_REMOTE' named in $LOCALSETTINGS"
+	else
+		[ -e "$_rclone" ] && die "records.clone $_rclone exists and is not a Git repository"
+		printf '%s: cloning the records repository %s into %s\n' "$ME" "$RECORDS_REMOTE" "$_rclone" >&2
+		mkdir -p "${_rclone%/*}" 2>/dev/null || :
+		git clone -q "$RECORDS_REMOTE" "$_rclone" >/dev/null 2>&1 ||
+			die "could not clone the records repository $RECORDS_REMOTE into $_rclone"
+		# AN UNBORN HEAD AFTER A CLONE, and the two very different reasons for one.
+		#
+		# The first record ever pushed to an empty records repository goes to
+		# `refs/heads/main`, but that repository's own HEAD still names whatever
+		# branch its `git init` defaulted to — often `master` — and nothing here
+		# ever moves it. So the NEXT clone of that repository, on a second machine
+		# or for a second project, checks out that unborn default and sees none of
+		# the history that is sitting right there on `main`. Committing from there
+		# builds a second root and every push after it is rejected as
+		# non-fast-forward: the record is on the remote, and the practitioner is
+		# told his push failed. Found by this item's own test, on Git Bash.
+		#
+		# So: an unborn HEAD is resolved against what the REMOTE actually has —
+		# `main` when it is there, else the first branch it carries — and only a
+		# genuinely empty repository falls through to naming `main` for the first
+		# commit to create.
+		if ! git -C "$_rclone" rev-parse HEAD >/dev/null 2>&1; then
+			_rbr=''
+			git -C "$_rclone" show-ref --verify --quiet refs/remotes/origin/main && _rbr=main
+			[ -n "$_rbr" ] || _rbr=$(git -C "$_rclone" for-each-ref --format='%(refname:strip=3)' \
+				refs/remotes/origin 2>/dev/null | grep -v '^HEAD$' | sed -n 1p)
+			if [ -n "$_rbr" ]; then
+				git -C "$_rclone" checkout -q -B "$_rbr" "origin/$_rbr" >/dev/null 2>&1 ||
+					die "the records repository $RECORDS_REMOTE carries '$_rbr' and this clone could not check it out"
+			else
+				git -C "$_rclone" symbolic-ref HEAD refs/heads/main >/dev/null 2>&1 || :
+			fi
+		fi
+	fi
+	# The clone takes the project's committer identity when it has none of its
+	# own, so that a fresh clone can make its first record commit on a machine
+	# whose git carries no global identity — a build agent's, for instance.
+	if [ -z "$(git -C "$_rclone" config user.email 2>/dev/null)" ]; then
+		_rid=$(git -C "$root" config user.email 2>/dev/null) &&
+			[ -n "$_rid" ] && git -C "$_rclone" config user.email "$_rid"
+		_rid=$(git -C "$root" config user.name 2>/dev/null) &&
+			[ -n "$_rid" ] && git -C "$_rclone" config user.name "$_rid"
+	fi
+
+	# ONE PATH NAMESPACE, for the same reason `$root` is resolved this way above.
+	rec_root=$(resolve_dir "$_rclone") ||
+		die "cannot resolve the records clone at $_rclone"
+	rec="$rec_root/$_rfolder"
+	rec_pfx="$_rfolder/"
+	mkdir -p "$rec" 2>/dev/null || die "cannot create the records home at $rec"
 fi
 
 REMITDIR="$root/.remit"
-ITEMS="$REMITDIR/work-items"
+# The record's own root. It is `$REMITDIR` in every repository that has not asked
+# for personal records, which is what makes the default byte-for-byte today's.
+RECDIR="$rec/.remit"
+ITEMS="$RECDIR/work-items"
 ITEMARCH="$ITEMS/.archive"
-REPORTS="$REMITDIR/field-reports"
+REPORTS="$RECDIR/field-reports"
 REPORTARCH="$REPORTS/.archive"
 RUBRICS="$REMITDIR/rules"
 SETTINGS_REL=".remit/settings.json"
@@ -1080,11 +1446,27 @@ marker="$item/$marker_name"
 # magic asks it not to, so this one matches `<items>/.archive/<slug>/.working`
 # as well as `<items>/<slug>/.working` — which it must, because `close` moves an
 # item's folder whole into `.archive/` and a marker inside it moves with it.
-marker_glob="${ITEMS#"$root"/}/*/$marker_name"
+# Relative to the repository the record is COMMITTED in — `$rec_root`, which is
+# `$root` unless personal records moved it — because that is the repository whose
+# index this pathspec is handed to.
+marker_glob="${ITEMS#"$rec_root"/}/*/$marker_name"
 # The marker is machine state — see the note at the head of this script — so it
 # is excluded from every pathspec `commit_and_push` stages and commits.
 marker_exclude=":(exclude)$marker_glob"
 itemarchive="$ITEMARCH/$slug"
+# WHERE THIS ITEM'S KEPT RUN OUTPUT LIVES — the law is KEPT OUTPUT HAS A HOME in
+# this script's header.
+#
+# TWO NAMES, because there are two places and they are no longer the same place.
+# `$runs` is THE HOME: inside the item, wherever the record lives, which is where
+# `close` sweeps and archives it and where the evaluator's pointer aims.
+# `$runs_rel` is where a raise WRITES — always inside the working tree it was
+# given, and a build worktree is a worktree of the PROJECT repository whatever
+# the record does, so this one stays project-relative. `runs_harvest` below is
+# the crossing between them, and in personal mode it is the only way kept output
+# reaches the record at all.
+runs_rel=".remit/work-items/$slug/runs"
+runs="$ITEMS/$slug/runs"
 
 # ==============================================================================
 # the header: written here, read here, inferred nowhere
@@ -1357,13 +1739,13 @@ markers_untrack() {
 	# Read against HEAD as well as the index: after a rejected push has been
 	# reset away, the index no longer holds the marker but the tip this commit
 	# will sit on does, and that tip is what the removal has to be made against.
-	_mtracked=$(git -C "$root" ls-files --with-tree=HEAD -- "$marker_glob" 2>/dev/null) || _mtracked=''
+	_mtracked=$(git -C "$CIN_ROOT" ls-files --with-tree=HEAD -- "$marker_glob" 2>/dev/null) || _mtracked=''
 	[ -n "$_mtracked" ] || return 0
 	_midx="$common_dir/remit-marker-sweep.index"
 	rm -f "$_midx"
-	if GIT_INDEX_FILE="$_midx" git -C "$root" read-tree HEAD 2>/dev/null &&
-		GIT_INDEX_FILE="$_midx" git -C "$root" rm -q --cached --ignore-unmatch -- "$marker_glob" 2>/dev/null &&
-		GIT_INDEX_FILE="$_midx" git -C "$root" commit -q -m "remit: untrack the working marker — it is machine state" 2>/dev/null; then
+	if GIT_INDEX_FILE="$_midx" git -C "$CIN_ROOT" read-tree HEAD 2>/dev/null &&
+		GIT_INDEX_FILE="$_midx" git -C "$CIN_ROOT" rm -q --cached --ignore-unmatch -- "$marker_glob" 2>/dev/null &&
+		GIT_INDEX_FILE="$_midx" git -C "$CIN_ROOT" commit -q -m "remit: untrack the working marker — it is machine state" 2>/dev/null; then
 		MARKER_SWEPT=yes
 		# The real index still holds the entry the commit above removed, so it
 		# would now read as a staged ADDITION of that same marker — which no
@@ -1371,7 +1753,7 @@ markers_untrack() {
 		# one of them. `reset -- <paths>` puts those entries back to what HEAD
 		# says, which is nothing; it touches no file on disk and has no
 		# up-to-date check to fail on a marker a live run is rewriting.
-		git -C "$root" reset -q -- "$marker_glob" 2>/dev/null ||
+		git -C "$CIN_ROOT" reset -q -- "$marker_glob" 2>/dev/null ||
 			printf '%s: the marker is out of the tree, but the index still stages it — `git reset -- %s` clears that.\n' \
 				"$ME" "$marker_glob" >&2
 		printf 'untracked a working marker this repository was carrying — machine state, and it stays on disk:\n'
@@ -1385,6 +1767,17 @@ markers_untrack() {
 	return 0
 }
 
+# WHICH REPOSITORY A STATE COMMIT LANDS IN, and how a path given to it is
+# spelled there. `commit_and_push` is the RECORD's — the records clone in
+# personal mode, the project repository otherwise — and that is what all but two
+# of its callers want, because all but two of them are writing work items or
+# field reports. `commit_project_and_push` is the other one: installed payload
+# that stays with the project whatever the record does. In every repository that
+# has not asked for personal records the two are the same commit into the same
+# repository, which is why nothing about the default changes.
+CIN_ROOT=$rec_root
+CIN_PFX=$rec_pfx
+
 commit_and_push() { # $1 message, then every path this change occupies
 	lock_take || :
 	commit_locked "$@"
@@ -1393,20 +1786,50 @@ commit_and_push() { # $1 message, then every path this change occupies
 	return $_caprc
 }
 
+# For a path that is the PROJECT's and not the record's — `.remit/rules/`, which
+# the installer lays down in the target and a gate must find there. It commits
+# into `$root` with paths spelled from `$root`, which is what every caller here
+# already writes.
+commit_project_and_push() { # $1 message, then every path this change occupies
+	CIN_ROOT=$root
+	CIN_PFX=''
+	commit_and_push "$@"
+	_cprc=$?
+	CIN_ROOT=$rec_root
+	CIN_PFX=$rec_pfx
+	return $_cprc
+}
+
 # The body of the above, run with the mutex held. Called from there and nowhere
 # else, so that every path out of it releases the lock in one place.
 commit_locked() { # $1 message, then every path this change occupies
 	_msg=$1
 	shift
+	# EVERY CALLER SPELLS ITS PATHS FROM THE PROJECT — `.remit/work-items/<slug>`
+	# and the like — because that is the one spelling that is right when the
+	# record is in the project, and it is what twenty-two call sites already
+	# write. When personal records moved the record into a clone, the repository
+	# being committed in is that clone and the same path sits one folder down. The
+	# prefix therefore goes on ONCE, here, rather than at each of those sites: a
+	# rotation through the positional parameters, so that a path with a space in
+	# it survives the way it would not survive a rebuilt string.
+	if [ -n "$CIN_PFX" ]; then
+		_cn=$#
+		while [ "$_cn" -gt 0 ]; do
+			set -- "$@" "$CIN_PFX$1"
+			shift
+			_cn=$((_cn - 1))
+		done
+	fi
 	# The tip everything below sits on, read BEFORE anything is committed — the
 	# marker sweep included, because the remote has not seen that commit either
 	# and the replay further down asks whether the remote has moved on from a
 	# commit the remote could have had.
-	_pre=$(git -C "$root" rev-parse HEAD 2>/dev/null) || _pre=''
+	_pre=$(git -C "$CIN_ROOT" rev-parse HEAD 2>/dev/null) || _pre=''
 	markers_untrack
-	git -C "$root" add -A -- "$@" "$marker_exclude" ||
+	git -C "$CIN_ROOT" add -A -- "$@" "$marker_exclude" ||
 		{ printf '%s: could not stage %s\n' "$ME" "$*" >&2; return 2; }
-	if git -C "$root" diff --cached --quiet -- "$@" "$marker_exclude" 2>/dev/null; then
+	if git -C "$CIN_ROOT" diff --cached --quiet -- "$@" "$marker_exclude" 2>/dev/null; then
 		# Nothing of THIS change is left to record. A sweep may still have made a
 		# commit of its own, and that one has a remote to reach.
 		if [ "$MARKER_SWEPT" = no ]; then
@@ -1414,17 +1837,26 @@ commit_locked() { # $1 message, then every path this change occupies
 			return 0
 		fi
 	else
-		git -C "$root" commit -q -m "$_msg" -- "$@" "$marker_exclude" ||
+		git -C "$CIN_ROOT" commit -q -m "$_msg" -- "$@" "$marker_exclude" ||
 			{ printf '%s: commit failed\n' "$ME" >&2; return 2; }
 	fi
 
 	remote=origin
-	git -C "$root" remote get-url origin >/dev/null 2>&1 || remote=$(git -C "$root" remote | sed -n 1p)
+	git -C "$CIN_ROOT" remote get-url origin >/dev/null 2>&1 || remote=$(git -C "$CIN_ROOT" remote | sed -n 1p)
+	# EXIT-3 HONESTY SPEAKS ABOUT THE REMOTE THAT DID NOT ACCEPT THIS. When the
+	# record lives in a records clone, that remote is the RECORDS remote and not
+	# the project's, and naming it `origin` would send a reader to look at the
+	# wrong repository for a change that is not there. So it is named by its URL
+	# whenever the repository being committed in is not the project.
+	remote_said=$remote
+	if [ "$CIN_ROOT" != "$root" ] && [ -n "$remote" ]; then
+		remote_said="the records remote $remote ($(git -C "$CIN_ROOT" remote get-url "$remote" 2>/dev/null))"
+	fi
 	if [ -z "$remote" ]; then
 		printf 'committed. No remote configured — durable on this machine only.\n'
 		return 0
 	fi
-	branch=$(git -C "$root" rev-parse --abbrev-ref HEAD)
+	branch=$(git -C "$CIN_ROOT" rev-parse --abbrev-ref HEAD)
 	if [ "$branch" = HEAD ]; then
 		printf 'committed. Detached HEAD — NOT pushed; durable on this machine only.\n' >&2
 		return 3
@@ -1432,40 +1864,40 @@ commit_locked() { # $1 message, then every path this change occupies
 
 	_try=1
 	while :; do
-		if out=$(git -C "$root" push "$remote" "HEAD:refs/heads/$branch" 2>&1); then
+		if out=$(git -C "$CIN_ROOT" push "$remote" "HEAD:refs/heads/$branch" 2>&1); then
 			printf 'committed and pushed to %s/%s.\n' "$remote" "$branch"
 			return 0
 		fi
 		[ "$_try" -lt 3 ] || break
-		git -C "$root" fetch -q "$remote" "$branch" 2>/dev/null || break
-		_new=$(git -C "$root" rev-parse FETCH_HEAD 2>/dev/null) || break
+		git -C "$CIN_ROOT" fetch -q "$remote" "$branch" 2>/dev/null || break
+		_new=$(git -C "$CIN_ROOT" rev-parse FETCH_HEAD 2>/dev/null) || break
 		{ [ -n "$_new" ] && [ -n "$_pre" ]; } || break
 		[ "$_new" = "$_pre" ] && break
-		git -C "$root" merge-base --is-ancestor "$_pre" "$_new" 2>/dev/null || break
-		_had=$(git -C "$root" rev-parse HEAD) || break
-		git -C "$root" reset -q --soft "$_new" || break
+		git -C "$CIN_ROOT" merge-base --is-ancestor "$_pre" "$_new" 2>/dev/null || break
+		_had=$(git -C "$CIN_ROOT" rev-parse HEAD) || break
+		git -C "$CIN_ROOT" reset -q --soft "$_new" || break
 		# The reset put HEAD back on a tip that still carries whatever markers
 		# the remote holds, so the sweep is made again against THAT tip. Its
 		# earlier commit went away with the reset, and an unrepeated sweep would
 		# leave the marker in the tree while reporting the push as landed.
 		markers_untrack
-		git -C "$root" add -A -- "$@" "$marker_exclude" ||
-			{ git -C "$root" reset -q --soft "$_had"; break; }
-		if git -C "$root" diff --cached --quiet -- "$@" "$marker_exclude" 2>/dev/null; then
+		git -C "$CIN_ROOT" add -A -- "$@" "$marker_exclude" ||
+			{ git -C "$CIN_ROOT" reset -q --soft "$_had"; break; }
+		if git -C "$CIN_ROOT" diff --cached --quiet -- "$@" "$marker_exclude" 2>/dev/null; then
 			if [ "$MARKER_SWEPT" = no ]; then
 				printf 'the remote already carries this change — nothing left to push.\n'
 				return 0
 			fi
 		else
-			git -C "$root" commit -q -m "$_msg" -- "$@" "$marker_exclude" ||
-				{ git -C "$root" reset -q --soft "$_had"; break; }
+			git -C "$CIN_ROOT" commit -q -m "$_msg" -- "$@" "$marker_exclude" ||
+				{ git -C "$CIN_ROOT" reset -q --soft "$_had"; break; }
 		fi
 		printf 'the push was rejected; %s had moved. Replayed this commit on top of it.\n' "$remote"
 		_pre=$_new
 		_try=$((_try + 1))
 	done
 	printf 'committed. PUSH FAILED — %s has NOT accepted this change; durable on this machine only.\n%s\n' \
-		"$remote" "$out" >&2
+		"$remote_said" "$out" >&2
 	return 3
 }
 
@@ -1582,7 +2014,11 @@ compute_limit() {
 
 list_items() { # $1 active|parked
 	if [ ! -d "$ITEMS" ]; then
-		printf 'no work items: .remit/work-items/ does not exist.\n'
+		# NAMED, not spelled from a literal: where the record lives is the
+		# pointer's to decide, and a message that always said
+		# `.remit/work-items/` would send a practitioner whose record is in a
+		# records repository to look in the wrong repository for it.
+		printf 'no work items: %s does not exist.\n' "$ITEMS"
 		printf 'A repository laid out before work-items/ is migrated once, with `remit migrate`.\n'
 		return 0
 	fi
@@ -2130,14 +2566,27 @@ trimblank() {
 	'
 }
 
+# EVERY pull request a record's `## delivery —` entries name, in the order they
+# were written, one per line. ONE reader of that entry shape, because four moves
+# ask it — the three below, and the dependency check, which asks it of ANOTHER
+# item's record — and a second copy of the pattern would be a second answer the
+# day the entry shape changes. A delivery entry that names a commit instead of a
+# pull request prints nothing here and is counted by the caller that cares.
+delivery_pr_urls() { # $1 a record file
+	[ -f "$1" ] || return 0
+	nocr "$1" | sed -n 's|^## delivery — \(https://[^ ]*\) — .*|\1|p'
+}
+delivery_count() { # $1 a record file -> how many deliveries it records at all
+	[ -f "$1" ] || { printf '0\n'; return 0; }
+	nocr "$1" | awk 'index($0, "## delivery — ") == 1 { n++ } END { print n + 0 }'
+}
+
 # The pull request this item's record names, if any. Read from the record rather
-# than guessed. ONE reader of that line, because three moves ask it — the move
-# out of `accepted`, the move into it after a resume that did not deliver, and
-# the pull request going back to draft — and a second copy of the pattern would
-# be a second answer the day the entry shape changes.
+# than guessed. Three moves ask it — the move out of `accepted`, the move into it
+# after a resume that did not deliver, and the pull request going back to draft —
+# and the LAST delivery entry is the one they mean.
 recorded_pr_url() {
-	[ -f "$log" ] || return 0
-	nocr "$log" | sed -n 's|^## delivery — \(https://[^ ]*\) — .*|\1|p' | sed -n '$p'
+	delivery_pr_urls "$log" | sed -n '$p'
 }
 recorded_pr() {
 	recorded_pr_url | sed -n 's|.*/\([0-9][0-9]*\)$|\1|p'
@@ -2361,11 +2810,27 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	# shells the same and keeps the seam's own reading of stdin — none — a
 	# decision rather than a default.
 	#
+	# THE KEPT-OUTPUT HOME, opened before the raise rather than left to it: a
+	# context that has to make its own directory is a context that can choose a
+	# different one, and the whole point of the law is that it does not. A home
+	# that cannot be opened is SAID and the raise still runs — losing a raise
+	# over a folder would cost more than the folder is worth — and the raise is
+	# then told there is nowhere to keep output rather than pointed at a path
+	# that is not there.
+	_runs=''
+	if runs_open "$_wt"; then
+		_runs=$(runs_home "$_wt")
+	else
+		printf '%s: could not open the kept-output home at %s — this raise is told it has nowhere to keep what it runs.\n' \
+			"$ME" "$(runs_home "$_wt")" >&2
+	fi
 	# The clock is read HERE, immediately before the raise and immediately after
 	# it, so what the record calls the length of a raise is the wall clock the
 	# practitioner waited through and not the harness's own account of itself.
 	_t0=$(secs)
 	REMIT_ITEM="$item" \
+		REMIT_RUNS="$_runs" \
+		REMIT_RUNS_NAMING="$(runs_naming)" \
 		REMIT_AUTHORITY="$AUTHORITY" \
 		REMIT_RUBRICS="$_rub" \
 		REMIT_STANDARDS="$_std" \
@@ -2380,6 +2845,11 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	_irc=$?
 	_t1=$(secs)
 	RAISE_PID=''
+	# WHAT THE RAISE KEPT COMES HOME FIRST, before the kill check below, which
+	# does not return. A chain his `stop` ended still ran whatever it ran, and
+	# the evidence of that is worth as much as the evidence of one that finished
+	# — more, sometimes, because a stop is usually a stop for a reason.
+	runs_harvest "$_wt"
 	# A raise that ENDED because his `stop` took the lock is not a raise that
 	# FAILED, and the difference is the whole of what the record says next: one
 	# would be an escalation naming the seam, the other is his word being carried
@@ -2644,40 +3114,21 @@ delivery_section() { # $1 create|update
 	printf '%s\n' "$FENCE"
 }
 
-# The one mechanical gate in the whole chain, and it is read HERE rather than
-# left to branch protection: the practitioner's own bypass would otherwise let
-# the mechanism straight through it. Asked before `gh pr ready`, and again before
-# a merge. A pull request that reports no required check at all is said out loud
-# and is not treated as evidence of anything.
-CHECKS_ERR=''
-checks_green() { # $1 pull request number -> 0 green, 1 with CHECKS_ERR set
-	CHECKS_ERR=''
-	if _failed=$(cd "$WT" && gh pr checks "$1" --required --json name,state \
-		--jq '.[] | select(.state != "SUCCESS") | .name' 2>"$WORK/checks.err"); then
-		if [ -n "$_failed" ]; then
-			CHECKS_ERR="cannot act: required checks not green ($(printf '%s' "$_failed" | tr '\n' ' '))"
-			return 1
-		fi
-		say "checks: every required check reports SUCCESS."
-		return 0
-	fi
-	if grep -qi 'no checks reported' "$WORK/checks.err"; then
-		say "checks: this pull request reports no required check at all. Said, not treated as evidence of anything."
-		return 0
-	fi
-	CHECKS_ERR="cannot act: gh pr checks — $(tr '\n' ' ' <"$WORK/checks.err")"
-	return 1
-}
-
 # WHERE this item's build worktree is, decided in ONE place. The move that builds
 # it and the `stop` that discards it both ask here, so a layout that changes
 # cannot leave one of them looking somewhere the other never writes.
-worktree_path() { printf '%s\n' "${REMIT_WORKTREE_DIR:-$common_dir/remit-worktrees}/$slug"; }
+# ONE PATH NAMESPACE applies here too, and by `one_namespace` rather than
+# `resolve_dir`: this answers before the worktree exists, and the caller that
+# creates it asks here first. `$common_dir` is already in the one spelling, so
+# the conversion is doing its work on the override — a `REMIT_WORKTREE_DIR` the
+# practitioner or a fixture typed in the shell's own namespace, which would
+# otherwise reach a raise as the one name the raise cannot open.
+worktree_path() { one_namespace "${REMIT_WORKTREE_DIR:-$common_dir/remit-worktrees}/$slug"; }
 
 build_worktree() {
 	WT=$(worktree_path)
 	[ -e "$WT/.git" ] && return 0
-	mkdir -p "$(dirname "$WT")" || return 1
+	ensure_dir "$(dirname "$WT")" || return 1
 	if git -C "$root" show-ref --verify --quiet "refs/heads/work/$slug"; then
 		git -C "$root" worktree add "$WT" "work/$slug" >/dev/null 2>&1 || return 1
 	else
@@ -2687,12 +3138,217 @@ build_worktree() {
 }
 
 # ==============================================================================
-# what this brief depends on, and whether that work item has closed
+# kept output — the home, the hop, and the sweep
+# ==============================================================================
+#
+# The law is KEPT OUTPUT HAS A HOME in this script's header. This is only its
+# code, and every part of it is here rather than spread across the three places
+# that call it.
+
+runs_home() { # $1 a working tree -> where a raise in it keeps its output
+	# A raise in the PRIMARY worktree — the evaluator the chain hands `$root` —
+	# is handed THE HOME itself, wherever the record lives, so its pointer aims
+	# at what a build's output was harvested into. A raise in a build worktree is
+	# handed its own worktree-local one, and `runs_harvest` crosses the gap. The
+	# two expressions are the same string when the record is in the project, so
+	# nothing about this changes for a repository that never asked for personal
+	# records.
+	[ "$1" = "$root" ] && { printf '%s\n' "$runs"; return 0; }
+	printf '%s\n' "$1/$runs_rel"
+}
+
+# THE NAME A KEPT RUN TAKES, and the ONE copy of it. The sweep below keys on this
+# sentence and `bin/remit-invoke` reproduces it into the briefing verbatim, so a
+# context is held to the convention that is actually enforced rather than to a
+# second statement of it that could drift.
+# IT STATES THE NAME AND NOTHING ELSE. What closure then does with what is named
+# — the sweep, and what becomes of a file this cannot key — is KEPT OUTPUT HAS A
+# HOME in this script's header, and this line POINTS at it rather than saying it
+# a second time in a second wording that could come apart from the code.
+# ONE LINE OF TEXT, and it is written as one because that is what it has to be
+# where it is read: `bin/remit-invoke` prints it into a briefing without knowing
+# its shape, and a sentence broken across lines there would arrive broken.
+runs_naming() {
+	printf 'one file per run, named `<suite>.<shell>.<stamp>.log` — '
+	printf '`<suite>` what was run (`unit`, `integration`, or the suite'"'"'s own name), '
+	printf '`<shell>` the shell it ran under (`gitbash`, `dash`, `bash`, `zsh`), '
+	printf '`<stamp>` the UTC time it finished, as `YYYYMMDDThhmmssZ`. '
+	printf 'None of the three may contain a `.`, and the stamp is fixed-width so that '
+	printf 'the last run of a suite-and-shell is the last one by name. '
+	printf 'What closure does with a file named this way, and with one named otherwise, '
+	printf 'is `KEPT OUTPUT HAS A HOME` in `bin/remit`'"'"'s header — read it there.\n'
+}
+
+# Make the home, and make it invisible to git. The `*` pattern matches every
+# entry beneath it INCLUDING that file, which is the mechanism
+# `bin/remit-invoke` puts on the raise's scratch; its note there is the one
+# account of why an ignore file that TRAVELS with the directory is what this
+# needs and a line in remit's own `.gitignore` is not. Here it does a second job
+# that note does not: it holds the home out of the record commits this script
+# makes, without `commit_and_push` having to know the home exists.
+runs_open_at() { # $1 the directory itself
+	_rh=$1
+	ensure_dir "$_rh" 2>/dev/null || return 1
+	[ -f "$_rh/.gitignore" ] && return 0
+	printf '*\n' >"$_rh/.gitignore" || return 1
+	return 0
+}
+
+runs_open() { # $1 a working tree
+	runs_open_at "$(runs_home "$1")"
+}
+
+# What a raise kept, brought home. COPIED and not moved: the raise that comes
+# next is the gate's evaluator, it is given the primary worktree, and what it
+# reads there is this home — but a build worktree that is resumed into for a
+# second round must still carry what its earlier rounds kept, because that
+# worktree is where a builder looks for what it ran last time. Both copies are
+# ignored, so neither reaches a commit either way.
+runs_harvest() { # $1 the working tree that raise ran in
+	# `_hsrc` and not `_rh`: `runs_open` below sets `_rh` to the DESTINATION, and
+	# a source read back out of it afterwards would copy the home onto itself and
+	# report a harvest that never happened.
+	_hsrc=$(runs_home "$1")
+	[ "$_hsrc" = "$runs" ] && return 0
+	[ -d "$_hsrc" ] || return 0
+	runs_open_at "$runs" || {
+		printf '%s: could not open the kept-output home at %s — what the raise kept is still at %s and NOTHING was lost, but it is not in the item and a close will not archive it.\n' \
+			"$ME" "$runs" "$_hsrc" >&2
+		return 1
+	}
+	# `*` never matches a leading dot, so the home's own `.gitignore` is not one
+	# of the things carried across; the one already at the far end stays.
+	_hv=0
+	for _hf in "$_hsrc"/*; do
+		# REGULAR FILES, because the convention is one file per run and copying a
+		# tree home would be this script guessing at something nobody stated. What
+		# is left behind is NAMED rather than dropped in silence: a context that
+		# kept a directory has kept something, and being told where it stayed is
+		# the difference between a limit and a loss.
+		# An empty home leaves the glob unmatched, and then this is the literal
+		# `*` rather than anything on disk.
+		[ -e "$_hf" ] || continue
+		if [ ! -f "$_hf" ]; then
+			printf '%s: %s is not a file, so it was NOT brought home — kept output is one file per run. It is still at %s.\n' \
+				"$ME" "${_hf##*/}" "$_hf" >&2
+			continue
+		fi
+		if cp "$_hf" "$runs/${_hf##*/}"; then
+			_hv=$((_hv + 1))
+		else
+			printf '%s: could not bring %s home to %s — it stays where the raise left it.\n' \
+				"$ME" "$_hf" "$runs" >&2
+		fi
+	done
+	[ "$_hv" -gt 0 ] && say "kept output: $_hv file(s) now in $runs_rel."
+	return 0
+}
+
+# THE SWEEP, run by `close` before the archive move and by nothing else.
+#
+# Sets three lists, each a run of newline-terminated names: RUNS_KEPT (the last
+# run of each suite-and-shell, which the move carries into the archive),
+# RUNS_SWEPT (superseded, removed here, and in no commit anywhere because the
+# home was never committed) and RUNS_UNKEYED (a name this cannot key, kept
+# untouched). It also takes the ignore file away, which is what lets the archive
+# move deliver the survivors into the next record commit.
+RUNS_KEPT=''
+RUNS_SWEPT=''
+RUNS_UNKEYED=''
+runs_sweep() {
+	RUNS_KEPT='' RUNS_SWEPT='' RUNS_UNKEYED=''
+	[ -d "$runs" ] || return 0
+	# ONLY A REGULAR FILE IS EVEN CONSIDERED. The convention is one file per run,
+	# so anything else here — a directory a context made, a link — is something
+	# nobody said this may reason about: it is reported and kept, exactly as a
+	# name this cannot key is, and it is never a candidate for removal whatever
+	# it happens to be called. `*` never matches a leading dot, so the home's own
+	# ignore file is not one of the entries seen here.
+	: >"$WORK/runs-names"
+	for _f in "$runs"/*; do
+		if [ -f "$_f" ]; then
+			printf '%s\n' "${_f##*/}" >>"$WORK/runs-names"
+		elif [ -e "$_f" ]; then
+			RUNS_UNKEYED="$RUNS_UNKEYED${_f##*/}
+"
+		fi
+	done
+	# `<key>\t<name>`, sorted. The key is the first two dot-fields of a
+	# conforming name and EMPTY for one this cannot read, and a tab sorts below
+	# every printable character, so the unkeyable ones land together at the top
+	# and each key's own runs land adjacent in ascending order. The stamp is
+	# fixed-width, so last in that order is the newest.
+	awk -F. -v OFS="$TAB" '
+		NF == 4 && $4 == "log" && $1 != "" && $2 != "" && $3 != "" { print $1 "." $2, $0; next }
+		{ print "", $0 }
+	' "$WORK/runs-names" | LC_ALL=C sort >"$WORK/runs-keyed"
+	# A run survives when the line after it does not carry its key.
+	awk -F"$TAB" '
+		{ k[NR] = $1; n[NR] = $2 }
+		END {
+			for (i = 1; i <= NR; i++) {
+				if (k[i] == "") { print "unkeyed " n[i]; continue }
+				if (i < NR && k[i + 1] == k[i]) print "sweep " n[i]
+				else print "keep " n[i]
+			}
+		}
+	' "$WORK/runs-keyed" >"$WORK/runs-verdict"
+	while IFS= read -r _line; do
+		_what=${_line%% *}
+		_name=${_line#* }
+		case "$_what" in
+		sweep)
+			if rm -f "$runs/$_name"; then
+				RUNS_SWEPT="$RUNS_SWEPT$_name
+"
+			else
+				printf '%s: could not remove the superseded run %s — it is archived with the rest.\n' \
+					"$ME" "$_name" >&2
+				RUNS_KEPT="$RUNS_KEPT$_name
+"
+			fi
+			;;
+		keep) RUNS_KEPT="$RUNS_KEPT$_name
+" ;;
+		unkeyed) RUNS_UNKEYED="$RUNS_UNKEYED$_name
+" ;;
+		esac
+	done <"$WORK/runs-verdict"
+	# The home stops ignoring itself: from here the survivors are ordinary files
+	# in the item folder, and the move puts them where the closing commit stages
+	# them. An empty home is taken away rather than archived as a bare directory.
+	rm -f "$runs/.gitignore"
+	rmdir "$runs" 2>/dev/null || :
+	return 0
+}
+
+# What the sweep did, for the `closed` entry. Says something in every case,
+# including the case where there was nothing to say something about.
+runs_report() {
+	if [ -z "$RUNS_KEPT$RUNS_SWEPT$RUNS_UNKEYED" ]; then
+		printf 'No run output was kept for this item.\n'
+		return 0
+	fi
+	printf 'Kept output, swept to the last run of each suite-and-shell:\n\n'
+	printf '%s' "$RUNS_KEPT" | while IFS= read -r _r; do
+		[ -n "$_r" ] && printf -- '- archived: runs/%s\n' "$_r"
+	done
+	printf '%s' "$RUNS_UNKEYED" | while IFS= read -r _r; do
+		[ -n "$_r" ] && printf -- '- archived UNSWEPT, the sweep could not key it: runs/%s\n' "$_r"
+	done
+	printf '%s' "$RUNS_SWEPT" | while IFS= read -r _r; do
+		[ -n "$_r" ] && printf -- '- superseded: removed by this closure, and in no commit anywhere — runs/%s\n' "$_r"
+	done
+	return 0
+}
+
+# ==============================================================================
+# what this brief depends on, and whether that work item satisfies
 # ==============================================================================
 #
 # The law is WHAT A BRIEF DEPENDS ON in this script's header; this is only its
 # code. Nothing below writes a brief, and nothing below guesses: a line it cannot
-# read whole stops the item, and so does a name that has not closed.
+# read whole stops the item, and so does a name that does not satisfy.
 
 # THE LINE, REDUCED TO THE WORK ITEMS IT NAMES.
 #   0, DEPENDS_ON_LIST empty   it names none — absent, blank, `none` or `nothing`
@@ -2791,30 +3447,73 @@ nothing
 	return 0
 }
 
-# ONE WORK ITEM: has it closed? Its stage is read from its own brief, wherever
-# that brief now sits — ARCHIVING PRESERVES THE STAGE and never stamps one, so
-# being in the archive is not being done.
+# AN ARCHIVED ITEM'S DELIVERIES: is every one of them merged? The header's WHAT
+# SATISFIES ONE says why this question is asked and what an unreadable answer
+# means; this is only how it is asked. 0 = every distinct pull request its record
+# names reads MERGED, and the item satisfies. The local names are all `_d`-
+# prefixed because this runs two loops down inside `depends_on_ok`'s own.
+depends_on_merged() { # $1 slug  $2 its record  $3 the stage it archived at
+	_dat="archived at ${3:-no readable stage}"
+	_dn=$(delivery_count "$2")
+	if [ "$_dn" -eq 0 ]; then
+		DEPENDS_ON_WHY="work item $1 was $_dat and its record names no delivery at all — there is nothing here to witness merged"
+		return 1
+	fi
+	_dnamed=$(delivery_pr_urls "$2" | awk 'END { print NR + 0 }')
+	if [ "$_dnamed" -lt "$_dn" ]; then
+		DEPENDS_ON_WHY="work item $1 was $_dat and $((_dn - _dnamed)) of its $_dn recorded deliveries name a commit and no pull request — nothing here can witness those merged"
+		return 1
+	fi
+	if ! command -v gh >/dev/null 2>&1; then
+		DEPENDS_ON_WHY="work item $1 was $_dat, so whether its delivery merged is read from the pull request itself — and there is no \`gh\` on this PATH to read it with"
+		return 1
+	fi
+	_durls=$(delivery_pr_urls "$2" | awk '!seen[$0]++')
+	_doifs=$IFS
+	IFS='
+'
+	for _durl in $_durls; do
+		IFS=$_doifs
+		if ! _dstate=$(cd "$root" && gh pr view "$_durl" --json state --jq .state 2>"$WORK/dep-pr.err"); then
+			DEPENDS_ON_WHY="work item $1 was $_dat and the state of its delivery $_durl could not be read: $(tr -d '\015' <"$WORK/dep-pr.err" | tr '\n\t' '  ')"
+			return 1
+		fi
+		_dstate=$(printf '%s\n' "$_dstate" | tr -d '\015' | sed -n 1p)
+		if [ "$_dstate" != MERGED ]; then
+			DEPENDS_ON_WHY="work item $1 was $_dat and its delivery $_durl reads ${_dstate:-no state at all}, not MERGED"
+			return 1
+		fi
+		IFS='
+'
+	done
+	IFS=$_doifs
+	return 0
+}
+
+# ONE WORK ITEM: does it satisfy? Its stage is read from its own brief, wherever
+# that brief now sits, and an archived one that never reached `closed` is asked
+# the second question rather than refused outright.
 DEPENDS_ON_WHY=''
-depends_on_one() { # $1 one slug -> 0 it has closed, 1 it has not, with the why
+depends_on_one() { # $1 one slug -> 0 it satisfies, 1 it does not, with the why
 	DEPENDS_ON_WHY=''
 	if [ -f "$ITEMS/$1/brief.md" ]; then
 		_st=$(hdr "$ITEMS/$1/brief.md" Stage)
 		[ "$_st" = closed ] && return 0
-		DEPENDS_ON_WHY="work item $1 is at ${_st:-no readable stage}, not closed"
+		DEPENDS_ON_WHY="work item $1 is at ${_st:-no readable stage}, not closed, and is still in flight — an item that is not over satisfies nothing, whatever its branch has done"
 		return 1
 	fi
 	if [ -f "$ITEMARCH/$1/brief.md" ]; then
 		_st=$(hdr "$ITEMARCH/$1/brief.md" Stage)
 		[ "$_st" = closed ] && return 0
-		DEPENDS_ON_WHY="work item $1 was archived at ${_st:-no readable stage}, not closed — archiving leaves the stage as it was"
+		depends_on_merged "$1" "$ITEMARCH/$1/log.md" "$_st" && return 0
 		return 1
 	fi
 	DEPENDS_ON_WHY="$1 is not a work item here — neither .remit/work-items/$1 nor its archive is there"
 	return 1
 }
 
-# THE WHOLE LINE, BEFORE A BUILD. 0 = every work item it names has closed, or it
-# names none; 1 = it has not, with DEPENDS_ON_STOP the reason a row will show and
+# THE WHOLE LINE, BEFORE A BUILD. 0 = every work item it names satisfies, or it
+# names none; 1 = one does not, with DEPENDS_ON_STOP the reason a row will show and
 # DEPENDS_ON_NOTE the prose the record will carry.
 #
 # The line is read from the item's AUTHORITY, and from the brief where a phase
@@ -2841,7 +3540,7 @@ lifts this."
 	fi
 	[ -n "$DEPENDS_ON_LIST" ] || return 0
 
-	# EVERY NAME IS OBSERVED, and the first that has not closed is the one the
+	# EVERY NAME IS OBSERVED, and the first that does not satisfy is the one the
 	# reason names.
 	_held=''
 	_oifs=$IFS
@@ -2860,11 +3559,12 @@ lifts this."
 	[ -n "$_held" ] || return 0
 
 	DEPENDS_ON_STOP="depends on: $DEPENDS_ON_WHY"
-	DEPENDS_ON_NOTE="The brief's \`**Depends on:**\` line names a work item that has not closed:
+	DEPENDS_ON_NOTE="The brief's \`**Depends on:**\` line names a work item that does not satisfy it:
 $DEPENDS_ON_WHY.
 The build did not start — a delivery authored on a tree that lacks what it depends
 on is the incident this check exists for. The item waits here until that one closes
-through its gate, or until the practitioner rules that the line has changed."
+through its gate or ends with its delivery merged, or until the practitioner rules
+that the line has changed."
 	return 1
 }
 
@@ -2943,10 +3643,11 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 			_authornow=yes
 		else
 			# BEFORE THE BUILD, and before any worktree exists: what work items
-			# does this brief depend on, and have they closed? One that has not
+			# does this brief depend on, and does each satisfy? One that does not
 			# stops the item where it is, for the practitioner — nothing failed,
-			# so nothing escalates. Nothing outside this repository is asked, so
-			# there is no capability here that can be absent.
+			# so nothing escalates. An archived item's merge is witnessed at the
+			# pull request, so `gh` can be asked here; a `gh` that is absent or
+			# cannot answer HOLDS the item too, and still does not escalate.
 			if ! depends_on_ok; then
 				LOOP_STOP=$DEPENDS_ON_STOP
 				LOOP_STOP_NOTE=$DEPENDS_ON_NOTE
@@ -3165,6 +3866,10 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 do_close() { # $1 authority for this closure, in words  $2 delivery text  $3 `closed` to stamp it
 	_auth=$1 _delivery=$2 _stamp=${3:-}
 	log_ensure
+	# THE SWEEP, before anything is written and well before the move: what it
+	# leaves is what the move carries into the archive, and what it says is part
+	# of the entry composed below.
+	runs_sweep
 	nocr "$log" | awk '
 		/^- finding [0-9]+: / {
 			n = $3
@@ -3193,6 +3898,8 @@ do_close() { # $1 authority for this closure, in words  $2 delivery text  $3 `cl
 		else
 			printf 'No finding was without a disposition.\n'
 		fi
+		printf '\n'
+		runs_report
 		if [ "$_stamp" = closed ]; then
 			printf '\nStage: closed — this closure came through the closing gate and stamped it.\n'
 		else
@@ -3206,25 +3913,44 @@ do_close() { # $1 authority for this closure, in words  $2 delivery text  $3 `cl
 	else
 		put_header "$brief" '' "$(hdr "$brief" Stage)" "$(hdr "$brief" Until)" KEEP
 	fi
-	mkdir -p "$ITEMARCH"
+	ensure_dir "$ITEMARCH" || die "could not create $ITEMARCH"
 	mv "$item" "$itemarchive" || die "could not archive $slug"
 }
 
 # ==============================================================================
-# the empty shape of .remit/rules/ — the one thing this script writes there
+# the shape of .remit/rules/, and the rubrics remit ships
 # ==============================================================================
 #
-# The four section headings a gate file is written under, and the ONE rubric
-# remit ships: the universal first question, under `fix` in `refined.md`, because
-# an idea nobody could judge delivered or not is not yet a brief. Every other
-# section arrives empty, and an empty section changes nothing.
+# The four section headings a gate file is written under, and the rubrics remit
+# ships under them. Every other section arrives empty, and an empty section
+# changes nothing.
 #
-# It NEVER overwrites a file that is already there: what is in these files is the
-# practitioner's, through a retro he called, and a second `init` is not a licence
-# to replace it. Sets SEEDED to what it wrote.
+# `rubrics_shipped` is the ONE home of the shipped rubric text: the installer
+# reads it from here, through `remit rules ship`, rather than carrying a copy of
+# its own. Nothing else in this repository states those criteria.
+#
+# `rubrics_seed` NEVER overwrites a file that is already there: what is in these
+# files is the practitioner's, through a retro he called, and a second `init` is
+# not a licence to replace it. Sets SEEDED to what it wrote. Changing what is
+# already there, rubric by rubric, is the installer's migration and not this:
+# `remit rules read` and `remit rules apply` are the two halves it drives, and
+# the policy — what is ours, what is theirs, and who wins where both changed one
+# — is `install.sh`'s and is stated there.
+
+# One line per shipped rubric: <gate> <section> <id> <criterion>, tab separated.
+# r0 is the universal first question, because an idea nobody could judge
+# delivered or not is not yet a brief. a4 and a5 are what a delivery owes its own
+# proof: what one of remit's own scripts decides is asserted, and what a third
+# party decides is asserted against that third party.
+rubrics_shipped() {
+	printf 'refined\tfix\tr0\tthere is enough here to evaluate — an outcome a stranger could judge delivered or not\n'
+	printf 'accepted\tfix\ta4\ta change to what a script decides, reads, writes, refuses, reports or exits with lands a unit test for that behaviour in the same delivery\n'
+	printf 'accepted\tfix\ta5\ta behaviour that depends on a third party that can change under us — a CLI, an account, a model, a network — lands an integration assertion, or names itself uncovered with the reason\n'
+}
+
 SEEDED=''
 rubrics_seed() {
-	mkdir -p "$RUBRICS" || die "could not create .remit/rules"
+	ensure_dir "$RUBRICS" || die "could not create .remit/rules"
 	SEEDED=''
 	for _g in refined accepted closed; do
 		_p="$RUBRICS/$_g.md"
@@ -3236,13 +3962,13 @@ rubrics_seed() {
 			printf 'fresh context that evaluates at this gate, and acts only on the citations that\n'
 			printf 'context returns. What each section does, and the shape of a line, are in\n'
 			printf '`bin/remit`'"'"'s header. Only a retro he calls writes here.\n\n'
-			printf '## promote\n\n'
-			printf '## hold\n\n'
-			printf '## fix\n\n'
-			if [ "$_g" = refined ]; then
-				printf -- '- r0: there is enough here to evaluate — an outcome a stranger could judge delivered or not\n\n'
-			fi
-			printf '## accept\n'
+			for _s in promote hold fix accept; do
+				printf '## %s\n' "$_s"
+				_lines=$(rubrics_shipped |
+					awk -F"$TAB" -v g="$_g" -v s="$_s" '$1 == g && $2 == s { printf "- %s: %s\n", $3, $4 }')
+				[ -n "$_lines" ] && printf '\n%s\n' "$_lines"
+				[ "$_s" = accept ] || printf '\n'
+			done
 		} >"$_p"
 		SEEDED="$SEEDED $_g.md"
 	done
@@ -3253,12 +3979,134 @@ rubrics_seed() {
 	return 0
 }
 
+# What a directory's gate files carry NOW, in the same four columns
+# `rubrics_shipped` prints, read with the same parser this script judges a gate
+# by — so the installer's view of a rubric cannot drift from the one that decides
+# anything. A line this script cannot read is emitted as
+# `!<TAB><gate><TAB><line-number><TAB><text>`, exactly as `rubrics_dump` does,
+# and it is the caller's to refuse on.
+rubrics_read_dir() { # $1 a directory holding refined.md, accepted.md, closed.md
+	RUBRICS=$1
+	for _f in refined accepted closed; do
+		rubrics_dump_file "$_f"
+	done
+	return 0
+}
+
+# Apply an edit list to a directory's gate files. One op per stdin line —
+# `<gate><TAB><section><TAB><id><TAB><op><TAB><text>`, op one of `add`, `set`,
+# `del` — and NOTHING else in a file is touched: its prose, its headings, its
+# order and every rubric no op names come through unchanged.
+#
+# ONE EXCEPTION, and it is the line ending. A file this rewrites comes out with
+# LF endings whatever it went in with, because it is read through `nocr` — the
+# same way `rubrics_dump_file` reads it, and the same way every other reader of
+# these files reads it. That is what remit wrote in the first place (`rubrics_seed`
+# is all `printf`), so it is a return to the shape rather than a change of it, and
+# a repository that checks out CRLF converts on the way out again. It is stated
+# here because "unchanged" above would otherwise be a claim about bytes that this
+# does not keep.
+#
+# An `add` whose section heading is not in the file is NOT invented: a heading
+# the practitioner removed stays removed. It is reported unapplied, on stdout, as
+# `unplaced<TAB><gate><TAB><section><TAB><id>`, and what became of it is the
+# caller's to say.
+rubrics_apply_dir() { # $1 the directory; the edit list on stdin
+	RUBRICS=$1
+	_ops="$WORK/rules-ops"
+	tr -d '\015' >"$_ops"
+	for _g in refined accepted closed; do
+		_p="$RUBRICS/$_g.md"
+		[ -f "$_p" ] || continue
+		awk -F"$TAB" -v g="$_g" '$1 == g { print $2 "\t" $3 "\t" $4 "\t" $5 }' "$_ops" >"$WORK/rules-ops.$_g"
+		[ -s "$WORK/rules-ops.$_g" ] || continue
+		: >"$WORK/rules-unplaced.$_g"
+		nocr "$_p" | awk -v opsfile="$WORK/rules-ops.$_g" -v unplaced="$WORK/rules-unplaced.$_g" -v g="$_g" '
+			function secname(l,   s) {
+				s = l
+				sub(/^##[ \t]*/, "", s)
+				sub(/[ \t]*$/, "", s)
+				return tolower(s)
+			}
+			# Emit the section just closed: its own lines, then any rubric added
+			# to it, after the last thing already in it and before the blank line
+			# that separates it from the next heading.
+			function flush(atend,   i, n) {
+				n = nbuf
+				if (nadd[sec] > 0) {
+					while (n > 0 && buf[n - 1] ~ /^[ \t]*$/) n--
+					for (i = 0; i < n; i++) print buf[i]
+					if (n == 0 || buf[n - 1] !~ /^- /) print ""
+					for (i = 0; i < nadd[sec]; i++) print addline[sec, i]
+					if (!atend) print ""
+					nadd[sec] = 0
+				} else {
+					for (i = 0; i < n; i++) print buf[i]
+				}
+				nbuf = 0
+			}
+			BEGIN {
+				while ((getline opline < opsfile) > 0) {
+					if (split(opline, f, "\t") < 4) continue
+					if (f[3] == "add") {
+						# +0 first: an unset count subscripts as "", not as 0,
+						# and the add would then be stored where flush never
+						# looks for it.
+						k = nadd[f[1]] + 0
+						addline[f[1], k] = "- " f[2] ": " f[4]
+						addid[f[1], k] = f[2]
+						nadd[f[1]] = k + 1
+					} else if (f[3] == "set") {
+						newtext[f[1], f[2]] = f[4]
+						isset[f[1], f[2]] = 1
+					} else if (f[3] == "del") {
+						drop[f[1], f[2]] = 1
+					}
+				}
+				close(opsfile)
+				sec = ""
+				nbuf = 0
+			}
+			/^##/ { flush(0); sec = secname($0); print; next }
+			{
+				if (sec != "" && $0 ~ /^- /) {
+					rest = substr($0, 3)
+					p = index(rest, ":")
+					if (p >= 2) {
+						id = substr(rest, 1, p - 1)
+						if (id != "" && id !~ /[ \t]/) {
+							if ((sec, id) in drop) next
+							if ((sec, id) in isset) {
+								buf[nbuf++] = "- " id ": " newtext[sec, id]
+								next
+							}
+						}
+					}
+				}
+				buf[nbuf++] = $0
+			}
+			END {
+				flush(1)
+				for (s in nadd) {
+					for (i = 0; i < nadd[s]; i++) {
+						u = "unplaced\t" g "\t" s "\t" addid[s, i]
+						print u > unplaced
+					}
+				}
+			}
+		' >"$_p.remit-tmp" || die "could not rewrite $_p"
+		mv "$_p.remit-tmp" "$_p" || die "could not replace $_p"
+		cat "$WORK/rules-unplaced.$_g"
+	done
+	return 0
+}
+
 # ==============================================================================
 # scratch, and the values every verb shares
 # ==============================================================================
 
 WORK=$(mktemp -d 2>/dev/null) || WORK=${TMPDIR:-/tmp}/remit-$$
-mkdir -p "$WORK" || die "cannot make a scratch directory"
+ensure_dir "$WORK" || die "cannot make a scratch directory"
 # `SAVETMP` is the half-written registry `setup --write` builds beside the real
 # one. It is named here so that an interrupt between building it and renaming it
 # leaves nothing behind: the registry is either the old file or the new one.
@@ -3332,7 +4180,7 @@ create_item() {
 	rubrics_check
 	[ -e "$item" ] && die "work item '$slug' already exists at .remit/work-items/$slug"
 	[ -e "$itemarchive" ] && die "'$slug' is already archived at .remit/work-items/.archive/$slug"
-	mkdir -p "$item"
+	ensure_dir "$item" || die "could not create $item"
 	tr -d '\015' >"$brief"
 	if [ ! -s "$brief" ]; then
 		rm -rf "$item"
@@ -3629,7 +4477,7 @@ report)
 	case "$report_cmd" in
 	new)
 		[ -e "$rfile" ] && die "a field report named '$report_name' already exists at .remit/field-reports/$report_name.md"
-		mkdir -p "$REPORTS"
+		ensure_dir "$REPORTS" || die "could not create $REPORTS"
 		tr -d '\015' >"$rfile"
 		if [ ! -s "$rfile" ]; then
 			rm -f "$rfile"
@@ -3642,7 +4490,7 @@ report)
 	close)
 		[ -f "$rfile" ] || die "no field report '$report_name' — expected .remit/field-reports/$report_name.md"
 		[ -e "$rarch" ] && die "'$report_name' is already archived at .remit/field-reports/.archive/$report_name.md"
-		mkdir -p "$REPORTARCH"
+		ensure_dir "$REPORTARCH" || die "could not create $REPORTARCH"
 		mv "$rfile" "$rarch" || die "could not archive the report"
 		say "archived .remit/field-reports/$report_name.md to .remit/field-reports/.archive/."
 		commit_and_push "remit: close report $report_name" \
@@ -3955,7 +4803,7 @@ setup)
 	# tmp + rename in the SAME directory, so the registry is either the file that
 	# was there or the whole of the new one, and never a truncated half of either
 	# — including when this script is interrupted mid-save.
-	mkdir -p "$(dirname "$SETTINGSFILE")" ||
+	ensure_dir "$(dirname "$SETTINGSFILE")" ||
 		die "could not create $(dirname "$SETTINGS_REL")"
 	SAVETMP="$SETTINGSFILE.remit-setup.$$"
 	cat "$proposal" >"$SAVETMP" || die "could not write beside $SETTINGS_REL — nothing was changed"
@@ -3981,24 +4829,81 @@ setup)
 	;;
 
 rules)
+	# The four that need no repository, and commit nothing. They exist so the
+	# installer reads the shipped rubrics from their one home rather than
+	# carrying a copy, and migrates a target's rubric by rubric.
+	case "$rules_cmd" in
+	ship)
+		rubrics_shipped
+		exit 0
+		;;
+	seed)
+		RUBRICS=$rules_dir
+		rubrics_seed
+		# shellcheck disable=SC2086
+		[ -n "$SEEDED" ] && printf '%s\n' $SEEDED
+		exit 0
+		;;
+	read)
+		rubrics_read_dir "$rules_dir"
+		exit 0
+		;;
+	apply)
+		rubrics_apply_dir "$rules_dir"
+		exit 0
+		;;
+	esac
 	rubrics_seed
 	if [ -z "$SEEDED" ]; then
 		say ".remit/rules/ is already there and nothing was written — what is in it is the practitioner's."
 		exit 0
 	fi
 	say "laid down .remit/rules/ —$SEEDED"
-	say "one rubric ships, r0 under refined.md's \`fix\`. Every other section is empty, and an empty section changes nothing: every gate waits for the practitioner until he writes one, in a retro he calls."
-	commit_and_push "remit: lay down .remit/rules/" ".remit/rules"
+	say "what ships: $(rubrics_shipped | awk -F"$TAB" '{ printf "%s%s under %s.md'"'"'s `%s`", (NR > 1 ? ", " : ""), $3, $1, $2 }')."
+	say "Every other section is empty, and an empty section changes nothing: every gate waits for the practitioner until he writes one, in a retro he calls."
+	# THE PROJECT's, not the record's — see `commit_project_and_push`.
+	commit_project_and_push "remit: lay down .remit/rules/" ".remit/rules"
 	exit $?
 	;;
 
 migrate)
+	# NOT WHILE THE RECORD LIVES ELSEWHERE. This verb moves a repository's OWN
+	# legacy work location into `work-items/` and commits the whole `.remit` tree
+	# as one pathspec — a project-shaped move, made before there was anywhere else
+	# for a record to be. Against personal records it would have to migrate out of
+	# one repository and into another, which is a different operation nobody has
+	# specified. It refuses and says so rather than half-doing that.
+	[ -n "$RECORDS_REMOTE" ] &&
+		die "migrate is refused while $LOCALSETTINGS points the record at $RECORDS_REMOTE — this verb moves a repository's own legacy layout in place, and moving a record between repositories is not something it does. Migrate first with the pointer removed, or move the record by hand."
 	# ONE-TIME, IDEMPOTENT, ONE COMMIT. It refuses outright once work-items/
-	# exists rather than half-applying itself a second time.
-	[ -d "$ITEMS" ] && die "already migrated — .remit/work-items/ exists. This move happens once."
+	# HOLDS SOMETHING rather than half-applying itself a second time.
+	#
+	# The test is what is IN the directory, not whether the directory is there,
+	# and the difference is not academic: `install.sh` creates an empty
+	# `.remit/work-items/` on every install, because git tracks no empty
+	# directory and a target is owed the work location on the day it installs.
+	# So the whole install-then-migrate order — install remit into a repository
+	# that still carries the old layout, then migrate it — refused itself, and
+	# the one repository that needed migrating most was the one that could never
+	# run it. Found live on a target, 2026-08-30.
+	#
+	# An EMPTY work-items/ is therefore not-yet-migrated: there is nothing there
+	# to half-apply over. A NON-EMPTY one — one live item, or the `.archive/`
+	# this migration itself moves in — is a migration that already happened, and
+	# is refused exactly as before. Dotted entries count: `.archive` is the only
+	# thing a migration may leave behind with no visible sibling.
+	if [ -d "$ITEMS" ]; then
+		for _e in "$ITEMS"/* "$ITEMS"/.*; do
+			case "${_e##*/}" in '.' | '..') continue ;; esac
+			# An unmatched glob comes back as itself; `-e` is what sorts a
+			# real entry from that, so no name is special-cased away.
+			[ -e "$_e" ] || continue
+			die "already migrated — .remit/work-items/ holds work. This move happens once."
+		done
+	fi
 	[ -d "$REMITDIR" ] || die "no .remit/ in this repository — there is nothing to migrate"
 	moved=0
-	mkdir -p "$ITEMS" || die "could not create .remit/work-items"
+	ensure_dir "$ITEMS" || die "could not create .remit/work-items"
 
 	migrate_one() { # $1 the item folder, already in its new home
 		_d=$1
@@ -4089,7 +4994,7 @@ migrate)
 
 	paths=".remit"
 	if [ -d "$root/field-reports" ]; then
-		mkdir -p "$REPORTS"
+		ensure_dir "$REPORTS" || die "could not create $REPORTS"
 		for f in "$root"/field-reports/*; do
 			[ -e "$f" ] || continue
 			mv "$f" "$REPORTS/" || die "could not move $f"
@@ -4134,7 +5039,7 @@ migrate)
 				}
 			' >"$carried"
 			if [ -s "$carried" ]; then
-				mkdir -p "$(dirname "$SETTINGSFILE")"
+				ensure_dir "$(dirname "$SETTINGSFILE")"
 				jq -R -s '
 					(split("\n") | map(select(length > 0) | split("\t"))) as $rows
 					| {
@@ -4289,7 +5194,7 @@ resume)
 
 		# A phase waiting at the `accepted` stop — whether the item was resting
 		# there when this resume began or has just arrived. The chain stops here
-		# and the hand-off happens below: nothing is merged out from under work he
+		# and the hand-off happens below: nothing is closed out from under work he
 		# has queued, and nothing of that phase is built in this run.
 		if [ "$st" = accepted ]; then
 			PHASE_QUEUED=$(queued_phase)
@@ -4369,8 +5274,9 @@ and no second round was run."
 		accepted)
 			# THE CLOSING GATE. It judges the folder that is already there —
 			# `log.md` and every evaluator's note in it — so nothing is built in
-			# front of it, and it runs BEFORE any merge. A must-fix raised here
-			# goes back to a builder like any other.
+			# front of it. It licenses the CLOSURE and never a merge: this
+			# mechanism merges nothing. A must-fix raised here goes back to a
+			# builder like any other.
 			run_gate closed build no
 			_grc=$?
 			if [ "$_grc" = 2 ]; then
@@ -4417,7 +5323,6 @@ in the stage it is in, for the practitioner, whatever else was cited there."
 			if [ -n "$PR_NUM" ]; then
 				command -v gh >/dev/null 2>&1 || escalate "cannot act: gh"
 				build_worktree || escalate "cannot act: could not prepare the build worktree"
-				checks_green "$PR_NUM" || escalate "$CHECKS_ERR"
 				out=$(cd "$WT" && gh pr ready "$PR_NUM" 2>&1) ||
 					escalate "cannot act: gh pr ready — $(printf '%s' "$out" | tr '\n' ' ')"
 				say "pull request: #$PR_NUM is ready for review — a recorded passing verdict took it out of draft."
@@ -4427,18 +5332,17 @@ in the stage it is in, for the practitioner, whatever else was cited there."
 			say "stage: accepted."
 			;;
 		accepted)
-			mark_step "the merge into closed"
-			# The pull request is read back from the record when this resume did
-			# not open it — nothing here guesses which one carries the item.
+			mark_step "the move into closed"
+			# The pull request is read back from the record for the closing
+			# entry's delivery line, and for nothing else: NOTHING HERE MERGES.
+			# Ruled by the practitioner, 2026-08-30 — "CI/CD is not remit's
+			# job … it's just about using sub-agents evaluating, and getting
+			# work done through a mechanism to ensure state of my work" — so the
+			# chain's last act on a pull request is the flip out of draft at the
+			# `accepted` gate, and merging is the host repository's and his. An
+			# item whose record names no pull request still closes: the gate is
+			# what licenses this, and it was asked.
 			pr_from_record
-			[ -n "$PR_NUM" ] ||
-				escalate "cannot act: no pull request is recorded for this item, and nothing here guesses which one carries it"
-			build_worktree || escalate "cannot act: could not prepare the build worktree"
-			command -v gh >/dev/null 2>&1 || escalate "cannot act: gh"
-			checks_green "$PR_NUM" || escalate "$CHECKS_ERR"
-			out=$(cd "$WT" && gh pr merge "$PR_NUM" --squash --delete-branch 2>&1) ||
-				escalate "cannot act: gh pr merge — $(printf '%s' "$out" | tr '\n' ' ')"
-			say "merged: #$PR_NUM."
 			# WHAT LICENSED THIS CLOSURE is written down, because two different
 			# things can license one and they are not the same fact. Either the
 			# practitioner's own `until` reached `closed`, or the closing gate's
@@ -4452,8 +5356,13 @@ in the stage it is in, for the practitioner, whatever else was cited there."
 				_lic="**Until:** closed — the practitioner's own word reached this stop and nothing held it"
 				_licshort="until closed"
 			fi
+			if [ -n "$PR_NUM" ]; then
+				_del="Delivered as pull request #$PR_NUM${PR_URL:+ ($PR_URL)}. It is out of draft and NOT merged: merging is the repository's and the practitioner's, never this mechanism's."
+			else
+				_del=''
+			fi
 			do_close "$_lic. Every finding nobody ruled on is sealed by this closure as pre-authorised, and never as a ruling made on each one" \
-				"Merged as pull request #$PR_NUM${PR_URL:+ ($PR_URL)}." closed
+				"$_del" closed
 			say "closed .remit/work-items/$slug — archived whole to .remit/work-items/.archive/$slug."
 			commit_step "remit: close $slug ($_licshort)" \
 				".remit/work-items/$slug" ".remit/work-items/.archive/$slug"
