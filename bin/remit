@@ -16,13 +16,37 @@
 #              given together with `--park` is ONE ruling — run to X and rest
 #              there — so it is recorded as ONE value: `**Until:** X, then park`.
 #              A fourth line would let an edit keep one half and drop the other,
-#              and the half that survived would be a ruling nobody gave. What the
-#              recorded `, then park` binds, until a later `--until` replaces it:
-#              no promote may carry the item past X, and on REACHING X the
-#              attention goes back to `parked`, so no later `promote` is ever
-#              consulted for it again. A `hold` may still stop it earlier — and
-#              then it is active at that earlier stop, with the rule named,
-#              because it never reached X.
+#              and the half that survived would be a ruling nobody gave.
+#
+#              THIS IS THE ONE STATEMENT OF THAT RULING. Every other mention of
+#              it — in this header, in `usage`, in `create_item`, in the resume
+#              loop — POINTS HERE and repeats none of it.
+#
+#              PARK IS A CEILING, NOT A BRAKE. Ruled by the practitioner,
+#              2026-09-01: "until is where i need the card to go to
+#              autonomously. but our promotion rules might have it move past
+#              refined, which is why park exists, to ensure that those promotion
+#              rules aren't allowed to fire." So `--until X --park`:
+#
+#                * RUNS, and runs WHEN IT WAS GIVEN — at `new`, in that same
+#                  command, exactly as far as `--until X` alone would carry it,
+#                  and at a `resume` from wherever the item stands;
+#                * lets NO promote carry the item past X — not on that run and
+#                  not on any later one, until a later `--until` replaces the
+#                  recorded value;
+#                * on REACHING X puts the attention back to `parked`, so the
+#                  ruling outlives the run: no later `promote` is ever consulted
+#                  for it again, and a bare `resume` moves it nowhere;
+#                * is still stoppable EARLIER — by a `hold`, by a must-fix, by a
+#                  dependency that does not satisfy, by an escalation. That stop
+#                  stands exactly as it would with no park at all: the item is
+#                  active at that earlier stop with the rule named, because it
+#                  never reached X. The `, then park` stays recorded, so it is
+#                  the ceiling on every later resume just the same.
+#
+#              `--park` with NO `--until` is the other thing entirely, and all
+#              the two share is the word: nothing runs, and the item is born
+#              parked at `new` with no `until` recorded at all.
 #
 #              plus **Migrated:** — written only by `remit migrate`, recording
 #              what that one-time move had to infer.
@@ -67,9 +91,11 @@
 #       `**Depends on:**` line is optional — omitted is `none` — and one that is
 #       there is REFUSED unless every name on it can be read. Born ACTIVE at
 #       `new`.
-#       `--park` files it instead: parked, and it moves for nothing.
-#       `--until X --park` is born parked too, with X and the park recorded as
-#       one value: a `resume` then runs it to X and PARKS IT THERE.
+#       `--park` ALONE files it instead: parked at `new`, and it moves for
+#       nothing.
+#       `--until X --park` is ONE ruling and runs like `--until X`: the chain
+#       runs NOW, here, as far as X, and parks the item there. What that binds
+#       is stated once, at `**Until:**` above, and is not restated here.
 #
 #   remit resume <slug> [--until refined|accepted|closed [--park]]
 #       The whole chain. Activates a parked or escalated item, records a new
@@ -78,10 +104,10 @@
 #       cited carries it, and never past a `hold` one cited, a must-fix that
 #       still stands, or a `**Depends on:**` work item that does not satisfy —
 #       then prints the row `list` would show, and why it stopped.
-#       `--park` here attaches to the `--until` beside it, and means exactly what
-#       it means at `new`: run to that stop and rest there. It is refused on its
-#       own, because a `resume` whose only word is "do not move" is two commands
-#       arguing; `remit park <slug>` is that instruction.
+#       `--park` here attaches to the `--until` beside it and is the same one
+#       ruling it is at `new` — `**Until:**` above states it. It is refused on
+#       its own, because a `resume` whose only word is "do not move" is two
+#       commands arguing; `remit park <slug>` is that instruction.
 #
 #   remit park <slug>            attention -> parked; the stage does not move
 #   remit stop <slug>            end the chain that is running on this item. It
@@ -184,7 +210,9 @@
 # (a rubric the gate's evaluator cited stopped it here for his eyes), `fix:
 # <id>` (a rubric the gate's evaluator cited is the must-fix still standing),
 # `depends on: <the work item the line names that does not satisfy it, or what it
-# left unreadable>`, `<n> fails`, `same must-fix twice`, `cannot act: <what>`, `authority changed`
+# left unreadable>`, `<n> fails`, `same must-fix twice`, `cannot act: <what>`,
+# `stalled: <what the seam said>` (a raised CLI stopped writing anything and the
+# seam ended it — THE IDLE BOUND in `bin/remit-invoke`'s header), `authority changed`
 # (it changed while the chain was running — THE AUTHORITY LOCK below), `stopped
 # on the practitioner's word at <step>`, `stopped a crashed chain at <step>`,
 # `queued phase: <file>` (a phase was waiting
@@ -329,7 +357,10 @@
 # allow-listed environment, and writes its provenance to the sidecar below. How
 # it does each of those is ITS header's to say and is not restated here. An
 # invoke that exits non-zero is recorded as `cannot act: remit-invoke` and
-# escalates the item at the stage it could not leave. Nothing here ever pretends.
+# escalates the item at the stage it could not leave — EXCEPT exit 8, the seam's
+# idle bound, which is recorded as `stalled: <what the seam said>` because a CLI
+# that went silent and was ended is a fact about the run and not a seam that
+# refused to raise one. Nothing here ever pretends.
 #
 # WHAT THE SEAM IS GIVEN, in the environment:
 #
@@ -385,7 +416,12 @@
 #                     into, already made and already ignoring itself. Handed to
 #                     every role: the ones that author keep their run output
 #                     there, and the ones that judge read it there. KEPT OUTPUT
-#                     HAS A HOME above is the law.
+#                     HAS A HOME above is the law. IT IS ALWAYS INSIDE THE
+#                     WORKTREE THE RAISE RUNS IN, and for a role that JUDGES it
+#                     is filled with the whole of what the item has kept before
+#                     the raise starts — `runs_seed` in this script, which says
+#                     why a pointer out of the worktree was not an option and why
+#                     the copy is not taken away again.
 #   REMIT_RUNS_NAMING one line of text: the name a kept run takes. It is passed
 #                     THROUGH the seam into the briefing verbatim, so that the
 #                     convention the sweep here keys on and the convention a
@@ -512,10 +548,10 @@
 #
 # PRECEDENCE, once, and it is the law's sentence: a `hold` beats a `promote`; a
 # `promote` beats the practitioner's `until`; a missed `fix` sends the work back
-# before any of that; `--park` beats everything; an empty folder changes nothing
-# — every gate waits for him. An `until` recorded `, then park` is him saying no
-# rather than saying nothing: no promote carries the item past that stop, a hold
-# may still stop it earlier, and reaching the stop parks it.
+# before any of that; a parked item moves for nothing; an empty folder changes
+# nothing — every gate waits for him. An `until` recorded `, then park` is a
+# CEILING on the promotes, not a brake on the run, and its whole law is stated
+# once at `**Until:**` in this header.
 #
 # ==============================================================================
 # log.md — THE ENTRY SHAPES
@@ -958,10 +994,11 @@ usage:
                          `resume` would, and prints the row where it stopped.
                          With nothing said it runs the chain only if refined.md
                          carries a promote a gate could cite; otherwise it sits.
-                         --park files it instead and nothing runs: a parked item
-                         moves for nothing. --until X --park is one ruling: a
-                         resume runs it to X and parks it there, and no promote
-                         carries it past X.
+                         --park ALONE files it instead and nothing runs: a
+                         parked item moves for nothing. --until X --park is ONE
+                         ruling and runs like --until X: the chain runs NOW, as
+                         far as X, and PARKS IT THERE — no promote carries it
+                         past X, then or ever.
   remit resume <slug> [--until refined|accepted|closed [--park]]
                          the whole chain: activate, record the ruling, then move
                          one gate at a time as far as the until says, or as far
@@ -2968,6 +3005,9 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	_runs=''
 	if runs_open "$_wt"; then
 		_runs=$(runs_home "$_wt")
+		# A ROLE THAT READS what was kept is shown ALL of it, and is shown it
+		# somewhere it can actually open. `runs_seed` above is the whole of why.
+		[ "$_role" = evaluate ] && runs_seed "$_wt"
 	else
 		printf '%s: could not open the kept-output home at %s — this raise is told it has nowhere to keep what it runs.\n' \
 			"$ME" "$(runs_home "$_wt")" >&2
@@ -3015,6 +3055,21 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	# It ran to completion: past the kill check above, and the seam exited zero.
 	# That is the whole of what earns a `- raise:` line, and a refusal earns none.
 	[ "$_irc" = 0 ] && raise_line "$_role" "$_t0" "$_t1"
+	# WHY THE RAISE ENDED, where the seam distinguishes it. Exit 8 is the seam's
+	# idle bound: a CLI that stopped writing anything was ended for it, which is a
+	# fact about the run and not a refusal to raise one. Every other non-zero exit
+	# stays `cannot act: remit-invoke`, which is what it has always been. The
+	# reason itself comes off the provenance the seam wrote, so this script does
+	# not restate a sentence the seam owns; a provenance that carried none still
+	# names the stall.
+	INVOKE_STOP=''
+	if [ "$_irc" = 8 ]; then
+		INVOKE_STOP=$(prov note | sed 's/\..*//')
+		case "$INVOKE_STOP" in
+		stalled*) ;;
+		*) INVOKE_STOP="stalled: the seam's idle bound ended a silent CLI" ;;
+		esac
+	fi
 	if [ "$_irc" != 0 ]; then
 		printf '%s: the seam refused `%s` (exit %s):\n' "$ME" "$_role" "$_irc" >&2
 		sed 's/^/    /' "$WORK/invoke.err" >&2
@@ -3353,6 +3408,56 @@ runs_open_at() { # $1 the directory itself
 
 runs_open() { # $1 a working tree
 	runs_open_at "$(runs_home "$1")"
+}
+
+# THE HARVEST'S MIRROR — what the item has kept, put where a raise can READ it.
+#
+# `runs_harvest` below carries a worktree's kept output HOME. This carries the
+# home's kept output back OUT, into the worktree a raise is about to run in, and
+# it exists because of two facts that only bite together:
+#
+#   * in personal-records mode the home is in the records clone, which is OUTSIDE
+#     the repository entirely; and
+#   * every gate after a delivery raises its evaluator in the ITEM'S OWN worktree,
+#     on `work/<slug>`, so the pointer it is handed is that worktree's own runs
+#     directory.
+#
+# A devin evaluator is scoped to its worktree and cannot open the records clone;
+# an evaluator on any seat that is pointed outside its worktree is being sent
+# somewhere it may not be able to go, and one that asks to go there ends its own
+# run (`devin_write_containment` in `bin/remit-invoke`, the `request_scope`
+# deny). So the pointer must name something INSIDE the worktree, and what it
+# names must contain everything the item has kept — not just what this worktree's
+# own builders happened to write.
+#
+# So this copies THE WHOLE HOME in, before the raise. That closes the narrowing
+# the last field fix left open: research kept at gate 1 is written into the
+# primary worktree's home and was invisible to an accepted-gate evaluator raised
+# in the item worktree. It is visible now, because the whole home comes across.
+#
+# IT IS NOT REMOVED AFTERWARDS, and that is deliberate rather than forgotten. The
+# destination is the worktree's own kept-output home — the same directory this
+# item's builders write into and read back on a later round — so there is nothing
+# there to tell a copied file from an authored one, and a sweep would take both.
+# It does not need removing: `runs_open_at` puts a `*` `.gitignore` in that
+# directory, so nothing in it can reach a stage or a commit, and `runs_harvest`
+# copying a file back over itself is a no-op.
+runs_seed() { # $1 the working tree the raise will run in
+	_ssdst=$(runs_home "$1")
+	[ "$_ssdst" = "$runs" ] && return 0
+	[ -d "$runs" ] || return 0
+	runs_open_at "$_ssdst" || {
+		printf '%s: could not open %s — this raise is not shown what earlier rounds kept.\n' \
+			"$ME" "$_ssdst" >&2
+		return 1
+	}
+	_ssn=0
+	for _ssf in "$runs"/*; do
+		[ -f "$_ssf" ] || continue
+		cp "$_ssf" "$_ssdst/${_ssf##*/}" && _ssn=$((_ssn + 1))
+	done
+	[ "$_ssn" -gt 0 ] && say "kept output: $_ssn file(s) copied into $runs_rel for this raise to read."
+	return 0
 }
 
 # What a raise kept, brought home. COPIED and not moved: the raise that comes
@@ -3816,7 +3921,7 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 			fi
 			mark_step "build round $ROUND, at the gate into $GATE"
 			if ! invoke build "$WORK/final" "$WT" "$WORK/mustfix"; then
-				LOOP_STOP="cannot act: remit-invoke"
+				LOOP_STOP=${INVOKE_STOP:-"cannot act: remit-invoke"}
 				return 1
 			fi
 			# The build took as long as it took. Nothing it authored is committed
@@ -3862,7 +3967,7 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 		fi
 		mark_step "evaluate round $ROUND, at the gate into $GATE"
 		if ! invoke evaluate "$WORK/verdict" "$_evalwt"; then
-			LOOP_STOP="cannot act: remit-invoke"
+			LOOP_STOP=${INVOKE_STOP:-"cannot act: remit-invoke"}
 			return 1
 		fi
 		chain_intact || { LOOP_STOP="authority changed"; return 1; }
@@ -4342,9 +4447,15 @@ LOOP_STOP_NOTE=''
 # it can auto promote." So `new` is the same chain `resume` is, decided once,
 # here, from what he said and what `refined.md` carries:
 #
-#   --park                  it sits. Whatever else was said, he has said no.
-#   --until X (no --park)   the chain runs NOW, in this same command, and prints
-#                           the row where it stopped.
+#   --park, nothing else    it sits. He has said no, and named no stop to go to.
+#   --until X               the chain runs NOW, in this same command, and prints
+#                           the row where it stopped. A `--park` beside the
+#                           `--until` does not change THAT — it is the ceiling
+#                           on the promotes and the rest at X, stated once at
+#                           `**Until:**` in this script's header and not again
+#                           here. Ruled 2026-09-01, correcting a `new` that
+#                           filed such an item parked at `new` having run
+#                           nothing: park is a ceiling, not a brake.
 #   nothing said            the chain runs only if `refined.md`'s `promote`
 #                           section carries something a gate's evaluator could
 #                           cite to carry it. With nothing there, no fresh
@@ -4378,18 +4489,22 @@ create_item() {
 		rm -rf "$item"
 		die "the brief's '**Depends on:**' line cannot be read whole — $DEPENDS_ON_BAD. That line names work items by slug, comma-separated, or the word 'none'; omitting it altogether means none. Ask him; nothing here may answer it for him."
 	fi
-	if [ "$want_park" = yes ]; then
+	# A `--park` with no `--until` beside it is the only one that files the item
+	# without running it: he named no stop for it to go to. A `--park` that DOES
+	# have an `--until` beside it is one ruling with that `--until`, and the item
+	# is born ACTIVE and runs, because the park is the ceiling on the chain and
+	# not a brake on it — `**Until:**` in this script's header is where that is
+	# stated, and this is not a second statement of it.
+	if [ "$want_park" = yes ] && [ -z "$want_until" ]; then
 		att=parked
 	else
 		att=active
 	fi
 	CHAIN=no
-	if [ "$want_park" = no ]; then
-		if [ -n "$want_until" ]; then
-			CHAIN=yes
-		elif [ -n "$(rubric_ids refined promote)" ]; then
-			CHAIN=yes
-		fi
+	if [ -n "$want_until" ]; then
+		CHAIN=yes
+	elif [ "$want_park" = no ] && [ -n "$(rubric_ids refined promote)" ]; then
+		CHAIN=yes
 	fi
 	recorded_until=$(until_value "$want_until" "$want_park")
 	put_header "$brief" "$att" new "$recorded_until" ''
@@ -4400,26 +4515,24 @@ create_item() {
 	resolve_authority
 	[ -n "$recorded_until" ] &&
 		printf 'Recorded at admission.\n' | log_append "ruling — until $recorded_until — $(now)"
-	if [ "$want_park" = yes ]; then
+	if [ "$CHAIN" != yes ] && [ "$want_park" = yes ]; then
 		{
-			if [ -n "$want_until" ]; then
-				printf 'Filed. A parked item moves for nothing but `remit resume`, and that resume runs\nit to `%s` and parks it there: no promote carries it past.\n\n' "$want_until"
-			else
-				printf 'Filed. A parked item moves for nothing — not for a promote, not for anything\nbut `remit resume`.\n\n'
-			fi
+			printf 'Filed. A parked item moves for nothing — not for a promote, not for anything\nbut `remit resume`.\n\n'
 			authority_lines
 		} | log_append "stopped — parked — $(now)"
-		say "created .remit/work-items/$slug — parked at stage new${recorded_until:+, until $recorded_until}."
+		say "created .remit/work-items/$slug — parked at stage new."
 	elif [ "$CHAIN" = yes ]; then
 		{
-			if [ -n "$want_until" ]; then
+			if [ "$want_park" = yes ]; then
+				printf 'Born active at `new`. The chain runs now, in this same command, as far as\n`%s` — and rests there: on reaching `%s` the item parks, and no promote may\ncarry it past.\n\n' "$want_until" "$want_until"
+			elif [ -n "$want_until" ]; then
 				printf 'Born active at `new`. The chain runs now, in this same command, as far as\n`%s`.\n\n' "$want_until"
 			else
 				printf 'Born active at `new`. Nothing was said about how far it may go, and\n`refined.md` carries a `promote` a gate could cite, so the chain asks that\ngate now, in this same command.\n\n'
 			fi
 			authority_lines
 		} | log_append "admitted — $(now)"
-		say "created .remit/work-items/$slug — active at stage new${want_until:+, until $want_until}."
+		say "created .remit/work-items/$slug — active at stage new${recorded_until:+, until $recorded_until}."
 	else
 		{ printf 'Born active at `new`.\n\n'; authority_lines; } | log_append "stopped — until ran out — $(now)"
 		say "created .remit/work-items/$slug — active at stage new."
@@ -5397,6 +5510,10 @@ resume)
 		CARRY=until
 		if [ "$nr" -gt "$LIM" ]; then
 			CARRY=promote
+			# THE CEILING. A recorded `, then park` is the practitioner's word
+			# that no promote gets past the stop he named — the run that reached
+			# it, and every later resume of the item alike. `**Until:**` in this
+			# script's header states it; this is where it binds.
 			if [ "$UNTIL_PARK" = yes ] && [ "$r" -ge "$(rank "$UNTIL_STOP")" ]; then
 				STOP=$LIM_REASON
 				break
@@ -5418,7 +5535,7 @@ resume)
 				GATE=''
 				STANDARDS_GATE=refined
 				mark_step "research, before the gate into refined"
-				invoke research "$WORK/research" "$root" || escalate "cannot act: remit-invoke"
+				invoke research "$WORK/research" "$root" || escalate "${INVOKE_STOP:-cannot act: remit-invoke}"
 				chain_intact || escalate "authority changed"
 				cat "$WORK/research" >"$item/research.md"
 				commit_step "remit: $slug research" ".remit/work-items/$slug"
@@ -5579,12 +5696,12 @@ Nothing of this phase was built in this run."
 		say "$PR_DRAFT_NOTE."
 	fi
 
-	# `--until X --park`: the practitioner said the item RESTS at X. Reaching X
-	# puts the attention back to `parked`, so the ruling outlives this run and no
-	# later `promote` is ever consulted for the item again. A `hold` that stopped
-	# it short of X did not reach the stop, so it stays active and named — that is
-	# the whole difference between a stop the practitioner chose and one a rubric
-	# imposed.
+	# REACHING X, on a `--until X --park`: the attention goes back to `parked`, so
+	# the ruling outlives this run. A stop short of X did not reach it, so the
+	# item stays active with the rule that stopped it named — the whole difference
+	# between a stop the practitioner chose and one a rubric imposed. Both halves
+	# are stated at `**Until:**` in this script's header; this is where the first
+	# binds, and it binds the same whether the run began at a `new` or a `resume`.
 	if [ -z "$STOP_NOTE" ] && [ "$UNTIL_PARK" = yes ] && [ "$r" -ge "$(rank "$UNTIL_STOP")" ]; then
 		put_header "$brief" parked "$st" "$(hdr "$brief" Until)" KEEP
 		STOP='parked at until'

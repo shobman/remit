@@ -204,10 +204,23 @@
 #                 TO IT — the same run listed a skill discovered from an
 #                 untracked, excluded `.agents/skills/`, which is why the payload
 #                 laid down by this mode is discovered normally.
-#                 The negative matters as much: Devin does NOT read
-#                 `CLAUDE.local.md` (the same fixture, the file present and
-#                 absent, no rule either way), so the two files are two files and
-#                 not one written twice.
+#                 The negative was stated too narrowly and is corrected here.
+#                 Devin does not read `CLAUDE.local.md` — the same fixture, the
+#                 file present and absent, no rule either way — but it DOES read
+#                 `CLAUDE.md`, through a Claude configuration importer that is on
+#                 by default and that also pulls in `~/.claude/CLAUDE.md`,
+#                 `.claude/skills/`, `.claude/commands/` and every MCP server a
+#                 Claude config names. Established 2026-09-01 on devin 3000.6.7
+#                 with `devin rules list`, `devin skills list` and `devin mcp
+#                 list` in a throwaway fixture, and documented in the CLI's own
+#                 `share/devin/docs/reference/configuration/read-config-from.mdx`.
+#                 SO THE TWO FILES ARE TWO SURFACES FOR TWO TOOLS, not one
+#                 written twice: `CLAUDE.local.md` reaches Claude Code alone, and
+#                 a devin raise under remit has that importer turned OFF —
+#                 `devin_write_containment` in `bin/remit-invoke`, which owns
+#                 that law and states what the switch was measured to do and what
+#                 it does not reach — leaving `AGENTS.local.md` as the surface
+#                 that gets there.
 #
 #   Codex CLI     `AGENTS.override.md`, AND ONLY WHERE IT DISPLACES NOTHING —
 #                 which, because Pi reads the same file off a LONGER candidate
@@ -1425,8 +1438,12 @@ if [ "$SHADOW" = yes ]; then
 	printf '  CLAUDE.local.md   Claude Code reads it per repository.\n'
 	printf '  AGENTS.local.md   Devin CLI reads it per repository, alongside AGENTS.md —\n'
 	printf '                    verified with `devin rules list`, which lists it always-on\n'
-	printf '                    while the file is untracked and excluded. Devin does NOT\n'
-	printf '                    read CLAUDE.local.md, which is why there are two files.\n'
+	printf '                    while the file is untracked and excluded. Devin DOES read\n'
+	printf '                    CLAUDE.md too, through a Claude importer that is on by\n'
+	printf '                    default; a remit raise turns that importer off, so under\n'
+	printf '                    remit AGENTS.local.md is the surface that reaches it. The\n'
+	printf '                    two files are two surfaces for two tools, not one written\n'
+	printf '                    twice.\n'
 	if [ "${PI_TRACKED:-no}" = no ]; then
 		printf '  .pi/APPEND_SYSTEM.md\n'
 		printf '                    Pi APPENDS it to its system prompt, replacing nothing —\n'

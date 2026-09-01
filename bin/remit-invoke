@@ -32,6 +32,35 @@
 #               `<run directory>/progress` — where the heartbeat also lands.
 #               `REMIT_HEARTBEAT=<n>` is its interval in seconds; default 30,
 #               `0` silences it. Neither channel changes what stdout carries.
+#
+# THE IDLE BOUND — `REMIT_QUIET`, and why a wall clock was not enough.
+#
+# The bounded wait each harness gets is WALL CLOCK. On 2026-09-01, in Zenith.Core,
+# a devin process stopped emitting at 90 seconds and held the whole 3600s bound;
+# the heartbeat pulsed the entire time, because the heartbeat is this script's own
+# clock and says nothing about the CLI. So there is a SECOND bound, on the run's
+# own output: if neither the CLI's stdout nor its stderr has grown for
+# `REMIT_QUIET` seconds, the CLI is ended and this script exits 8.
+#
+# WHAT IS WATCHED is the two files the CLI actually writes — `<run dir>/stdout`
+# and `<run dir>/stderr` — and NOT the progress log, which the heartbeat writes
+# to on its own and which would therefore never look idle.
+#
+# THE DEFAULT IS PER HARNESS, because "silent" does not mean the same thing on
+# each. `devin` narrates its tool calls to stdout as it goes, so silence there is
+# a stall: its default is 600s — an order of magnitude longer than any gap a
+# working run has shown, and a sixth of the wall bound, so a stall is reported in
+# ten minutes rather than an hour. Every other seat here is invoked in a mode
+# whose ONLY write is the final envelope (`claude -p --output-format json`, and
+# codex and pi the same way): such a run is silent by construction, an idle bound
+# on it would kill work that is going fine, and its default is therefore `0` —
+# off. `REMIT_QUIET` set explicitly applies to any harness, and `0` turns it off
+# everywhere.
+#
+# THE KILL IS BEST-EFFORT and says so: this script signals the process it started
+# and, where `pkill` exists, that process's children. A CLI that ignores both is
+# still held by its own wall bound, which is not removed. What exit 8 attests is
+# that the SEAM stopped waiting and said why — never that the process is gone.
 #   exit 0      the context ran. Exit is COMPLETION, not success.
 #   exit 2      usage; a registry that is absent, malformed, or does not carry
 #               the seat asked for; a registered seat that is not available on
@@ -42,6 +71,10 @@
 #               containment asked for (codex's sandbox, devin's permission mode).
 #   exit 7      the containment canary failed: copilot's containment did not
 #               demonstrably hold, so no context was raised.
+#   exit 8      THE RUN WENT SILENT and was ended for it — the idle bound below.
+#               A context was raised and IS billed; what it had said by then is
+#               in the run directory, and the provenance carries a `note:`
+#               naming the stall.
 #
 # THE PROVENANCE KEYS. `bin/remit` reads `session:`, `model:` and `harness:`;
 # the rest are for the record, and an unknown key is ignored, never an error.
@@ -58,6 +91,9 @@
 #                  codex is `user` by its run header, every other seat `none`.
 #                  Nothing here ever writes `attested by canary`.
 #   boundary-note: what that line does NOT establish
+#   tools:         pi only: the tool surface that context actually got — the
+#                  allowlist, the denylist on top of it, and extension discovery
+#                  off. Why pi alone is at THE ENVIRONMENT's `pi` entry below.
 #   effort: scrub: run-log: cost: harness-version: sandbox: permission-mode:
 #   note:          anything the run could not be read back for
 #
@@ -185,6 +221,16 @@
 #     (`ANTHROPIC_API_KEY`, `AWS_*`, `PI_KEY` and the rest). Those are tokens
 #     and are NOT passed, so a pi seat whose credentials live only in an
 #     exported variable will find none. That is the rule doing its job.
+#   * A PI PACKAGE'S SKILLS ARE NOT EXTENSION CODE, and `--no-extensions` does
+#     not remove them. Rendered with discovery off, the practitioner's three
+#     installed packages still put `council-mode`, `pi-subagents` and
+#     `mcp-scripting` into the prompt's skill list. What is left is prose, not a
+#     tool and not a hook: a skill can only tell the model to reach for
+#     something, and after the tool allowlist the things these name no longer
+#     exist in a contained context. The flag that WOULD remove them is
+#     `--no-skills`, which is all-or-nothing and would take remit's own skills
+#     with them — the same refusal as Copilot's `--no-custom-instructions` below.
+#     So it is disclosed rather than implied away.
 #   * It says nothing about what a process can READ from the filesystem. That is
 #     the boundary line above, and on this host only codex has one.
 #   * The PLATFORM adds names remit neither passes nor can prevent: on Git Bash,
@@ -192,6 +238,221 @@
 #     They are paths and a platform name, never a credential, and they are named
 #     here so that reading the allow-list against a real raise is not read as a
 #     leak.
+#
+# THE PRACTITIONER'S CONFIGURATION IS IMPORTED BY SOME OF THESE CLIs, and that
+# is a different hole from the environment. It is closed where a documented
+# opt-out exists in a file remit already writes, and RECORDED where none does.
+#
+#   devin — CLOSED for skills, commands and MCP servers, by `read_config_from` in
+#     the `.devin/config.json` this script writes per raise; the switch, the key
+#     set and what it was measured to do are at `devin_write_containment` below,
+#     which is the one place any of it is stated.
+#     THE RESIDUAL, measured and not assumed: `devin rules list` still reports
+#     the practitioner's `~/.claude/CLAUDE.md` as an always-on rule with every
+#     importer false, and still reports it under `env -i` with a scratch `HOME`.
+#     Devin's own global rules — `%APPDATA%\devin\AGENTS.md`, `~/.devin/rules/`
+#     — and the user `config.json`'s own `permissions` are NATIVE, not imports,
+#     and `read_config_from` does not reach them at all; remit passes `APPDATA`
+#     because devin needs it to authenticate, so they are readable by a raise.
+#   copilot — NOT CLOSED. NO OPT-OUT EXISTS, and that is now a SEARCHED negative
+#     rather than an undocumented assertion. Copilot reads
+#     `$COPILOT_HOME/copilot-instructions.md` and
+#     `$COPILOT_HOME/instructions/*.instructions.md` as user-level instruction
+#     sources, and `.claude/skills/**` as project skills. remit points
+#     `COPILOT_HOME` at the practitioner's real `~/.copilot` so the seat can
+#     authenticate, which is what makes the first two reachable; the third is
+#     reachable because the tree may carry a `.claude/` of its own.
+#     HOW THE NEGATIVE WAS ESTABLISHED, on copilot 1.0.80, through the free
+#     channels only — `copilot --help`, every subcommand's help, the CLI's own
+#     `copilot help config` and `copilot help environment` topics,
+#     `copilot skill list --json`, and the bundle's own
+#     `repoDiscoverInstructionSources` called standalone under node out of
+#     `$LOCALAPPDATA/copilot/pkg/<ver>/prebuilds/<plat>/runtime.node`, which
+#     renders the model-visible instruction sources exactly as a session
+#     assembles them, with no session, no auth and no token spent. A fixture
+#     carried a distinct marker in each candidate file. Every lever found, and
+#     what the render said of it:
+#       * `--no-custom-instructions` EXISTS and is ALL-OR-NOTHING: its help is
+#         "Disable loading of custom instructions from AGENTS.md and related
+#         files", and it is one boolean (`skipCustomInstructions`) fed to the
+#         prompt builder. The render settles that it cannot be scoped: ONE
+#         discovery call returns the user sources and the repository's own
+#         `AGENTS.md`, `.github/copilot-instructions.md` and
+#         `.github/instructions/*.instructions.md` in a single list. There is no
+#         seam in it, so this flag would strip the project's instructions — the
+#         ones a context is raised to work from — to strip the practitioner's.
+#         It is not taken, and the raise below says so at its own call site.
+#       * `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` ADDS, it does not replace. Its own
+#         help says "additional directories to search for custom instructions
+#         files (in addition to git root and current working directory)", and the
+#         render agrees: with it set, both user-level markers were still in the
+#         list and the new one was appended. It cannot narrow anything.
+#       * `disabledInstructionSources` is REAL and PER-SOURCE — the render's
+#         every source carries an `id` and a `location` of `user`, `repository`
+#         or `working-directory`, so the wanted distinction exists inside the
+#         CLI — but it is SESSION-ONLY: no flag in any help output, no
+#         environment variable in `copilot help environment`, and no key in the
+#         config, which is the difference that decides it. In the shipped bundle
+#         `disabledSkills` is read out of the loaded config; the same read for
+#         `disabledInstructionSources` does not occur anywhere. It is reachable
+#         only from the interactive `/instructions` picker, and a raise is not
+#         interactive.
+#       * `disabledSkills` IS a config key and it DOES work — with it set, the
+#         render's `.claude/skills` marker and the user-level skill both came
+#         back `enabled=false`. It is still not an opt-out remit can take. It is
+#         keyed by skill NAME, which a raise cannot know in advance; and it lives
+#         ONLY in the user config. Four candidate project-level homes were each
+#         written and rendered alone — `.copilot/config.json`,
+#         `.copilot/settings.json`, `.github/settings.json`,
+#         `.github/copilot/config.json` — and every one was a no-op, while the
+#         same content in `$COPILOT_HOME/settings.json` took effect. So using it
+#         would mean remit WRITING INTO THE PRACTITIONER'S OWN configuration and
+#         changing every session they run for themselves. A raise does not edit
+#         the config it borrows to authenticate.
+#       * THERE IS NO "ignore user config" FLAG AND NO PROFILE MECHANISM. Neither
+#         appears in `copilot --help` or in any subcommand's help.
+#       * The mechanism that WOULD close it is a `configDir` the CLI never
+#         exposes: `repoDiscoverInstructionSources` takes one, and called with it
+#         unset the render returned the repository's three sources and NEITHER
+#         user-level source. Its only handle at the CLI surface is `COPILOT_HOME`
+#         — the same variable that carries authentication. Moving it suppresses
+#         the practitioner's instructions and the seat's login together.
+#     So it is DISCLOSED rather than implied away. (Devin's own `copilot`
+#     importer — `.github/skills/**` and `~/.copilot/skills/**` — IS closed, by
+#     the same switch as above.)
+#   codex — NOT CLOSED, and the same negative, searched the same way. Codex reads
+#     `$CODEX_HOME/AGENTS.md`, and remit points `CODEX_HOME` at the
+#     practitioner's real `~/.codex` so the seat can authenticate.
+#     HOW THE NEGATIVE WAS ESTABLISHED, on codex-cli 0.151.0, free throughout via
+#     `codex debug prompt-input`, which renders the model-visible prompt as JSON
+#     and — established rather than assumed — needs NO auth and runs under a
+#     scratch `CODEX_HOME` that has no `auth.json` at all. A fixture carried a
+#     distinct marker in `$CODEX_HOME/AGENTS.md`, the repository's `AGENTS.md`,
+#     `$CODEX_HOME/skills/` and `.agents/skills/`. What the render said:
+#       * THE TWO INSTRUCTION FILES ARE ONE BLOCK. The global and the project doc
+#         are concatenated into a single `<INSTRUCTIONS>` element separated by a
+#         literal `--- project-doc ---`, the global one FIRST. There is no
+#         config key addressing the first half.
+#       * `-c project_doc_max_bytes=0` cuts THE WRONG HALF: the project marker
+#         left the prompt and the practitioner's global marker stayed. It is a
+#         project-doc bound and nothing else.
+#       * `--ignore-user-config` LOOKS like the answer and is not. Its own help is
+#         "Do not load `$CODEX_HOME/config.toml`; auth still uses `CODEX_HOME`",
+#         which is the right shape — and the render proves it cannot reach this:
+#         with `config.toml` DELETED ENTIRELY from the scratch `CODEX_HOME`, the
+#         global `AGENTS.md` marker was still in the prompt. Not loading that
+#         file is exactly what the flag does, so the flag cannot drop this. The
+#         same proof disposes of `--profile`, which only layers a second
+#         `config.toml` on top of the first.
+#       * NO CONFIG KEY REACHES IT, and the key set was enumerated off the
+#         shipped binary rather than guessed. Every instruction-adjacent key was
+#         rendered: `instructions`, `developer_instructions`,
+#         `project_doc_fallback_filenames`, `project_root_markers`,
+#         `include_environment_context`, `compact_prompt` — none moved the global
+#         marker; `model_instructions_file` replaces the BASE instructions, is a
+#         different channel, and refuses an empty file. No `skills.*` key exists:
+#         six spellings were rendered and every one was inert.
+#       * NO ENVIRONMENT VARIABLE REACHES IT either — the binary's whole `CODEX_*`
+#         set carries no instruction or skills switch.
+#       * `$CODEX_HOME/AGENTS.override.md` IS read and DOES replace
+#         `$CODEX_HOME/AGENTS.md` — the override's marker reached the prompt and
+#         the global one did not, with the project doc untouched. It is a real
+#         lever and remit still does not take it: it is a write into the
+#         practitioner's own home that would silence their global instructions in
+#         every session they run for themselves, which is the same refusal as
+#         Copilot's `disabledSkills` above.
+#       * POINTING `CODEX_HOME` AT A SCRATCH DIRECTORY WOULD WORK AND IS REFUSED.
+#         It suppresses the file, but the seat then cannot authenticate unless
+#         `auth.json` is copied or linked into that directory — and `auth.json`
+#         IS THE CREDENTIAL. Remit never copies, moves or links a credential, so
+#         this is not done and no shipped code does it. The hole stays open
+#         rather than being closed by materialising a token at a second path.
+#       * WHAT CODEX DOES NOT DO, so that it is not carried as a worry: it does
+#         NOT read `.claude/skills`. The prompt's own skill-roots table listed
+#         `$CODEX_HOME/skills`, `$CODEX_HOME/skills/.system` and the
+#         repository's `.agents/skills` — and the `.claude/skills` marker in the
+#         same fixture never appeared, in any run.
+#     Codex is the one seat here with an enforced read boundary, so what it does
+#     with what it reads is bounded; what it READS is not.
+#   pi — CLOSED for extension TOOLS and for extension CODE, by two flags every
+#     raise passes: `--tools` carrying pi's built-in set, and `--no-extensions`.
+#     remit points `PI_CODING_AGENT_DIR` at the practitioner's real `~/.pi/agent`
+#     so the seat can authenticate, and that directory's `settings.json` carries
+#     their installed packages — so without these flags a contained context is
+#     handed every tool those packages register. On this host, 2026-09-01, that
+#     was NINE beyond the built-ins: `subagent`, `subagent_wait`,
+#     `subagent_supervisor`, `mcpScript`, `mcp`, `web_search`, `source_check`,
+#     `fetch_content`, `get_search_content` — a builder able to spawn its own
+#     fleet and to reach the network through a plugin the containment never
+#     considered. Same class as devin's importer: no personal tool reaches a raise.
+#     THE RULE. Every pi raise passes `--tools read,bash,edit,write` — pi's
+#     built-in set, verified from the render below and not assumed — so no
+#     extension or custom tool exists in a contained context. A caller's
+#     `--allowed-tools` NARROWS WITHIN that set and can never widen it: the two
+#     lists are intersected, case-insensitively so that a claude-shaped
+#     `Bash,Edit` lands on pi's `bash,edit`, and a name that is not a built-in is
+#     dropped rather than forwarded. An intersection that comes out empty is
+#     `--no-tools`, said on stderr and in the provenance, never a silent
+#     widening back to the default. A caller's `--exclude-tools` is passed on top
+#     and still applies: pi's denylist runs after its allowlist, so it can only
+#     subtract — rendered, `--tools read,bash,edit,write --exclude-tools bash`
+#     left `read,edit,write`. The `tools:` provenance line is the record.
+#     THE RESIDUAL THE ALLOWLIST ALONE DOES NOT CLOSE, which is why
+#     `--no-extensions` is passed as well: `--tools` bounds the tools the MODEL
+#     sees, not the code the PROCESS runs. A pi extension is a module pi imports
+#     and calls at startup, and its `pi.on(...)` handlers fire whatever the tool
+#     list says. Measured: under `--tools read,bash,edit,write` the marker tool
+#     was gone from the prompt and the marker extension's module body, its setup
+#     function and its `session_start` handler had all still run. A hook that
+#     runs code you did not write is a hole even with its tool gone.
+#     `--no-extensions` closes it — its own help is "Disable extension discovery
+#     (explicit -e paths still work)" — and the same fixture under it logged
+#     NOTHING: no module body, no setup function, no handler, no tool. It costs
+#     no credential; the config directory still carries `auth.json` and the model
+#     catalogue, and every render below ran against the practitioner's own agent
+#     directory.
+#     HOW ALL OF THIS WAS ESTABLISHED, free of a model turn and free of money, on
+#     pi 0.84.4: pi's own `-e <file>` extension channel, the same shape the
+#     shadow-pi item used. A probe extension registers a `before_agent_start`
+#     handler — the event whose payload carries `systemPromptOptions`, with
+#     `.selectedTools`, `.toolSnippets`, `.skills` and `.contextFiles`, which IS
+#     the model-visible surface — writes them to a file and calls
+#     `process.exit(0)` BEFORE the agent loop. No prompt reaches a provider. `-e`
+#     paths load even under `--no-extensions`, which is what lets the probe
+#     report on a run with discovery off. The hook question was answered by a
+#     second extension placed in a scratch `PI_CODING_AGENT_DIR`'s `extensions/`,
+#     carrying a marker tool and marker handlers that logged on load and on fire.
+#     TRUST, AND WHAT A RAISE THEREFORE SEES. A raise passes NEITHER `--approve`
+#     NOR `--no-approve`, so pi's own rule decides and nothing here overrides the
+#     practitioner's own answer. `.pi/skills/`, `.agents/skills/` and
+#     `.pi/APPEND_SYSTEM.md` — the project resources `install.sh` writes for pi,
+#     which is where that list is stated and it is not restated here — load ONLY
+#     after the project is trusted, and a `-p` run never prompts. What applies is
+#     the closest saved decision in `~/.pi/agent/trust.json` on the worktree or a
+#     PARENT of it, and failing that `defaultProjectTrust`, whose default `ask`
+#     means "ignore" in `-p`. A raise's worktree is a fresh path, so unless a
+#     parent directory carries a saved yes, REMIT'S OWN SKILLS ARE NOT VISIBLE TO
+#     A PI RAISE. Rendered: untrusted, the fixture's `.pi/skills` and
+#     `.agents/skills` were both absent from `.skills` and its `.pi/extensions`
+#     module never ran; with `--approve` all three appeared. CONTEXT FILES ARE
+#     THE EXCEPTION and load either way — `AGENTS.md` was in `.contextFiles`
+#     plain, under `--no-approve` and under `--no-extensions` alike. And
+#     `--no-extensions` OUTRANKS TRUST: with `--approve` AND `--no-extensions`
+#     the project skills loaded and the project-local extension still did not.
+#   claude — not investigated, and nothing is claimed either way.
+#
+# THE SHAPE OF BOTH NEGATIVES IS THE SAME, and it is worth naming once. Each CLI
+# HAS the distinction remit wants — Copilot's sources are tagged `user` against
+# `repository`; Codex's global doc is a separate file from the project's. Each
+# also has a lever that acts on it. Neither exposes that lever to a
+# non-interactive invocation without either taking the project's own
+# instructions away at the same time, or writing into the practitioner's
+# personal configuration, or moving the directory the seat authenticates from.
+# Those are the three refusals, and they are refusals rather than oversights.
+#
+# None of this is a read boundary and no line above should be read as one; it is
+# the INSTRUCTION SURFACE a raise inherits, which is a separate question from
+# what a raise can open.
 #
 # ==============================================================================
 # THE HONESTY RULES
@@ -828,8 +1089,35 @@ if [ "$HARNESS" = devin ]; then
 		die "neither jq nor node is on PATH — a devin run is judged from its ATIF export, which nothing here could read; not raising a context"
 	fi
 
-	[ "$SANDBOX_GIVEN" = no ] ||
-		die "--sandbox does not apply to a devin raise — devin's OS-level sandbox is unsupported on Windows and this script never passes it. A devin context's containment is its worktree, the permission rules and the hook written for the run, and the provenance says exactly that"
+	# THE SANDBOX REFUSAL IS TWO REFUSALS, because it had one reason and two
+	# platforms. On Windows devin's OS-level sandbox does not exist — its own docs
+	# say a session HARD-FAILS when `--sandbox` is passed — so the refusal there is
+	# the CLI's own behaviour said earlier and more clearly. Everywhere else the
+	# sandbox is real (macOS seatbelt, Linux `bwrap` + `seccomp`, per `devin
+	# --help`), and remit still does not pass it — for a DIFFERENT reason, stated
+	# as its own reason rather than hidden behind Windows'.
+	#
+	# THAT REASON: `--sandbox` selects Autonomous and, per `reference/
+	# permissions.mdx`, Autonomous is then the ONLY permission mode available. The
+	# shipped build's `--permission-mode` does not accept `autonomous` as a value
+	# at all — its `--help` lists `auto`, `accept-edits`, `smart`, `dangerous` — so
+	# a raise that asked for `accept-edits` and got Autonomous would trip this
+	# script's own mode read-back and exit 6 on every run. Making that work means
+	# not asking for a mode and not checking the one that applied, which is
+	# retiring a precondition, and NOTHING HERE ESTABLISHES that the trade is
+	# sound: there is no non-Windows host in this repository's reach and no run
+	# has been made on one. UNESTABLISHED-UNTIL-RUN, and refused rather than
+	# guessed at — an absent capability is reported before anything is invoked.
+	if [ "$SANDBOX_GIVEN" != no ]; then
+		case "$(uname -s 2>/dev/null)" in
+		MINGW* | MSYS* | CYGWIN* | Windows*)
+			die "--sandbox does not apply to a devin raise on this platform — devin's OS-level sandbox is unsupported on Windows and its own documentation says a session HARD-FAILS when the flag is passed, so this script refuses first rather than letting the CLI refuse later. A devin context's containment here is its worktree, the permission rules and the hooks written for the run, and the provenance says exactly that"
+			;;
+		*)
+			die "--sandbox is NOT refused here because the sandbox is missing — on this platform devin's sandbox is real (macOS seatbelt, Linux bwrap+seccomp) and it is the posture remit wants. It is refused because passing it selects Autonomous, which is then the only permission mode available, and the shipped build's --permission-mode does not carry that value — so this raise could not ask for a mode or check the one that applied, and retiring that precondition is not something any run has established. Read \`devin_write_containment\` in this script for what does contain a devin raise today"
+			;;
+		esac
+	fi
 
 	# A .devin/ that is already there is the repository's own: it is not
 	# overwritten, and not silently layered under rules this script relies on.
@@ -1067,6 +1355,21 @@ case "$HEARTBEAT" in
 	;;
 esac
 
+# THE IDLE BOUND's setting. The law — including why the default is 600 on devin
+# and 0 everywhere else — is THE IDLE BOUND in this script's header.
+if [ -n "${REMIT_QUIET:-}" ]; then
+	QUIET=$REMIT_QUIET
+elif [ "$HARNESS" = devin ]; then
+	QUIET=600
+else
+	QUIET=0
+fi
+case "$QUIET" in
+'' | *[!0-9]*)
+	die "REMIT_QUIET must be a whole number of seconds, or 0 to turn the idle bound off — not '$QUIET'"
+	;;
+esac
+
 # The allow-list, written down before anything runs. This file IS the record of
 # what crossed into the context, and it is what the provenance quotes: a scrub
 # nobody can read afterwards is a claim, not a mechanism.
@@ -1144,7 +1447,16 @@ role_limits() {
 		printf '  or `gh` AT ALL — not to change anything and not to read anything. A\n'
 		printf '  raised context never runs either; the seam does. Everything you judge is\n'
 		printf '  already on disk in front of you, and a `git` you reach for here is denied\n'
-		printf '  by the containment this run wrote, on every harness.\n'
+		printf '  by the containment this run wrote, on every harness. Those two are named\n'
+		printf '  so you know what not to do, NOT as files to go and look at: depending on\n'
+		printf '  how this repository was installed they may not be in your worktree at\n'
+		printf '  all, and their absence is normal rather than a finding.\n'
+		printf -- '- EVERY PATH THIS BRIEFING NAMES IS EITHER INSIDE YOUR WORKTREE OR MARKED\n'
+		printf '  AS TEXT. A path marked as text is where something came FROM, printed so\n'
+		printf '  you can name it in what you return; the thing itself is reproduced here\n'
+		printf '  in full and there is nothing to open. Do not go looking for one, and do\n'
+		printf '  not ask for access to anything outside your worktree — there is nothing\n'
+		printf '  outside it for this run, and asking ends the run without a verdict.\n'
 		printf -- '- A finding is a FACT with its evidence, never a task. You do not classify\n'
 		printf '  findings by consequence: only a rubric below can accept a finding or make\n'
 		printf '  one a must-fix, and every such use cites the rubric and the evidence.\n'
@@ -1285,9 +1597,10 @@ role_returns() {
 	delivery_section
 	runs_section
 	if [ -n "$AUTHORITY" ]; then
-		printf '\n## Your authority — `%s`, reproduced in full\n\n' "$AUTHORITY"
+		printf '\n## Your authority — reproduced in full\n\n'
 		printf 'This is the whole of what you were given. It is not a summary of something\n'
-		printf 'else and there is nothing behind it.\n\n'
+		printf 'else and there is nothing behind it. It came from `%s`; that path is TEXT,\n' "$AUTHORITY"
+		printf 'printed so you can name it, and there is no file for you to open.\n\n'
 		tr -d '\015' <"$AUTHORITY"
 	fi
 	if [ -n "$MUSTFIX" ] && [ -f "$MUSTFIX" ] && [ -s "$MUSTFIX" ]; then
@@ -1300,7 +1613,8 @@ role_returns() {
 	if [ -n "$STANDARDS" ] && [ -f "$STANDARDS" ]; then
 		printf '\n## The standards this work is held to\n\n'
 		printf 'The practitioner'\''s `fix` rubrics for the gate this work is heading into,\n'
-		printf 'reproduced verbatim from `%s`. Work that falls short of one of\n' "$STANDARDS"
+		printf 'reproduced verbatim. They came from `%s`; that path is TEXT and there is no\n' "$STANDARDS"
+		printf 'file for you to open. Work that falls short of one of\n'
 		printf 'these comes back to a fresh author as a must-fix. They are the bar, not a\n'
 		printf 'checklist to write about: meet them and say nothing about them.\n\n'
 		printf 'This is the ONLY part of that gate'\''s file you are shown. What may carry work\n'
@@ -1312,10 +1626,12 @@ role_returns() {
 	if [ "$ROLE" = evaluate ]; then
 		printf '\n## The rubrics for THIS gate\n\n'
 		if [ -n "$RUBRICS" ] && [ -f "$RUBRICS" ]; then
-			printf 'These are the practitioner'\''s own standards for the gate this item is at —\n'
-			printf '`%s`, reproduced verbatim. They are the only rubrics you may cite. You are\n' "$RUBRICS"
-			printf 'not shown any other gate'\''s file, and there is no rubric anywhere else for\n'
-			printf 'you to reach for.\n\n'
+			printf 'These are the practitioner'\''s own standards for the gate this item is at,\n'
+			printf 'REPRODUCED WHOLE BELOW. They came from `%s` — that path is TEXT, printed\n' "$RUBRICS"
+			printf 'so you can name it, and there is no file for you to find: it is not in your\n'
+			printf 'worktree and it does not need to be, because the whole of it is here. They\n'
+			printf 'are the only rubrics you may cite. You are not shown any other gate'\''s file,\n'
+			printf 'and there is no rubric anywhere else for you to reach for.\n\n'
 			tr -d '\015' <"$RUBRICS"
 			printf '\n'
 		else
@@ -1367,6 +1683,11 @@ if [ "$HEARTBEAT" -gt 0 ]; then
 else
 	say "  heartbeat    : silenced (REMIT_HEARTBEAT=0) — nothing will be said between the line below and the run's end"
 fi
+if [ "$QUIET" -gt 0 ]; then
+	say "  idle bound   : ${QUIET}s (REMIT_QUIET) — the CLI is ended, and this exits 8, if it writes nothing to stdout or stderr for that long. The wall bound is separate and still applies"
+else
+	say "  idle bound   : none (REMIT_QUIET=0) — this seat is invoked in a mode whose only write is its final envelope, so silence is not evidence of a stall and nothing is bounded on it"
+fi
 [ -n "${REMIT_PROGRESS:-}" ] && say "  progress at  : $REMIT_PROGRESS names this run directory, written before anything was raised"
 say "  environment  : env -i with $(awk 'END { print NR }' "$ENVLIST") allow-listed variables and nothing else; HOME is the scratch directory $SCRUB_HOME"
 say "  scratch      : $SCRUB_TMP (TMPDIR, TEMP and TMP) — the seat's one writable scratch root, removed with the run"
@@ -1374,7 +1695,8 @@ say "  registry     : $SETTINGS ($REGISTRY_HASH), seat $SEAT_KIND"
 if [ "$HARNESS" = devin ]; then
 	say "  devin binary : $DEVIN"
 	say "  account      : tier ${DEVIN_TIER:-<not reported>}, primary org ${DEVIN_ORG:-<none reported>}"
-	say "  permissions  : requesting $DEVIN_MODE, with the git deny, the whole-\`exec\` allow that keeps an ordinary command off devin's prompt default, and the hook, all written to $WT/.devin for the run"
+	say "  permissions  : requesting $DEVIN_MODE, with the git deny, the whole-\`exec\` allow that keeps an ordinary command off devin's prompt default, the mcp/request_scope/webfetch denies, and both hooks, all written to $WT/.devin for the run"
+	say "  imports      : read_config_from turns off every importer but agents_standard, so this raise inherits no skill, command or MCP server from another tool's configuration. What it does NOT stop is at \`devin_write_containment\` in this script"
 	[ -n "$EXCLUDED" ] &&
 		say "  exclusions   : $EXCLUDED — under devin these are DENY rules, and a denied call ends the run rather than failing on its own. This raise has chosen a kill switch, not a scoping."
 	say "  bounded wait : ${DEVIN_TIMEOUT}s (REMIT_DEVIN_TIMEOUT)"
@@ -1427,16 +1749,71 @@ heartbeat_stop() {
 # this change does not quietly take that on.
 trap 'heartbeat_stop' INT TERM
 
+# THE IDLE BOUND. Its law — what is watched, why the progress log is not, why the
+# default is per harness, and what the kill does and does not attest — is
+# THE IDLE BOUND in this script's header. This is only its code.
+STALLED=''
+idle_sig() { # a signature of everything the CLI has written, so far
+	printf '%s %s' "$(wc -c <"$OUTFILE" 2>/dev/null || printf 0)" \
+		"$(wc -c <"$ERRFILE" 2>/dev/null || printf 0)"
+}
+idle_kill() { # $1 the pid this script started
+	command -v pkill >/dev/null 2>&1 && pkill -TERM -P "$1" 2>/dev/null
+	kill -TERM "$1" 2>/dev/null
+	_ik=0
+	while [ "$_ik" -lt 10 ] && kill -0 "$1" 2>/dev/null; do
+		sleep 1
+		_ik=$((_ik + 1))
+	done
+	if kill -0 "$1" 2>/dev/null; then
+		command -v pkill >/dev/null 2>&1 && pkill -KILL -P "$1" 2>/dev/null
+		kill -KILL "$1" 2>/dev/null
+	fi
+	return 0
+}
+idle_watch() { # $1 the pid to watch. Returns when it has gone, or kills it.
+	_iw_pid=$1
+	_iw_tick=$QUIET
+	[ "$_iw_tick" -gt 15 ] && _iw_tick=15
+	_iw_sig=$(idle_sig)
+	_iw_quiet=0
+	while kill -0 "$_iw_pid" 2>/dev/null; do
+		sleep "$_iw_tick"
+		kill -0 "$_iw_pid" 2>/dev/null || return 0
+		_iw_now=$(idle_sig)
+		if [ "$_iw_now" = "$_iw_sig" ]; then
+			_iw_quiet=$((_iw_quiet + _iw_tick))
+		else
+			_iw_sig=$_iw_now
+			_iw_quiet=0
+		fi
+		if [ "$_iw_quiet" -ge "$QUIET" ]; then
+			say "$ME: THE RUN HAS GONE SILENT — $CLI has written nothing to stdout or stderr for ${_iw_quiet}s (REMIT_QUIET=$QUIET). Ending it."
+			printf '%s: stalled — no output for %ss; the CLI was ended\n' "$ME" "$_iw_quiet" >>"$PROGRESSFILE"
+			STALLED=$_iw_quiet
+			idle_kill "$_iw_pid"
+			return 0
+		fi
+	done
+	return 0
+}
 run_harness() { # $1 stdin file or 'none'; rest: the command, env prefix included
 	sf=$1
 	shift
 	heartbeat_start
+	# THE RUN IS BACKGROUNDED so that something else can watch it. With `QUIET` at
+	# 0 nothing does, and this is the same foreground wait it always was, one
+	# `wait` further out.
 	if [ "$sf" = none ]; then
-		(cd "$WT" && "$@") >"$OUTFILE" 2>"$ERRFILE"
+		(cd "$WT" && "$@") >"$OUTFILE" 2>"$ERRFILE" &
 	else
-		(cd "$WT" && "$@" <"$sf") >"$OUTFILE" 2>"$ERRFILE"
+		(cd "$WT" && "$@" <"$sf") >"$OUTFILE" 2>"$ERRFILE" &
 	fi
+	HARNESS_PID=$!
+	[ "$QUIET" -gt 0 ] && idle_watch "$HARNESS_PID"
+	wait "$HARNESS_PID"
 	HARNESS_EXIT=$?
+	HARNESS_PID=''
 	heartbeat_stop
 }
 
@@ -1455,13 +1832,30 @@ run_harness() { # $1 stdin file or 'none'; rest: the command, env prefix include
 # cost the run. What the hook stops is git and gh, wrapped or not, and nothing
 # else.
 #
-# The allow list names tools by the shipped build's OWN names, read as
-# `function_name` values out of a real run's export — not the names Cognition
-# documents, which include a `glob` the build does not have. An entry that
-# matches nothing is silent: it grants nothing and says nothing, and the context
-# that reaches for what it was meant to grant ends the run instead. So the list
-# is what a context needs and ALL of it. A list pruned for tidiness is a run that
-# dies on its first search.
+# THE ALLOW LIST IS THE UNION OF TWO CHANNELS, and it is a union because each one
+# alone has already cost a run. An entry that matches nothing is SILENT — it
+# grants nothing and says nothing, and the context that reaches for what it was
+# meant to grant ends the run instead — so the cost of a name too many is nil and
+# the cost of a name too few is the whole raise.
+#
+#   the CLI's own bundled documentation, `share/devin/docs/extensibility/hooks/
+#   lifecycle-hooks.mdx`, whose "tool names you can match" table is the shipped
+#   build's externally-visible inventory: `read`, `write`, `edit`, `apply_patch`,
+#   `notebook_read`, `notebook_edit`, `grep`, `glob`, `exec`, `get_output`,
+#   `write_to_process`, `kill_shell`, `webfetch`, `todo_write`,
+#   `exit_plan_mode`, `skill`, `run_subagent`, `read_subagent`, `request_scope`,
+#   `mcp_list_servers`, `mcp_list_tools`, `mcp_call_tool`, `mcp_read_resource`.
+#   (`reference/permissions.mdx` prints a much shorter list — `read`, `edit`,
+#   `grep`, `glob`, `exec` — as "available tool names". It is the same doc set
+#   contradicting itself; the matcher table is the specific one and is taken.)
+#
+#   the ATIF export of a real run, whose `function_name` values carry
+#   `find_file_by_name`, which appears in NO version of the documentation. The
+#   build has it and the docs do not say so.
+#
+# So neither channel is authority over the other and the list carries both. The
+# names dropped from it are dropped BY NAME, into the deny list, because a tool
+# that is merely unlisted dies the run without saying why.
 #
 # THE FALL-THROUGH, AND WHY `exec` IS ALLOWED WHOLE. Devin's permission check is a
 # FIXED FOUR-TIER LADDER — deny, then ask, then allow, then a default of PROMPT —
@@ -1496,18 +1890,106 @@ run_harness() { # $1 stdin file or 'none'; rest: the command, env prefix include
 # bundled documentation. A raise that dies with an empty final message and a
 # tool nobody listed is this hole, and the run's kept log is where it is legible.
 #
-# `accept-edits` is requested explicitly on every raise and every tier, and it
-# COVERS FILE EDITS ONLY — the CLI's own table has every mode but `dangerous`,
-# `smart` and `autonomous` still prompting for shell commands, and this tenant's
-# organisation policy downgrades `dangerous` and `smart` to `normal`. So the
-# permission mode is not what closes the fall-through and was never going to be;
-# the allow list is. It is never inferred from an organisation's policy, and this
-# configuration behaves the same whether or not one exists.
+# WHAT IS DENIED BY NAME, and why a deny is the kind thing to do to a tool that
+# was going to die anyway. Under `-p` an unlisted tool call is rejected for want
+# of confirmation and takes its whole batch with it; a DENIED call ends the run
+# too (probe item 16 — a deny is a kill switch here, not a scoping), but it ends
+# it against a rule somebody wrote, and the run's kept log then names the rule
+# rather than showing a batch that vanished. So the four tools remit will not
+# have a raised context use are denied out loud:
+#
+#   mcp__*          every MCP tool, on every server. With the importers off there
+#   mcp_call_tool   are NO servers configured (measured: 1 -> 0), so no MCP call
+#                   can arise and this rule should never fire. It is the BACKSTOP
+#                   for the day one does — a server configured natively in
+#                   `%APPDATA%\devin`, which `read_config_from` does not reach.
+#                   Both spellings, because `mcp__*` matches the namespaced tools
+#                   and `mcp_call_tool` is the generic caller.
+#                   THE COST IS A RUN, so the backstop is not the control:
+#                   UNREACHABILITY is — no servers, and a briefing that asks for
+#                   nothing outside the worktree.
+#   request_scope   devin's own documented way to ask for read/write access to a
+#                   directory outside the current scope. The scope IS the
+#                   worktree, everything a raise is judged on is inside it, and
+#                   nothing outside it exists for this raise. An evaluator that
+#                   reaches for this has been sent looking for something it
+#                   cannot have, and that is a fault in the briefing — which is
+#                   why the briefing was audited for it rather than left to be
+#                   caught here.
+#   webfetch        a raised context establishes what is true from the tree in
+#                   front of it. It has no network errand.
+#
+# `mcp_list_servers`, `mcp_list_tools` and `mcp_read_resource` stay ALLOWED: they
+# are the harmless lookups, they will answer "none", and a context that dies for
+# asking a question with an empty answer is a run lost to tidiness.
+#
+# THE PERMISSION MODE STAYS `accept-edits`, and this raise does not reach for a
+# wider one. The shipped build's `--permission-mode` takes `auto`, `accept-edits`,
+# `smart` and `dangerous` — its own `--help`, which does not agree with the doc
+# set's `normal`/`bypass`/`autonomous` naming — and of those only `smart` even
+# claims to stop prompting for non-edit actions, by delegating each one to a fast
+# model. That is a WIDENING dressed as a convenience: it decides, per call,
+# something remit's allow list decides once and legibly. This tenant's
+# organisation policy also downgrades `smart` and `dangerous` to normal, so
+# resting on either would be resting on a mode that is not applied. The allow
+# list closes the fall-through; the mode never did and was never going to.
+#
+# THE NEUTRAL CONTEXT — `read_config_from`, and what it was measured to do.
+#
+# Devin imports another tool's configuration by default, at PROJECT AND USER
+# scope. On 2026-09-01 an evaluate raise in Zenith.Core inherited the
+# practitioner's own instruction surface through it: 9 skills of which 5 were
+# from `~/.claude/skills`, 7 MCP servers all from `~/.claude.json`, and a global
+# Claude hook that told the evaluator to journal the session through an MCP tool
+# — which it obeyed as its first act, before reading anything it was raised to
+# judge. remit's OWN conventions were the one thing that did not load.
+#
+# `read_config_from` is valid at project scope, in the very file this function
+# already writes, and every importer is turned off in it. The key set is the
+# documented one, whole, from `share/devin/docs/reference/configuration/
+# read-config-from.mdx`: `cursor`, `windsurf`, `claude`, `copilot`, `opencode`,
+# `vscode` and `zed`. All false.
+#
+# `agents_standard` IS THE ONE LEFT TRUE, deliberately and explicitly. It is the
+# importer that carries `AGENTS.md` and `AGENTS.local.md` — remit's own
+# instruction surface, the file the installer writes remit's block into, and the
+# only channel by which this mechanism speaks to a devin session at all. Turning
+# it off would silence remit and leave the practitioner's global rule (see the
+# residual below) as the loudest thing in the context, which is the opposite of
+# the fix. It imports nothing from anybody's personal tooling: the files it names
+# are in the tree in front of the raise.
+#
+# WHAT THAT WAS MEASURED TO DO, on this host, 2026-09-01, devin 3000.6.7, in a
+# throwaway fixture carrying a marker `CLAUDE.md`, `AGENTS.md`, `AGENTS.local.md`
+# and `.claude/skills/`, through the free subcommands that raise no agent turn
+# and spend no ACU:
+#
+#   `devin skills list`   13 -> 2. Both survivors are devin's own builtins;
+#                         `~/.claude/skills` and the project `.claude/skills`
+#                         both went.
+#   `devin mcp list`      1 -> 0.
+#   `devin rules list`    4 -> 4. UNCHANGED. Both `CLAUDE` rules — the project's
+#                         and the practitioner's `~/.claude/CLAUDE.md` — and both
+#                         Standard rules were still listed, with `claude` false
+#                         AND with `agents_standard` false.
+#
+# THE RESIDUAL, AND WHAT IT IS NOT. Two readings fit that last row and this host
+# cannot separate them without spending a run: either the rules importer ignores
+# the switch, or `devin rules list` is a lister that does not apply import
+# filtering while `skills list` and `mcp list` do. Read it off the next raise's
+# own `rules discovery` log line and not off this comment. Either way there is NO
+# documented rules-level suppression to reach for — a project config accepts only
+# `permissions`, `read_config_from` and `hooks` (`config-file.mdx`), and
+# `read_config_from` is the only import switch there is — and `env -i` with a
+# scratch `HOME` does not stop it either: the global rule was still listed under
+# exactly the environment a raise gets. So a devin raise may still carry the
+# practitioner's `~/.claude/CLAUDE.md` as an always-on rule. That is stated here
+# and in THE ENVIRONMENT above, and it is not fixed.
 #
 # Written here, removed before anything else, committed nowhere. The copies kept
 # in the run directory are the record of what actually applied.
-DEVIN_DENY='Exec(git) Exec(gh) Write(.git/**) Write(.devin/**)'
-DEVIN_ALLOW='read write grep find_file_by_name todo_write get_output skill mcp_list_tools exec Exec(sh)'
+DEVIN_DENY='Exec(git) Exec(gh) Write(.git/**) Write(.devin/**) mcp__* mcp_call_tool request_scope webfetch'
+DEVIN_ALLOW='read write edit apply_patch notebook_read notebook_edit grep glob find_file_by_name exec get_output write_to_process kill_shell todo_write exit_plan_mode skill run_subagent read_subagent mcp_list_servers mcp_list_tools mcp_read_resource Exec(sh)'
 devin_json_array() { # $1 space- or comma-separated entries -> "a", "b"
 	printf '%s\n' "$1" | tr ' ,' '\n\n' |
 		awk 'NF { printf "%s%s", sep, "\"" $0 "\""; sep = ", " }'
@@ -1517,6 +1999,16 @@ devin_write_containment() { # $1 the context's tree
 	mkdir -p "$devin_dir" || return 1
 	cat >"$devin_dir/config.json" <<EOF || return 1
 {
+  "read_config_from": {
+    "agents_standard": true,
+    "cursor": false,
+    "windsurf": false,
+    "claude": false,
+    "copilot": false,
+    "opencode": false,
+    "vscode": false,
+    "zed": false
+  },
   "permissions": {
     "deny": [$(devin_json_array "$DEVIN_DENY${EXCLUDED:+ $EXCLUDED}")],
     "allow": [$(devin_json_array "$DEVIN_ALLOW${ALLOWED:+ $ALLOWED}")]
@@ -1526,15 +2018,34 @@ EOF
 	# Event names sit at the top level of this file. The schema Cognition's own
 	# documentation shows (nested under "hooks") is rejected by the shipped build,
 	# and rejected SILENTLY — the hook simply never fires. Trust the probe.
+	# The SECOND entry exists for its MESSAGE and for nothing else. The four tools
+	# it matches are already denied in the config above, and a deny ends the run on
+	# its own — but devin's denial text is its own fixed sentence naming a rule, and
+	# whoever reads the run afterwards is owed remit's reason instead. A hook
+	# matcher is a REGEX, not a permission glob, so `mcp__` is anchored rather than
+	# starred. Whether this fires before the deny resolves is NOT established here;
+	# if the deny wins, the run's log carries devin's sentence and the rule name,
+	# which is why the rules are named the way they are.
 	cat >"$devin_dir/hooks.v1.json" <<'EOF' || return 1
 {
   "PreToolUse": [
     {
       "matcher": "exec",
       "hooks": [ { "type": "command", "command": "sh .devin/remit-no-git.sh" } ]
+    },
+    {
+      "matcher": "^(request_scope|webfetch|mcp_call_tool|mcp__.*)$",
+      "hooks": [ { "type": "command", "command": "sh .devin/remit-no-reach.sh" } ]
     }
   ]
 }
+EOF
+	cat >"$devin_dir/remit-no-reach.sh" <<'EOF' || return 1
+#!/bin/sh
+# Written by remit-invoke for one raise, and removed after it. Its whole job is
+# to say WHY, because the rule that stops these tools cannot carry a sentence.
+printf 'blocked by remit law: your scope is the worktree you were raised in, and nothing outside it exists for this raise. Everything you were raised to author or judge is on disk in front of you, there is no MCP server configured for this run and no network errand in your brief, and there is no wider scope to be granted. If your briefing pointed you at something you cannot reach, THAT is the finding — report it in what you return, which is the one channel that gets read.\n' >&2
+exit 2
 EOF
 	cat >"$devin_dir/remit-no-git.sh" <<'EOF' || return 1
 #!/bin/sh
@@ -1939,6 +2450,42 @@ while IFS= read -r _v; do
 done <"$ENVLIST"
 set -- env -i "$@"
 
+# Pi's built-in tools, and the one place the list is written down. `pi --help`
+# names them in its own first line — "AI coding assistant with read, bash, edit,
+# write tools" — and the render confirmed it: a run with no tool flags at all
+# reported exactly these four before its extensions' tools. THE ENVIRONMENT at
+# the head of this script owns why a pi raise is held to them.
+PI_BUILTIN_TOOLS='read,bash,edit,write'
+PI_TOOLS=''
+
+# The caller's --allowed-tools intersected with that set, so it can only narrow.
+# Case is folded because the spec a caller writes is often claude-shaped —
+# `Bash,Edit` — and those ARE pi's tools under another capitalisation; anything
+# that is not a built-in under either case is an extension tool by definition and
+# is dropped. An empty result is empty on purpose and the caller is told.
+pi_tool_allowlist() { # $1 the caller's spec, empty for none — prints the list
+	[ -n "${1:-}" ] || { printf '%s' "$PI_BUILTIN_TOOLS"; return 0; }
+	_pi_out=''
+	_pi_rest=$1
+	while [ -n "$_pi_rest" ]; do
+		case "$_pi_rest" in
+		*,*) _pi_t=${_pi_rest%%,*}; _pi_rest=${_pi_rest#*,} ;;
+		*) _pi_t=$_pi_rest; _pi_rest='' ;;
+		esac
+		_pi_t=$(printf '%s' "$_pi_t" | tr -d ' 	' | tr 'A-Z' 'a-z')
+		[ -n "$_pi_t" ] || continue
+		case ",$PI_BUILTIN_TOOLS," in
+		*",$_pi_t,"*) ;;
+		*) continue ;;
+		esac
+		case ",$_pi_out," in
+		*",$_pi_t,"*) ;;
+		*) _pi_out=${_pi_out:+$_pi_out,}$_pi_t ;;
+		esac
+	done
+	printf '%s' "$_pi_out"
+}
+
 HARNESS_EXIT=0
 
 case "$HARNESS" in
@@ -1953,6 +2500,14 @@ claude)
 codex)
 	# `-` takes the briefing on stdin; -o writes the final message; the sandbox
 	# denies .git by upstream design, which is the ruled behaviour enforced.
+	#
+	# No `-c` override and no `--ignore-user-config` here, and that is a searched
+	# result rather than an omission: nothing this CLI accepts suppresses the
+	# `$CODEX_HOME/AGENTS.md` a raise inherits without also taking away the
+	# project's own instructions, the practitioner's own configuration, or the
+	# directory the seat authenticates from. What was enumerated and what was
+	# rendered is in THE ENVIRONMENT at the head of this script, which is the one
+	# place it is stated.
 	set -- "$@" codex exec -s "$SANDBOX" -C "$WT" --skip-git-repo-check -o "$FINALFILE"
 	[ -n "$MODEL" ] && set -- "$@" -m "$MODEL"
 	set -- "$@" -
@@ -1963,12 +2518,28 @@ pi)
 	set -- "$@" pi
 	[ -n "$PROVIDER" ] && set -- "$@" --provider "$PROVIDER"
 	set -- "$@" --model "$MODEL" --no-session
+	# `--no-extensions` and the tool allowlist are the containment, and neither is
+	# optional: without them a raise inherits every tool the practitioner's
+	# installed pi packages register, and every line of code those packages run at
+	# startup. What was rendered, and why the allowlist alone is not enough, is in
+	# THE ENVIRONMENT at the head of this script — the one place it is stated.
+	set -- "$@" --no-extensions
+	PI_TOOLS=$(pi_tool_allowlist "$ALLOWED")
+	if [ -n "$PI_TOOLS" ]; then
+		set -- "$@" --tools "$PI_TOOLS"
+	else
+		# The caller narrowed to a set with no built-in in it. That is no tools,
+		# and it is said rather than quietly widened back to the default.
+		set -- "$@" --no-tools
+		say "note: --allowed-tools '$ALLOWED' names no tool pi has built in, and a contained pi context has nothing else. This raise runs with --no-tools."
+	fi
 	# Whole-tool scoping only: excluding git means excluding bash wholesale, so a
 	# pi context restrained by mechanism has no shell at all. The caller chose;
-	# this records which.
+	# this records which. Pi applies the denylist after the allowlist, so this can
+	# only subtract from the line above.
 	[ -n "$EXCLUDED" ] && set -- "$@" --exclude-tools "$EXCLUDED"
 	set -- "$@" -p "@$BRIEF"
-	say "invoking: pi --model $MODEL --no-session -p @$(basename "$BRIEF")"
+	say "invoking: pi --model $MODEL --no-session --no-extensions ${PI_TOOLS:+--tools $PI_TOOLS}${PI_TOOLS:---no-tools} -p @$(basename "$BRIEF")"
 	run_harness none "$@"
 	;;
 devin)
@@ -1987,6 +2558,7 @@ devin)
 	cp "$WT/.devin/config.json" "$RUNDIR/devin-config.json"
 	cp "$WT/.devin/hooks.v1.json" "$RUNDIR/devin-hooks.v1.json"
 	cp "$WT/.devin/remit-no-git.sh" "$RUNDIR/devin-remit-no-git.sh"
+	cp "$WT/.devin/remit-no-reach.sh" "$RUNDIR/devin-remit-no-reach.sh"
 	set -- "$@" timeout "$DEVIN_TIMEOUT" "$DEVIN" -p \
 		--prompt-file "$BRIEF" \
 		--respect-workspace-trust false \
@@ -2020,9 +2592,13 @@ copilot)
 	# invisible to every shell deny rule and to a hook that inspects shell
 	# commands. Ruled: the CLI is the route and that server is not.
 	#
-	# Never `--no-custom-instructions`, which would strip the AGENTS.md a context
-	# needs; never `--share`, whose default path writes the transcript into the
-	# directory about to be staged; never `--share-gist`.
+	# Never `--no-custom-instructions`: it is one boolean over the whole
+	# custom-instruction section, so it would strip the AGENTS.md a context needs
+	# in order to strip the practitioner's own files. That it cannot be scoped,
+	# and every other lever that was searched for and did not exist, is stated
+	# once in THE ENVIRONMENT at the head of this script and nowhere else. Never
+	# `--share`, whose default path writes the transcript into the directory
+	# about to be staged; never `--share-gist`.
 	copilot_write_containment "$WT" || {
 		copilot_remove_containment "$WT"
 		die "could not write the context's containment under $WT/.github/hooks — not raising a context this script cannot contain"
@@ -2271,7 +2847,7 @@ write_provenance() {
 			else
 				printf 'boundary: none — attested by disclosed\n'
 			fi
-			printf 'boundary-note: devin'\''s own OS-level sandbox is unsupported on Windows outside WSL, so it was never passed and there is no read boundary here. What did apply is the worktree, the deny rules and the PreToolUse hook — git and gh, and nothing else. The export is the channel that says which permission mode applied.\n'
+			printf 'boundary-note: devin'\''s own OS-level sandbox was never passed, so there is no read boundary here. On Windows it does not exist; on every other platform it does and remit does not yet pass it — the two reasons are separate and are at the `--sandbox` refusal in this script. What did apply is the worktree, the deny rules and the PreToolUse hooks — git and gh, every MCP call, request_scope and webfetch, and nothing else. The export is the channel that says which permission mode applied.\n'
 			;;
 		*)
 			printf 'boundary: none — attested by disclosed\n'
@@ -2281,6 +2857,15 @@ write_provenance() {
 		[ -n "$EFFORT" ] && printf 'effort: %s\n' "$EFFORT"
 		printf 'scrub: env -i with %s and nothing else\n' \
 			"$(sed 's/=.*//' "$ENVLIST" | tr '\n' ' ' | sed 's/ $//')"
+		# The tool surface a pi context actually got. It is written for pi alone
+		# because pi is the seat where the surface is remit's to set: extension
+		# discovery is off and the list is an intersection, so what the model
+		# could reach is a fact this script owns and must be able to show.
+		if [ "$HARNESS" = pi ]; then
+			printf 'tools: %s, with extension discovery off (--no-extensions)%s\n' \
+				"${PI_TOOLS:+--tools $PI_TOOLS}${PI_TOOLS:---no-tools}" \
+				"${EXCLUDED:+, then --exclude-tools $EXCLUDED}"
+		fi
 		printf 'run-log: %s\n' "$RUNDIR"
 		[ -n "$COPILOT_VERSION" ] && printf 'harness-version: copilot %s\n' "$COPILOT_VERSION"
 		[ -n "$DEVIN_VERSION" ] && printf 'harness-version: devin %s\n' "$DEVIN_VERSION"
@@ -2295,6 +2880,18 @@ write_provenance() {
 		return 0
 	} >"$PROVFILE"
 }
+
+# A STALL IS ITS OWN OUTCOME, and it is checked before the exit code because a
+# process this script killed exits non-zero and would otherwise be reported as a
+# CLI that failed on its own. It did not: it stopped saying anything and was
+# ended for it. Whatever it had said is in the run directory either way.
+if [ -n "$STALLED" ]; then
+	final_note="stalled: no output for ${STALLED}s. The CLI was ended by this script's idle bound (REMIT_QUIET=$QUIET), not by its own wall bound and not by any failure it reported. What it had written by then is in $RUNDIR${final_note:+; $final_note}"
+	write_provenance
+	say "THE RUN STALLED: nothing was written to either output channel for ${STALLED}s and the CLI was ended. No text is returned, because there is no final message to return."
+	print_harness_stderr
+	exit 8
+fi
 
 if [ "$HARNESS_EXIT" -ne 0 ]; then
 	write_provenance
