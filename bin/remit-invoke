@@ -212,6 +212,12 @@
 #     run happened", so a devin run is judged from its ATIF export. Its
 #     containment is enforced by TERMINATION, not refusal, which is why its
 #     allow list is everything a context reaches for.
+#   * A DEVIN TOOL CALL THAT IS NEITHER ALLOWED NOR DENIED IS NOT SAFE. Its
+#     permission ladder ends in a default of PROMPT, there is nobody to prompt in
+#     `-p`, and the rejection cancels every sibling call in the batch — a raise
+#     can end with an empty final message and no verdict at all. A catch-all deny
+#     is not expressible, so what closes it is the ALLOW LIST, and the residual
+#     hole is stated where that list is written: `devin_write_containment` below.
 #   * Copilot reports NOTHING about the permissions that actually applied, in
 #     any channel, so there is no read-back to make. What exists instead is a
 #     canary: a cheap throwaway run under the exact configuration the context
@@ -458,6 +464,7 @@ AUTHORITY=${REMIT_AUTHORITY:-}
 RUBRICS=${REMIT_RUBRICS:-}
 STANDARDS=${REMIT_STANDARDS:-}
 MUSTFIX=${REMIT_MUSTFIX:-}
+DELIVERY=${REMIT_DELIVERY:-}
 PROVFILE=${REMIT_PROVENANCE:-}
 RUNS=${REMIT_RUNS:-}
 RUNS_NAMING=${REMIT_RUNS_NAMING:-}
@@ -1133,10 +1140,11 @@ role_limits() {
 		printf '  expectation formed after reading is not an expectation.\n'
 		printf -- '- You NEVER repair, amend, accept, merge or close. A must-fix goes back to a\n'
 		printf '  fresh builder; that is the mechanism'\''s, not yours.\n'
-		printf -- '- You NEVER run `bin/remit` or `bin/remit-invoke`, and you never run `git`\n'
-		printf '  or `gh` to CHANGE anything — nothing that writes, stages, pushes,\n'
-		printf '  comments, merges or closes. READING is not that and is fine: `git show`,\n'
-		printf '  `git diff`, `git log`.\n'
+		printf -- '- You NEVER run `bin/remit` or `bin/remit-invoke`, and you NEVER run `git`\n'
+		printf '  or `gh` AT ALL — not to change anything and not to read anything. A\n'
+		printf '  raised context never runs either; the seam does. Everything you judge is\n'
+		printf '  already on disk in front of you, and a `git` you reach for here is denied\n'
+		printf '  by the containment this run wrote, on every harness.\n'
 		printf -- '- A finding is a FACT with its evidence, never a task. You do not classify\n'
 		printf '  findings by consequence: only a rubric below can accept a finding or make\n'
 		printf '  one a must-fix, and every such use cites the rubric and the evidence.\n'
@@ -1162,8 +1170,10 @@ role_limits() {
 		;;
 	research)
 		printf 'You are a RESEARCHER. You establish what is true and you change nothing.\n\n'
-		printf -- '- You NEVER run `git` or `gh` for anything but READING, and you NEVER run\n'
-		printf '  `bin/remit` or `bin/remit-invoke`. You author no product change.\n'
+		printf -- '- You NEVER run `git` or `gh` AT ALL, and you NEVER run `bin/remit` or\n'
+		printf '  `bin/remit-invoke`. A raised context never runs either; the seam does.\n'
+		printf '  Your evidence is the tree in front of you and the record. You author no\n'
+		printf '  product change.\n'
 		printf -- '- You work only inside the authority below and NEVER widen it: you establish\n'
 		printf '  what it names and stop, rather than surveying whatever is nearby.\n'
 		printf -- '- Everything you report is evidenced by something you actually ran or read,\n'
@@ -1174,8 +1184,9 @@ role_limits() {
 		printf 'You analyse an ESCALATION and propose an amendment to the brief.\n\n'
 		printf -- '- THE BRIEF IS UNTOUCHED until the practitioner rules. You edit no file at\n'
 		printf '  all: you return a proposal as text.\n'
-		printf -- '- You NEVER run `git` or `gh` for anything but READING, and you NEVER run\n'
-		printf '  `bin/remit` or `bin/remit-invoke`.\n'
+		printf -- '- You NEVER run `git` or `gh` AT ALL, and you NEVER run `bin/remit` or\n'
+		printf '  `bin/remit-invoke`. A raised context never runs either; the seam does.\n'
+		printf '  Your evidence is the record and the tree in front of you.\n'
 		printf -- '- You say which of the three is at fault — the brief, the proof, or the\n'
 		printf '  build — and why, from the record. A proposal with no evidence behind it is\n'
 		printf '  worse than none.\n'
@@ -1218,6 +1229,31 @@ runs_section() {
 	return 0
 } # end runs_section
 
+# WHAT AN EVALUATOR IS LOOKING AT, named. `bin/remit` decides which tree this
+# raise stands in and which commit it hands over — WHERE AN EVALUATOR IS RAISED
+# in that script's header is the law, and this end states none of it. All this
+# does is say, to the context that has to judge, that the delivery is the files
+# under its own worktree and not something behind a command it may not run.
+#
+# THE INCIDENT, so nobody removes this as decoration: an accepted-gate evaluator
+# was raised in a tree that did not carry the delivered file, read for the file,
+# found nothing, and spent the rest of the run hunting the commit through git
+# plumbing it was contained away from — ending with no verdict at all.
+delivery_section() {
+	[ "$ROLE" = evaluate ] || return 0
+	[ -n "$DELIVERY" ] || return 0
+	printf '\n## The delivery you are judging\n\n'
+	printf 'It is commit `%s` on `work/%s`, and IT IS ALREADY CHECKED OUT: the delivered\n' "$DELIVERY" "$SLUG"
+	printf 'tree is the files in front of you at\n\n'
+	printf '  %s\n\n' "$WT"
+	printf 'Judge it by READING THOSE FILES, and by reading the kept runs named below.\n'
+	printf 'There is nothing to fetch, nothing to check out and nothing to reconstruct:\n'
+	printf 'the commit id is here so you can name it in what you return, not so you can\n'
+	printf 'go looking for it. If a file you expected is not there, that absence IS the\n'
+	printf 'finding — report it as one rather than hunting for the file by another road.\n'
+	return 0
+} # end delivery_section
+
 role_returns() {
 	case "$ROLE" in
 	build) printf 'Your final message. It is recorded as the delivery'\''s returned text, quoted\nand not endorsed. The tree you authored is the delivery; the message says what\nyou did, what you could not do, and what you left undone.\n' ;;
@@ -1246,6 +1282,7 @@ role_returns() {
 	role_limits
 	printf '\n## What you return\n\n'
 	role_returns
+	delivery_section
 	runs_section
 	if [ -n "$AUTHORITY" ]; then
 		printf '\n## Your authority — `%s`, reproduced in full\n\n' "$AUTHORITY"
@@ -1337,7 +1374,7 @@ say "  registry     : $SETTINGS ($REGISTRY_HASH), seat $SEAT_KIND"
 if [ "$HARNESS" = devin ]; then
 	say "  devin binary : $DEVIN"
 	say "  account      : tier ${DEVIN_TIER:-<not reported>}, primary org ${DEVIN_ORG:-<none reported>}"
-	say "  permissions  : requesting $DEVIN_MODE, with the git deny and the hook written to $WT/.devin for the run"
+	say "  permissions  : requesting $DEVIN_MODE, with the git deny, the whole-\`exec\` allow that keeps an ordinary command off devin's prompt default, and the hook, all written to $WT/.devin for the run"
 	[ -n "$EXCLUDED" ] &&
 		say "  exclusions   : $EXCLUDED — under devin these are DENY rules, and a denied call ends the run rather than failing on its own. This raise has chosen a kill switch, not a scoping."
 	say "  bounded wait : ${DEVIN_TIMEOUT}s (REMIT_DEVIN_TIMEOUT)"
@@ -1412,25 +1449,65 @@ run_harness() { # $1 stdin file or 'none'; rest: the command, env prefix include
 # hook sees the whole command string and closes that, and since a context
 # realistically needs a shell, the hook is not a second line of defence here: it
 # is the line that holds — and holds by ending the run, which is what a block
-# costs here.
+# costs here. THE HOOK'S MATCHER IS `exec` AND STAYS THERE: an omitted matcher
+# would fire this on every tool call, and a hook that blocks is the one thing
+# under this CLI that reliably ends a run, so widening it would buy nothing and
+# cost the run. What the hook stops is git and gh, wrapped or not, and nothing
+# else.
 #
 # The allow list names tools by the shipped build's OWN names, read as
 # `function_name` values out of a real run's export — not the names Cognition
 # documents, which include a `glob` the build does not have. An entry that
 # matches nothing is silent: it grants nothing and says nothing, and the context
 # that reaches for what it was meant to grant ends the run instead. So the list
-# is what a context needs and ALL of it — with exec narrowed to `Exec(sh)`, so
-# the deny and the hook still stand between a context and git. A list pruned for
-# tidiness is a run that dies on its first search.
+# is what a context needs and ALL of it. A list pruned for tidiness is a run that
+# dies on its first search.
 #
-# `accept-edits` is requested explicitly on every raise and every tier. It is
-# never inferred from an organisation's policy, and this configuration behaves
-# the same whether or not one exists.
+# THE FALL-THROUGH, AND WHY `exec` IS ALLOWED WHOLE. Devin's permission check is a
+# FIXED FOUR-TIER LADDER — deny, then ask, then allow, then a default of PROMPT —
+# and there is no fifth tier and no key that changes what the default resolves to.
+# There is no `"*"`, no `Exec(*)` and no `defaultMode` in the shipped build; the
+# only wildcard it carries is `mcp__*`, inside the MCP namespace. So a CATCH-ALL
+# DENY IS NOT EXPRESSIBLE, and a tool call that is neither denied nor allowed
+# lands on that default. In `-p` there is nobody to prompt, and the CLI rejects
+# it — `rejected a tool call that requires confirmation` — which CANCELS EVERY
+# SIBLING CALL IN THE SAME BATCH and can end the run with an empty final message.
+#
+# THE FIELD FAILURE, 2026-09-01, Zenith.Core: an evaluator reached for
+# `python -c "import importlib.util…"`. Not denied, not allowed. Fall-through,
+# reject, batch cancelled, empty final message, and `bin/remit` recorded
+# `cannot act: verdict` and escalated.
+#
+# So the allow list carries the `exec` TOOL ITSELF rather than a prefix apiece.
+# DENY BEATS ALLOW ABSOLUTELY, so `Exec(git)` and `Exec(gh)` still stand over it
+# and still carry remit's message, and the hook below still sees git in any
+# wrapping. What changes is that no ordinary command an evaluator reaches for —
+# `python`, `node`, a test runner, a lister — can fall through to the prompt any
+# more: it is allowed, or it is denied by name, or the hook stops it. Widening
+# this grants nothing remit's law withheld: the law is that a raised context runs
+# no `git` and no `gh`, and this seat's `boundary:` has always been reported as
+# `none` — the containment here was never a read boundary and never claimed to be.
+#
+# THE RESIDUAL HOLE, said out loud. Only `exec` is closed. A tool call whose NAME
+# is not on the list still falls through to the prompt and still rejects the same
+# way, and the shipped build's full tool inventory is NOT ESTABLISHED — a real
+# run's export reported 29 tool definitions and enumerated a subset of them. The
+# names below are the ones confirmed from real exports and from the CLI's own
+# bundled documentation. A raise that dies with an empty final message and a
+# tool nobody listed is this hole, and the run's kept log is where it is legible.
+#
+# `accept-edits` is requested explicitly on every raise and every tier, and it
+# COVERS FILE EDITS ONLY — the CLI's own table has every mode but `dangerous`,
+# `smart` and `autonomous` still prompting for shell commands, and this tenant's
+# organisation policy downgrades `dangerous` and `smart` to `normal`. So the
+# permission mode is not what closes the fall-through and was never going to be;
+# the allow list is. It is never inferred from an organisation's policy, and this
+# configuration behaves the same whether or not one exists.
 #
 # Written here, removed before anything else, committed nowhere. The copies kept
 # in the run directory are the record of what actually applied.
 DEVIN_DENY='Exec(git) Exec(gh) Write(.git/**) Write(.devin/**)'
-DEVIN_ALLOW='read write grep find_file_by_name todo_write get_output skill mcp_list_tools Exec(sh)'
+DEVIN_ALLOW='read write grep find_file_by_name todo_write get_output skill mcp_list_tools exec Exec(sh)'
 devin_json_array() { # $1 space- or comma-separated entries -> "a", "b"
 	printf '%s\n' "$1" | tr ' ,' '\n\n' |
 		awk 'NF { printf "%s%s", sep, "\"" $0 "\""; sep = ", " }'
@@ -1481,7 +1558,7 @@ if [ -z "$payload" ]; then
 	exit 2
 fi
 if printf '%s\n' "$payload" | grep -Eiq '(^|[^A-Za-z0-9_-])(git|gh)([^A-Za-z0-9_-]|$)'; then
-	printf 'blocked by remit law: a builder never runs git or gh. Author the working tree and stop there — remit branches, commits, pushes and opens the pull request after you exit, and a tree you leave uncommitted is exactly what it expects.\n' >&2
+	printf 'blocked by remit law: a raised context never runs git or gh — the seam does, as the coordinator, after this context exits. Nothing you were raised for needs either: what you author or judge is the tree on disk in front of you, and a tree left uncommitted is exactly what the seam expects. Carry on without it.\n' >&2
 	exit 2
 fi
 exit 0
@@ -1580,7 +1657,7 @@ if [ -z "$payload" ]; then
 	exit 2
 fi
 if printf '%s\n' "$payload" | grep -Eiq '(^|[^A-Za-z0-9_-])(git|gh)([^A-Za-z0-9_-]|$)'; then
-	printf 'blocked by remit law: a builder never runs git or gh. Author the working tree and stop there — remit branches, commits, pushes and opens the pull request after you exit, and a tree you leave uncommitted is exactly what it expects.\n' >&2
+	printf 'blocked by remit law: a raised context never runs git or gh — the seam does, as the coordinator, after this context exits. Nothing you were raised for needs either: what you author or judge is the tree on disk in front of you, and a tree left uncommitted is exactly what the seam expects. Carry on without it.\n' >&2
 	exit 2
 fi
 exit 0

@@ -375,6 +375,12 @@
 #   REMIT_ROUND       the round number in the author/evaluate loop; 1 first time
 #   REMIT_MUSTFIX     absolute path of a file holding the must-fix being sent
 #                     back, or empty on a first attempt
+#   REMIT_DELIVERY    the commit the LAST recorded delivery names, handed to the
+#                     `evaluate` raise at a gate after a delivery and EMPTY
+#                     everywhere else — at the gate into `refined`, which judges a
+#                     brief, and wherever the record names no delivery at all.
+#                     WHERE AN EVALUATOR IS RAISED below is the law of it, and of
+#                     the worktree that goes with it.
 #   REMIT_RUNS        absolute path of the KEPT-OUTPUT HOME this raise writes
 #                     into, already made and already ignoring itself. Handed to
 #                     every role: the ones that author keep their run output
@@ -541,10 +547,32 @@
 # under it while it ran — so anything he wrote during a run is still a change at
 # the next one.
 #
-# Every entry that RECORDS A RAISE carries one line naming it:
+# Every entry that RECORDS A RAISE carries one line naming it, and beneath it the
+# provenance the seam reported for that raise, indented under it:
 #
 #   - raise: <role> — <harness> — <seconds>s
 #   - raise: <role> — <harness> — not timed: <why>
+#     - model: <as served, or the id asked for with ` (asked)`>
+#     - session: <the run id the harness reports>
+#     - run-log: <the seam's run directory>
+#     - boundary: <user|container|none — attested by …>
+#     - permission-mode: <where the harness has one>
+#     - sandbox: <where the harness has one>
+#     - scrub: <what crossed into the context's environment>
+#     - effort: <where one was asked for>
+#     - cost: <where the harness reports one>
+#
+# EVERY KEY THE SEAM REPORTED AND NOT ONE MORE. A key the provenance did not
+# carry gets no line: absent is absent, and a default written in its place would
+# be this script inventing what a run did. WHY THEY ARE HERE, dated 2026-09-01: an
+# escalation whose entry said only `- raise: evaluate — devin — 73s` could not be
+# read afterwards at all — which model sat in the seat, what containment applied
+# and where the run's own output went were reconstructable only because the seam's
+# temporary run directories happened not to have been swept yet. The provenance
+# sidecar lives in this run's scratch and dies with it; these lines are the copy
+# that stays. The RUN'S OWN LOG is kept too, and that is `raise_log_keep` below:
+# it lands in the item's runs home, under the naming convention, and the
+# `run-log:` line above names where it came from.
 #
 # `<role>` is the role that ran: research, build, evaluate or repair-brief.
 # `<harness>` is the provenance sidecar's `harness:`, or `an unreported harness`
@@ -663,9 +691,13 @@
 # the worktree is the one directory writable by every seat on every harness — a
 # sandboxed one runs as another account and is refused everywhere else — so a
 # raise writes where it can, and this script brings what it wrote home the moment
-# the raise returns. The `evaluate` raise is given the PRIMARY worktree, so for
-# it the two are one directory and the hop does not happen: it reads the builder's
-# kept output straight out of the home.
+# the raise returns. WHICH TREE AN `evaluate` RAISE GETS is WHERE AN EVALUATOR IS
+# RAISED below, and it decides which of the two homes that raise is handed: the
+# gate into `refined` is raised in the primary worktree and reads the home
+# itself, and every gate after a delivery is raised in the item's worktree and
+# reads the worktree-local home the build wrote into — which is where the
+# builder's kept output already is, because `runs_harvest` COPIES it home rather
+# than moving it.
 #
 # NOTHING IS COMMITTED WHILE THE ITEM IS IN FLIGHT. A per-run commit would put
 # every superseded log into history forever, where no sweep can reach it. The
@@ -690,6 +722,14 @@
 # removes only what it can key, because deleting evidence it does not understand
 # is the worse mistake. What it kept, what it removed and what it could not key
 # are all named in the `closed` entry of the record.
+#
+# EVERY RAISE KEEPS ONE RUN OF ITS OWN, and that is `raise_log_keep` below. It
+# takes the same naming convention, lands in the same home, travels by the same
+# harvest and is swept by the same sweep — so an item whose chain ran always
+# archives at least the raises that ran on it, and the "no run output was kept"
+# branch above is now reached only by an item that raised nothing at all. That is
+# a deliberate widening, dated 2026-09-01: `log.md — THE ENTRY SHAPES` above
+# carries the field evidence, which is an escalation nobody could reconstruct.
 #
 # ==============================================================================
 # THE THREE GATES
@@ -736,6 +776,39 @@
 # An item at `new` with nothing said runs no chain at all until it is resumed —
 # unless `refined.md` carries a `promote` that could carry it, which is the one
 # thing `new` asks the gate for on its own. That is the law's table, row one.
+#
+# ==============================================================================
+# WHERE AN EVALUATOR IS RAISED
+# ==============================================================================
+#
+# AN EVALUATOR IS RAISED WHERE THE THING IT JUDGES IS ON DISK, and that is one
+# rule with two answers because the three gates judge two different things.
+#
+#   into `refined`   the BRIEF, and nothing built yet: the primary worktree.
+#   into `accepted`  the DELIVERY: the item's own worktree — THE SAME PATH THE
+#   into `closed`    build used, `build_worktree`/`worktree_path` above, on
+#                    `work/<slug>`. There is no second resolver and no second
+#                    path; the gate asks the one that already exists.
+#
+# THE FIELD FAILURE THIS IS, dated 2026-09-01 on the Zenith.Core install: every
+# evaluate was raised in the primary worktree, and the accepted gate's evaluator
+# was asked to judge a file that existed only on `work/<slug>`. Its first call
+# was a read of that file; the read found nothing; it spent the rest of the run
+# hunting the delivery through `refs/`, `packed-refs` and loose objects, and the
+# run ended with no verdict at all. The evidence was never in front of it. The
+# briefing now NAMES the delivered commit — `recorded_delivery` reads it off the
+# last `## delivery —` entry, the record being the authority on what was
+# delivered — and states that the delivered tree IS the files at that path.
+#
+# WHERE THE TREE CANNOT BE OPENED — no `work/<slug>` on the record's repository,
+# or a worktree git refuses — the raise still happens, in the primary worktree,
+# with the commit unnamed and the briefing saying which tree it stands in. An
+# evaluation on the record alone is worth more than no evaluation, and a silent
+# fallback is what made the field failure unreadable.
+#
+# NOTHING ELSE MOVES. The refined gate's mechanics, the rubric reading and the
+# citation vocabulary are untouched by this; only the third argument of the
+# `evaluate` raise and what the briefing says about evidence.
 #
 # ==============================================================================
 # THE AUTHORITY LOCK — STOP, AMENDMENT AND THE PHASE QUEUE
@@ -2592,6 +2665,19 @@ recorded_pr() {
 	recorded_pr_url | sed -n 's|.*/\([0-9][0-9]*\)$|\1|p'
 }
 
+# The COMMIT the last recorded delivery names — the one an evaluator after it is
+# judging, and the one its briefing is told to expect in front of it. Read off
+# the delivery entry's own first line, which the seam writes as
+# ``Commit `<sha>` on `work/<slug>`…``, for the same reason `recorded_pr_url`
+# reads the entry rather than the branch: THE RECORD IS THE AUTHORITY on what was
+# delivered, and a commit sitting on the branch that no entry names is not a
+# delivery. Empty where the record names none, and the briefing then says so
+# rather than naming a commit nobody recorded.
+recorded_delivery() {
+	[ -f "$log" ] || return 0
+	nocr "$log" | sed -n 's|^Commit `\([0-9a-fA-F][0-9a-fA-F]*\)` on `work/.*|\1|p' | sed -n '$p'
+}
+
 # The same pair, taken into the two variables the moves use, and ONLY where this
 # run did not open one itself: a run that delivered knows its own.
 pr_from_record() {
@@ -2762,6 +2848,68 @@ raise_line() { # $1 role  $2 the epoch second it started  $3 the second it came 
 	else
 		printf -- '- raise: %s — %s — %ss\n' "$1" "$_rl_h" "$(($3 - $2))" >>"$RAISES"
 	fi
+	# THEN THE SIDECAR, indented under the line it belongs to. The provenance file
+	# dies with this run's scratch; without these lines a stop was reconstructable
+	# only from whatever of the seam's own run directory the operating system had
+	# not swept yet, which is what the field failure of 2026-09-01 came down to.
+	# Every key the seam actually reported, and no line for one it did not: an
+	# absent key is absent, never invented and never filled with a default.
+	for _rl_k in model session run-log boundary permission-mode sandbox scrub effort cost; do
+		_rl_v=$(prov "$_rl_k")
+		[ -n "$_rl_v" ] || continue
+		printf -- '  - %s: %s\n' "$_rl_k" "$_rl_v" >>"$RAISES"
+	done
+	return 0
+}
+
+# THE RUN'S OWN LOG, BROUGHT INTO THE RECORD'S REACH. Written into the home the
+# raise itself was given, so that `runs_harvest` — the one mechanism there is for
+# moving kept output, called immediately after this — carries it the rest of the
+# way and the sweep at close keys it like any other run. Nothing new travels and
+# nothing new is swept.
+#
+# WHY IT IS WRITTEN AT ALL: the seam's run directory lives under the coordinator's
+# TMPDIR and nothing here owns it, so it survives exactly as long as the operating
+# system leaves it there. A stop, an escalation and a verdict nobody can explain
+# are all read weeks later, and reading them off a temporary directory that
+# happened not to be swept is not a record. This is a BEST EFFORT and says so by
+# returning 0 whatever happens: losing a raise's log costs the record a page, and
+# losing the raise to a failed copy would cost it the work.
+#
+# THE NAME follows `runs_naming` above, with the HARNESS in the `<shell>` field —
+# that slot is "what it ran under", and for a raise the harness is what it ran
+# under. The round is in the suite field, so each round of each role keeps its own
+# last log through the sweep rather than the last round burying the one that
+# failed.
+raise_log_keep() { # $1 role  $2 the working tree the raise ran in
+	_klh=$(prov harness)
+	[ -n "$_klh" ] || _klh=unreported
+	# No `.` may appear in any of the three fields, or the sweep cannot key it.
+	_klh=$(printf '%s' "$_klh" | tr -c 'A-Za-z0-9-' '-')
+	_klstamp=$(date -u +%Y%m%dT%H%M%SZ 2>/dev/null) || _klstamp=''
+	[ -n "$_klstamp" ] || return 0
+	_kldir=$(runs_home "$2")
+	runs_open_at "$_kldir" || return 0
+	_klf="$_kldir/raise-$1-round$ROUND.$_klh.$_klstamp.log"
+	_klr=$(prov run-log)
+	{
+		printf 'raise: %s — round %s — item %s — %s\n\n' "$1" "$ROUND" "$slug" "$(now)"
+		printf '## provenance, as the seam reported it\n\n'
+		if [ -s "$WORK/prov" ]; then nocr "$WORK/prov"; else printf '(the seam reported none)\n'; fi
+		printf '\n## the seam'"'"'s own narration — its stderr\n\n'
+		if [ -s "$WORK/invoke.err" ]; then nocr "$WORK/invoke.err" | sed -n '1,2000p'; else printf '(none)\n'; fi
+		printf '\n## the run directory — %s\n\n' "${_klr:-<the seam reported none>}"
+		if [ -n "$_klr" ] && [ -d "$_klr" ]; then
+			for _klx in stderr progress final-message; do
+				[ -f "$_klr/$_klx" ] || continue
+				printf '### %s\n\n' "$_klx"
+				nocr "$_klr/$_klx" | sed -n '1,2000p'
+				printf '\n'
+			done
+		else
+			printf 'It is not readable from here, so what it held is not in this file.\n'
+		fi
+	} >"$_klf" 2>/dev/null || return 0
 	return 0
 }
 
@@ -2837,6 +2985,7 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 		REMIT_SETTINGS="$SETTINGSFILE" \
 		REMIT_PROVENANCE="$WORK/prov" \
 		REMIT_ROUND="$ROUND" \
+		REMIT_DELIVERY="${EVAL_DELIVERY:-}" \
 		REMIT_MUSTFIX="$_mf" \
 		sh "$INVOKE" "$_role" "$slug" "$_wt" >"$_out" 2>"$WORK/invoke.err" </dev/null &
 	RAISE_PID=$!
@@ -2849,6 +2998,12 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	# does not return. A chain his `stop` ended still ran whatever it ran, and
 	# the evidence of that is worth as much as the evidence of one that finished
 	# — more, sometimes, because a stop is usually a stop for a reason.
+	#
+	# THE RAISE'S OWN LOG IS WRITTEN INTO THAT HOME FIRST, so this one harvest
+	# carries it with everything else. It is written for EVERY raise, including
+	# one the seam refused: a refusal that reported nothing is exactly the run
+	# somebody will need to read.
+	raise_log_keep "$_role" "$_wt"
 	runs_harvest "$_wt"
 	# A raise that ENDED because his `stop` took the lock is not a raise that
 	# FAILED, and the difference is the whole of what the record says next: one
@@ -3146,10 +3301,12 @@ build_worktree() {
 # that call it.
 
 runs_home() { # $1 a working tree -> where a raise in it keeps its output
-	# A raise in the PRIMARY worktree — the evaluator the chain hands `$root` —
-	# is handed THE HOME itself, wherever the record lives, so its pointer aims
-	# at what a build's output was harvested into. A raise in a build worktree is
-	# handed its own worktree-local one, and `runs_harvest` crosses the gap. The
+	# A raise in the PRIMARY worktree — research, `repair-brief`, and the gate-1
+	# evaluator the chain hands `$root` — is handed THE HOME itself, wherever the
+	# record lives, so its pointer aims at what a build's output was harvested
+	# into. A raise in a build worktree — every builder, and every evaluator at a
+	# gate after a delivery — is handed its own worktree-local one, which is the
+	# one the build wrote into, and `runs_harvest` crosses the gap. The
 	# two expressions are the same string when the record is in the project, so
 	# nothing about this changes for a repository that never asked for personal
 	# records.
@@ -3682,8 +3839,29 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 			fi
 		fi
 
+		# THE EVALUATOR IS RAISED WHERE THE DELIVERY IS — the law is WHERE AN
+		# EVALUATOR IS RAISED in this script's header, and this is only its code.
+		# The gate into `refined` judges the brief, before any worktree exists, so
+		# it is raised in the primary worktree; every gate after a delivery is
+		# raised in the ITEM'S OWN worktree, on `work/<slug>`, which is the only
+		# tree where the delivered files are on disk.
+		EVAL_DELIVERY=''
+		_evalwt=$root
+		if [ "$GATE" != refined ]; then
+			EVAL_DELIVERY=$(recorded_delivery)
+			if git -C "$root" show-ref --verify --quiet "refs/heads/work/$slug" && build_worktree; then
+				_evalwt=$WT
+			else
+				# No delivery branch, or a worktree that would not open. Said out
+				# loud and raised in the primary worktree anyway: an evaluation
+				# that runs on the record alone is worth more than none, and the
+				# briefing tells it which tree it is standing in either way.
+				EVAL_DELIVERY=''
+				say "the delivered tree could not be opened at $(worktree_path) — this evaluate is raised in $root and judges the record and the kept runs."
+			fi
+		fi
 		mark_step "evaluate round $ROUND, at the gate into $GATE"
-		if ! invoke evaluate "$WORK/verdict" "$root"; then
+		if ! invoke evaluate "$WORK/verdict" "$_evalwt"; then
 			LOOP_STOP="cannot act: remit-invoke"
 			return 1
 		fi
