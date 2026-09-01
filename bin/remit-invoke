@@ -83,9 +83,46 @@
 #   seat:          `registered` (the registry's `defaults` decided it) or
 #                  `override` (a flag did — checked against the registry too)
 #   registry:      the digest of the registry AS READ, with its algorithm
-#   model:         THE MODEL AS SERVED where the run reports it; otherwise the id
-#                  ASKED FOR with ` (asked)` on the end and a `model-note:`
-#                  naming the channel that carried nothing. Never a guess.
+#   model:         THE MODEL THAT AUTHORED, as served, where the run reports it;
+#                  otherwise the id ASKED FOR with ` (asked)` on the end and a
+#                  `model-note:` naming the channel that carried nothing. Never a
+#                  guess.
+#                  WHERE A RUN REPORTS MORE THAN ONE MODEL — claude's envelope
+#                  carries a `modelUsage` MAP, and a Claude Code run bills an
+#                  internal ancillary model beside the one that wrote the
+#                  deliverable — THE AUTHOR IS CHOSEN, never taken by position.
+#                  THE RULE, and it is two clauses in this order:
+#                    1. the REGISTERED SEAT'S id, when that id is one of the
+#                       keys. The registry decided who was raised; a run that
+#                       reports it served that seat settles authorship.
+#                    2. failing that, the key with the LARGEST OUTPUT TOKEN
+#                       COUNT. What a model WROTE is the only proxy for
+#                       authorship the envelope carries; input tokens are not
+#                       (an ancillary model summarising a long context reads far
+#                       more than the author writes, which is exactly the shape
+#                       that produced the wrong record).
+#                  Ties on output go to the last key in sorted order, so the
+#                  choice is deterministic rather than dependent on the order a
+#                  JSON reader happened to hand the keys back. Taking `keys[0]`
+#                  is what the field failure of 2026-09-01 was: `modelUsage`
+#                  carried `claude-sonnet-5` at out=30249, the author, and
+#                  `claude-haiku-4-5-20251001` at out=3385, the ancillary, and
+#                  alphabetical order named the ancillary in the record.
+#   models:        EVERY model the run reports, with `in=`, `out=` and `cost=`
+#                  where the envelope carries them, semicolon-separated. Written
+#                  only where a run reports more than nothing here. It exists so
+#                  the ancillary model is VISIBLE — a reader can see what else
+#                  was billed — and can never again be mistaken for the author,
+#                  because the author is on its own line above.
+#   consulted:     `web_search=<n> web_fetch=<m>` — the run's OWN count of the
+#                  server-side searches and fetches it made, written ONLY when
+#                  the run reports them and absent, never zeroed, when it does
+#                  not. It is EVIDENCE FOR A READER OR A RUBRIC TO CITE, and
+#                  this seam draws NO conclusion from it: it does not gate, warn,
+#                  fail or grade on the number. A research pass that consulted
+#                  nothing and one that consulted forty look the same to this
+#                  script and different to whoever reads the record.
+#                  WHICH SEATS CAN ANSWER IT is at THE ENVIRONMENT below.
 #   model-check:   how the id was verified before the run, or why it was not
 #   boundary:      `<user|container|none> — attested by <header|export|disclosed>`:
 #                  codex is `user` by its run header, every other seat `none`.
@@ -439,7 +476,80 @@
 #     plain, under `--no-approve` and under `--no-extensions` alike. And
 #     `--no-extensions` OUTRANKS TRUST: with `--approve` AND `--no-extensions`
 #     the project skills loaded and the project-local extension still did not.
-#   claude — not investigated, and nothing is claimed either way.
+#   claude — the INSTRUCTION surface is not investigated, and nothing is claimed
+#     either way. What IS settled, and settled here rather than by the installer,
+#     is THE AGENT-TOOL GUARD.
+#     WHY THE SEAM WRITES IT AND NOT THE INSTALLER. `install.sh` registers
+#     `.remit/hooks/no-agent-tool.sh` as a `PreToolUse` hook in the repository's
+#     `.claude/settings.local.json`. Under a SHADOW install that file is
+#     shadow-excluded, so it does not exist in the `work/<slug>` worktree a raise
+#     actually runs in; and the global configuration the raise reads through
+#     `CLAUDE_CONFIG_DIR` carries no such hook. On 2026-09-01, in Zenith.Core,
+#     that left a claude raise with NOTHING banning its agent tool. An installed
+#     file cannot contain a raise that runs where the installed file is not, so
+#     the containment is written PER RAISE, by this script, into the argv and the
+#     worktree the raise is given. It travels with the raise by construction.
+#     THE MECHANISM, and it is the flag: every claude raise passes
+#     `--disallowedTools Agent,Task,AgentTool` alongside its `--allowedTools`.
+#     `Agent` is the tool's name since Claude Code 2.1.63 and `Task` its retained
+#     alias; `AgentTool` is carried for the same reason the hook carries it. A
+#     DENY OUTRANKS EVERY ALLOW — the documented order is deny, then ask, then
+#     allow, and no allow at any level reinstates a denied tool — so this holds
+#     against the raise's own `--allowedTools` and against the permissions in the
+#     practitioner's global settings, `defaultMode: auto` included. It needs no
+#     file to exist anywhere.
+#     THE SECOND LAYER, belt to that brace: this script also writes the
+#     containment INTO THE WORKTREE before the raise and removes it after —
+#     `claude_write_containment` below. Two files, and BOTH are written by this
+#     script at the raise so that nothing installed anywhere is depended on:
+#     `.claude/settings.local.json`, carrying the same deny rules and a
+#     `PreToolUse` registration, and `.claude/remit-no-agent-tool.sh` beside it,
+#     which is the guard itself — the same rule as the shipped
+#     `.remit/hooks/no-agent-tool.sh` and reachable when that file is not there.
+#     Copilot's containment is written the same way and for the same reason.
+#     WHY IT IS READ AT ALL, documented rather than assumed: Claude Code loads
+#     user, project and local settings from the working directory by default
+#     (`--setting-sources` defaults to all three); a `-p` session counts as
+#     accepted, so an UNTRACKED `.claude/settings.local.json` is applied with no
+#     trust step; and `PreToolUse` hooks fire in `-p` before any permission-mode
+#     check, in every mode.
+#     IT NEVER OVERWRITES. A `.claude/settings.local.json` already in the tree is
+#     left exactly as it is and NOT augmented — that file is the practitioner's
+#     or the installer's, and a raise does not edit configuration it found. Only
+#     what this script created is removed afterwards, so a `.claude/` the
+#     repository already had survives the raise untouched. When the file was
+#     already there the flag is the whole containment, and that is what the
+#     `containment:` provenance line then says. A copy of whatever was written
+#     goes into the run directory as the record.
+#     WHAT NEITHER LAYER DOES, said rather than implied away: both match NAMES. A
+#     claude build that renames its agent tool, or reaches a sub-agent through
+#     some other tool, walks past both — the same limit the shipped hook states
+#     about itself.
+#
+# WHETHER A RUN CAN SAY WHAT IT CONSULTED — the `consulted:` provenance key —
+# is a per-harness fact and this is the one place it is stated.
+#
+#   claude — YES, and it is the only seat here that answers. The `-p
+#     --output-format json` envelope carries a `server_tool_use` object with
+#     `web_search_requests` and `web_fetch_requests`: the run's own count of the
+#     server-side searches and fetches it made. This is read where the envelope
+#     carries it and written to `consulted:`.
+#   codex, copilot, devin, pi — NO EQUIVALENT COUNT IS RECORDED, and that is a
+#     searched negative over the shapes this script already parses and the probe
+#     records that captured them, not an assumption. codex's run header block
+#     carries the session, the model and the sandbox and no tool tally at all.
+#     Devin's ATIF export carries per-step `tool_calls` and `extra.
+#     committed_acu_cost` — a step-level trace, from which a search count could
+#     only be INFERRED by matching tool names, which is a guess and is not made.
+#     Copilot's JSONL carries `tool.execution_start` / `tool.execution_complete`
+#     pairs and a `result` usage block of AI credits, premium requests and files
+#     modified — again a trace, not a count, and again not inferred. Pi's stdout
+#     under `-p` is the final message and nothing else; a contained pi raise has
+#     no web tool to count in any case, since `--no-extensions` and the built-in
+#     allowlist remove `web_search` and `fetch_content` outright.
+#     So `consulted:` is ABSENT on those four seats. Absent means unreported, and
+#     it is left absent rather than written as a zero — a zero would say the run
+#     consulted nothing, which is a claim none of those channels supports.
 #
 # THE SHAPE OF BOTH NEGATIVES IS THE SAME, and it is worth naming once. Each CLI
 # HAS the distinction remit wants — Copilot's sources are tagged `user` against
@@ -485,6 +595,16 @@
 #     will get, which must run an ordinary command, author an ordinary in-tree
 #     file, and be BLOCKED on a wrapped `git`. Anything else refuses the raise
 #     (exit 7) — a hook that fails to load fails OPEN, silently.
+#   * A CLAUDE RUN BILLS MORE THAN ONE MODEL and its envelope reports them as a
+#     MAP, so `model:` is CHOSEN — the registered seat's id where the run names
+#     it, else the largest output-token count — and never taken by position.
+#     Every model the run reports is written to `models:` beside it, so the
+#     ancillary is visible and is never the one the record calls the author. The
+#     rule, and the field failure that wrote it, are at THE PROVENANCE KEYS.
+#   * WHAT A RUN CONSULTED IS RECORDED, NOT JUDGED. Where a run reports its own
+#     web-search and web-fetch counts, `consulted:` carries them for a reader or
+#     a rubric to cite. This script draws no conclusion from the number, gates
+#     nothing on it, and writes no line at all for a seat that cannot report one.
 #   * There is NO enforced read boundary on claude, pi, copilot or devin here,
 #     and every provenance line says so rather than implying one.
 #   * An absent capability is reported before anything is invoked, and nothing
@@ -726,6 +846,12 @@ RUBRICS=${REMIT_RUBRICS:-}
 STANDARDS=${REMIT_STANDARDS:-}
 MUSTFIX=${REMIT_MUSTFIX:-}
 DELIVERY=${REMIT_DELIVERY:-}
+# WHETHER `research.md` HAS AN AUTHOR AT THIS GATE — `yes` from the chain when it
+# is raising the gate into `refined` for an item whose authority asks for
+# research, empty everywhere else. It changes what the EVALUATOR is told it can
+# reach with a must-fix, and nothing else: THE THREE GATES' one exception in
+# `bin/remit`'s header is the law of it and this script states none of that law.
+RESEARCH_AUTHOR=${REMIT_RESEARCH_AUTHOR:-}
 PROVFILE=${REMIT_PROVENANCE:-}
 RUNS=${REMIT_RUNS:-}
 RUNS_NAMING=${REMIT_RUNS_NAMING:-}
@@ -1566,10 +1692,43 @@ delivery_section() {
 	return 0
 } # end delivery_section
 
+# WHAT THE EVALUATOR AT THE GATE INTO `refined` CAN ACTUALLY REACH, said only
+# when it can reach something. The chain sets `REMIT_RESEARCH_AUTHOR` for that one
+# raise; everywhere else this prints nothing and the briefing is what it was.
+#
+# THE FIELD FAILURE THIS IS, dated 2026-09-01: an evaluator judged a `research.md`
+# written from recall against a brief that asked for vendor documentation, found
+# two factual errors it could cite the vendor's own documentation against — and
+# raised no must-fix, because it had been told there was nothing at this gate that
+# could act. There was: research is machine-authored, and a fresh researcher can
+# be sent back into it.
+research_author_section() {
+	[ "$ROLE" = evaluate ] || return 0
+	[ "$RESEARCH_AUTHOR" = yes ] || return 0
+	printf '\n## Who can act on what you find\n\n'
+	printf 'The `research.md` beside the brief was written by a fresh context raised for\n'
+	printf 'this item — it is machine-authored, not the practitioner'\''s — and IT HAS AN\n'
+	printf 'AUTHOR. A must-fix against it comes back to a fresh researcher, which writes a\n'
+	printf 'replacement and returns here for another verdict, exactly as a must-fix at a\n'
+	printf 'later gate goes back to a builder. A research pass that does not hold is\n'
+	printf 'therefore something you CAN hold: raise it, by a `Must-fix:` line or by citing\n'
+	printf 'a `fix` rubric above, with the evidence.\n\n'
+	printf 'To send one back, write this line in your verdict:\n\n'
+	printf '  Back to: research\n\n'
+	printf 'That line is what routes the must-fix. Write it when what you require can be\n'
+	printf 'satisfied by rewriting `research.md`, and only then.\n\n'
+	printf 'THE BRIEF IS NOT YOURS, AND IT IS NOBODY'\''S HERE. Nothing in this mechanism\n'
+	printf 'edits `brief.md`: the practitioner writes it and he alone changes it. A\n'
+	printf 'must-fix that can only be satisfied by changing the brief carries NO `Back to:`\n'
+	printf 'line — the item stops and it goes to him, which is the design working rather\n'
+	printf 'than a gap for you to close.\n'
+	return 0
+} # end research_author_section
+
 role_returns() {
 	case "$ROLE" in
 	build) printf 'Your final message. It is recorded as the delivery'\''s returned text, quoted\nand not endorsed. The tree you authored is the delivery; the message says what\nyou did, what you could not do, and what you left undone.\n' ;;
-	research) printf 'Your findings as free text. They are written to `research.md` beside the brief\nexactly as returned.\n' ;;
+	research) printf 'Your findings as free text. They are written to `research.md` beside the brief\nexactly as returned, REPLACING what is there — on a round after the first, what\nyou return is the whole of the research this item carries.\n' ;;
 	repair-brief) printf 'The proposed amendment, as text. It is appended to the record under the\nescalation, and the brief is not touched.\n' ;;
 	evaluate)
 		printf 'ONE verdict, in these line shapes. They are the only text the mechanism\n'
@@ -1594,6 +1753,7 @@ role_returns() {
 	role_limits
 	printf '\n## What you return\n\n'
 	role_returns
+	research_author_section
 	delivery_section
 	runs_section
 	if [ -n "$AUTHORITY" ]; then
@@ -2399,20 +2559,183 @@ copilot_canary() { # $1 the context's tree — returns 0 if contained, 1 if not
 SANDBOX_APPLIED=''
 RUN_ID=''
 MODEL_SERVED=''
+MODELS_SEEN=''
+CONSULTED=''
 run_model=''
 model_channel=''
 
+# ==============================================================================
+# claude's containment, written per raise
+# ==============================================================================
+#
+# WHY THIS IS HERE AND NOT IN THE INSTALLER is at THE ENVIRONMENT's `claude`
+# entry above, which is the one place it is stated. This is the code.
+#
+# THE FLAG IS THE MECHANISM and it is unconditional — `CLAUDE_DENY_TOOLS` goes
+# into every claude raise's argv below, whatever happens here. What this function
+# adds is the hook arm, and it is BEST EFFORT: a tree it cannot write into
+# refuses nothing, because the deny list has already contained the raise and
+# losing a raise over a second layer would cost more than the layer is worth.
+# What actually applied is recorded on the `containment:` provenance line.
+CLAUDE_DENY_TOOLS='Agent,Task,AgentTool'
+CLAUDE_SETTINGS_MADE=no
+CLAUDE_DIR_MADE=no
+CLAUDE_HOOK_MADE=no
+CLAUDE_CONTAINMENT=''
+
+claude_write_containment() { # $1 the context's tree — best effort, always 0
+	_ccdir="$1/.claude"
+	_ccset="$_ccdir/settings.local.json"
+	_cchook="$_ccdir/remit-no-agent-tool.sh"
+	if [ -e "$_ccset" ]; then
+		CLAUDE_CONTAINMENT="--disallowedTools $CLAUDE_DENY_TOOLS; the worktree already carried .claude/settings.local.json and this raise did not touch it"
+		return 0
+	fi
+	if [ ! -d "$_ccdir" ]; then
+		mkdir -p "$_ccdir" 2>/dev/null || {
+			CLAUDE_CONTAINMENT="--disallowedTools $CLAUDE_DENY_TOOLS; the per-raise settings file could not be written (no .claude/ could be made in the worktree)"
+			return 0
+		}
+		CLAUDE_DIR_MADE=yes
+	fi
+	# The guard, written beside its registration so that neither depends on a file
+	# an installer put somewhere this raise cannot see. The rule it enforces is the
+	# shipped hook's rule and is stated there; this is a second COPY of an
+	# enforcement, never a second statement of the law.
+	if ! cat >"$_cchook" <<'EOF'
+#!/bin/sh
+# remit's agent-tool guard, written into this worktree by `bin/remit-invoke` for
+# the duration of ONE raise and removed after it. Why it is written here rather
+# than installed is in that script's header, at THE ENVIRONMENT's `claude` entry.
+payload=$(cat)
+if [ -z "$payload" ]; then
+	printf 'remit: this hook could not read the tool call to check it, and it does not pass what it cannot read.\n' >&2
+	exit 2
+fi
+if printf '%s\n' "$payload" |
+	grep -Eq '"(tool_name|toolName|tool|name)"[[:space:]]*:[[:space:]]*"(Task|Agent|AgentTool)"'; then
+	printf 'remit: raise contexts through bin/remit-invoke — settings.json decides the seat\n' >&2
+	exit 2
+fi
+exit 0
+EOF
+	then
+		CLAUDE_HOOK_MADE=yes
+		claude_remove_containment "$1"
+		CLAUDE_CONTAINMENT="--disallowedTools $CLAUDE_DENY_TOOLS; the per-raise guard script could not be written into the worktree"
+		return 0
+	fi
+	CLAUDE_HOOK_MADE=yes
+	# `permissions.deny` says the same thing as the flag, in the file, so the two
+	# layers cannot come apart; the hook is the arm that fires on a tool this
+	# script has not heard of yet under one of these names.
+	if ! cat >"$_ccset" <<'EOF'
+{
+  "permissions": {
+    "deny": ["Agent", "Task", "AgentTool"]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Task|Agent|AgentTool",
+        "hooks": [
+          { "type": "command", "command": "sh .claude/remit-no-agent-tool.sh" }
+        ]
+      }
+    ]
+  }
+}
+EOF
+	then
+		CLAUDE_SETTINGS_MADE=yes
+		claude_remove_containment "$1"
+		CLAUDE_CONTAINMENT="--disallowedTools $CLAUDE_DENY_TOOLS; the per-raise settings file could not be written into the worktree"
+		return 0
+	fi
+	CLAUDE_SETTINGS_MADE=yes
+	CLAUDE_CONTAINMENT="--disallowedTools $CLAUDE_DENY_TOOLS, and .claude/settings.local.json with .claude/remit-no-agent-tool.sh written into the worktree for this raise and removed after it"
+	return 0
+} # end claude_write_containment
+
+# Removes only what was created — never a `.claude/` the repository already had.
+claude_remove_containment() { # $1 the context's tree
+	[ "$CLAUDE_SETTINGS_MADE" = yes ] && rm -f "$1/.claude/settings.local.json"
+	[ "$CLAUDE_HOOK_MADE" = yes ] && rm -f "$1/.claude/remit-no-agent-tool.sh"
+	[ "$CLAUDE_DIR_MADE" = yes ] && rmdir "$1/.claude" 2>/dev/null
+	CLAUDE_SETTINGS_MADE=no
+	CLAUDE_HOOK_MADE=no
+	CLAUDE_DIR_MADE=no
+	return 0
+} # end claude_remove_containment
+
 # Reading one field out of a JSON envelope, with whichever reader exists.
-NODE_JSON='const fs=require("fs");let o;try{o=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}catch(e){process.exit(1)}const k=process.argv[2];const v=k==="model"?Object.keys(o.modelUsage||{})[0]:o[k];process.stdout.write(v==null?"":String(v)+"\n")'
-json_get() { # $1 envelope file  $2 field: result | session_id | is_error | model
+#
+# `model` IS THE ONE FIELD THAT IS NOT A LOOKUP. The envelope's `modelUsage` is a
+# MAP, and a Claude Code run puts the author and an internal ancillary model in
+# it together, so the author is CHOSEN by the rule at THE PROVENANCE KEYS —
+# the registered seat's id when the run names it, else the largest `outputTokens`
+# — and the third argument is the id that was asked for, which is what makes the
+# first clause possible. `models` renders the whole map for the record, and
+# `consulted` reads the run's own server-tool counts.
+#
+# `consulted` LOOKS IN A FIXED ORDER — `.server_tool_use`, then
+# `.usage.server_tool_use`, then the first object anywhere in the envelope
+# carrying either key — and takes THE FIRST it finds rather than summing across
+# them, because two envelopes shaped differently must not be added together. A
+# run whose envelope carries neither key yields nothing at all, which is what
+# keeps an unreported count out of the record instead of a zero.
+NODE_JSON='const fs=require("fs");let o;try{o=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}catch(e){process.exit(1)}
+const k=process.argv[2],want=process.argv[3]||"";const u=(o&&o.modelUsage)||{};
+function n(x){return typeof x==="number"?x:0}
+function cost(e){const c=(e.costUSD!=null?e.costUSD:e.cost);return c==null?"":" cost=$"+c}
+let v="";
+if(k==="model"){
+ if(want&&Object.prototype.hasOwnProperty.call(u,want)){v=want}
+ else{const ks=Object.keys(u).sort();let b="";for(const c of ks){if(b===""||n(u[c].outputTokens)>=n(u[b].outputTokens))b=c}v=b}
+}else if(k==="models"){
+ v=Object.keys(u).sort().map(function(c){const e=u[c]||{};return c+" in="+n(e.inputTokens)+" out="+n(e.outputTokens)+cost(e)}).join("; ")
+}else if(k==="consulted"){
+ let s=null;const cand=[o.server_tool_use,o.usage&&o.usage.server_tool_use];
+ for(const c of cand){if(c&&typeof c==="object"&&!Array.isArray(c)){s=c;break}}
+ if(!s){(function w(x){if(s||x==null||typeof x!=="object")return;if(!Array.isArray(x)&&(("web_search_requests"in x)||("web_fetch_requests"in x))){s=x;return}for(const kk of Object.keys(x))w(x[kk])})(o)}
+ if(s)v="web_search="+n(s.web_search_requests)+" web_fetch="+n(s.web_fetch_requests)
+}else{const x=o[k];v=x==null?"":String(x)}
+process.stdout.write(v===""?"":v+"\n")'
+json_get() { # $1 envelope  $2 result|session_id|is_error|model|models|consulted  [$3 the id asked for]
 	case "$JSONTOOL" in
 	jq)
 		case "$2" in
-		model) jq -r '(.modelUsage // {}) | keys | .[0] // empty' "$1" ;;
+		model)
+			jq -r --arg want "${3:-}" '
+				(.modelUsage // {}) as $u
+				| if ($want != "" and ($u | has($want))) then $want
+				  else ([$u | to_entries[] | {k: .key, o: (.value.outputTokens // 0)}]
+				        | sort_by(.k) | max_by(.o) | .k // empty)
+				  end' "$1"
+			;;
+		models)
+			jq -r '(.modelUsage // {}) | to_entries | sort_by(.key)
+				| map(.key
+				      + " in=" + ((.value.inputTokens // 0) | tostring)
+				      + " out=" + ((.value.outputTokens // 0) | tostring)
+				      + (if (.value.costUSD // .value.cost) == null then ""
+				         else " cost=$" + ((.value.costUSD // .value.cost) | tostring) end))
+				| join("; ")' "$1"
+			;;
+		consulted)
+			jq -r '
+				[(.server_tool_use? // null), ((.usage? // {}) | .server_tool_use? // null)]
+				+ [.. | objects | select(has("web_search_requests") or has("web_fetch_requests"))]
+				| map(select(type == "object")) | .[0]
+				| if . == null then empty
+				  else "web_search=" + ((.web_search_requests // 0) | tostring)
+				       + " web_fetch=" + ((.web_fetch_requests // 0) | tostring)
+				  end' "$1"
+			;;
 		*) jq -r ".$2 // empty" "$1" ;;
 		esac
 		;;
-	node) node -e "$NODE_JSON" "$1" "$2" ;;
+	node) node -e "$NODE_JSON" "$1" "$2" "${3:-}" ;;
 	esac
 }
 JSONTOOL=none
@@ -2490,12 +2813,32 @@ HARNESS_EXIT=0
 
 case "$HARNESS" in
 claude)
+	# THE CONTAINMENT IS WRITTEN HERE, PER RAISE, and the whole of why — that an
+	# installed hook cannot reach a raise that runs in a worktree the installed
+	# file is shadow-excluded from — is at THE ENVIRONMENT's `claude` entry in
+	# this script's header. Written before the flag so the `containment:` line
+	# records both layers together.
+	claude_write_containment "$WT"
+	for _ccf in settings.local.json remit-no-agent-tool.sh; do
+		[ -f "$WT/.claude/$_ccf" ] || continue
+		cp "$WT/.claude/$_ccf" "$RUNDIR/claude-$_ccf" 2>/dev/null || :
+	done
 	set -- "$@" claude -p --output-format json
 	[ -n "$MODEL" ] && set -- "$@" --model "$MODEL"
 	# Command-granular tool scoping is how a claude context's grant omits git.
 	[ -n "$ALLOWED" ] && set -- "$@" --allowedTools "$ALLOWED"
-	say "invoking: claude -p --output-format json${MODEL:+ --model $MODEL} < $(basename "$BRIEF")"
+	# AND THE DENY, on EVERY raise, allowlist or none. A deny outranks every
+	# allow at every level, so this is the one containment here that does not
+	# depend on a file existing anywhere.
+	set -- "$@" --disallowedTools "$CLAUDE_DENY_TOOLS"
+	say "invoking: claude -p --output-format json${MODEL:+ --model $MODEL}${ALLOWED:+ --allowedTools $ALLOWED} --disallowedTools $CLAUDE_DENY_TOOLS < $(basename "$BRIEF")"
+	say "containment: $CLAUDE_CONTAINMENT"
 	run_harness "$BRIEF" "$@"
+	# The apparatus goes the moment the CLI is done with it — before anything is
+	# read back, and on the failing and stalled paths alike, because both come
+	# back through here. A worktree is about to be staged by the seam's caller
+	# and nothing of this raise's may be in it.
+	claude_remove_containment "$WT"
 	;;
 codex)
 	# `-` takes the briefing on stdin; -o writes the final message; the sandbox
@@ -2682,8 +3025,17 @@ claude)
 		# The envelope names the model that actually served the run; a raise names
 		# an alias. Authorship is never obscured, so the provenance follows the
 		# envelope where they differ.
-		run_model=$(json_get "$OUTFILE" model)
+		#
+		# `$MODEL` GOES IN because this envelope reports a MAP and the seat that was
+		# registered is the first clause of the rule that reads it — the rule, and the
+		# field failure that wrote it, are at THE PROVENANCE KEYS in this header.
+		run_model=$(json_get "$OUTFILE" model "$MODEL")
 		[ -n "$run_model" ] && MODEL_SERVED=$run_model
+		# EVERY model the run billed, so the ancillary is visible on the record and
+		# can never again be read as the author.
+		MODELS_SEEN=$(json_get "$OUTFILE" models)
+		# AND WHAT IT CONSULTED, where the envelope says so. Recorded, never judged.
+		CONSULTED=$(json_get "$OUTFILE" consulted)
 		[ "$(json_get "$OUTFILE" is_error)" = true ] &&
 			final_note="the claude envelope reports is_error: true"
 	fi
@@ -2827,6 +3179,17 @@ write_provenance() {
 		else
 			printf 'model-note: no model was asked for and none was reported — the CLI took its own default and named it nowhere\n'
 		fi
+		# EVERY MODEL THE RUN REPORTED, beside the one named as its author above.
+		# A run whose envelope named one model writes one entry here and that is
+		# not a duplication: it is the whole of what was billed, and reading it
+		# against `model:` is how a reader sees there was nothing else.
+		[ -n "$MODELS_SEEN" ] && printf 'models: %s\n' "$MODELS_SEEN"
+		# WHAT THE RUN CONSULTED, from the run's own count and only where it
+		# carries one. This seam draws no conclusion from it and gates nothing on
+		# it; it is here for a reader or a rubric to cite. Which seats can answer
+		# it, and why the other four write no line at all rather than a zero, is
+		# at THE ENVIRONMENT in this script's header.
+		[ -n "$CONSULTED" ] && printf 'consulted: %s\n' "$CONSULTED"
 		[ -n "$MODEL_CHECK" ] && printf 'model-check: %s\n' "$MODEL_CHECK"
 		[ -n "$RUN_ID" ] && printf 'session: %s\n' "$RUN_ID"
 		case "$HARNESS" in
@@ -2873,6 +3236,10 @@ write_provenance() {
 		[ -n "$COPILOT_AIU" ] && printf 'cost: %s AI credits%s — the CLI'\''s own figure from the run envelope; the canary is billed separately and is additional to it\n' "$COPILOT_AIU" "${COPILOT_PREMIUM:+, $COPILOT_PREMIUM premium requests}"
 		[ -n "$COPILOT_CANARY_ID" ] && printf 'canary-session: %s\n' "$COPILOT_CANARY_ID"
 		[ -n "$COPILOT_HOOK_ATTEST" ] && printf 'containment: %s\n' "$COPILOT_HOOK_ATTEST"
+		# What actually banned the agent tool on this raise — the flag always, and
+		# the per-raise settings file where it could be written. It says which,
+		# because "the flag alone" and "both layers" are different facts.
+		[ -n "$CLAUDE_CONTAINMENT" ] && printf 'containment: %s\n' "$CLAUDE_CONTAINMENT"
 		[ -n "$DEVIN_TIER" ] && printf 'account: tier %s, primary org %s\n' "$DEVIN_TIER" "${DEVIN_ORG:-none reported}"
 		[ -n "$COPILOT_LOGIN" ] && printf 'account: %s at %s — recorded, not checked and not gated on\n' "$COPILOT_LOGIN" "${COPILOT_HOST:-not recorded}"
 		[ -n "$DEVIN_TIER_NOTE" ] && printf 'note: %s\n' "$DEVIN_TIER_NOTE"

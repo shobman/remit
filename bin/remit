@@ -255,8 +255,31 @@
 # partial delivery vehicles for work items; the work item itself is not done
 # until i say. New or refined work doesn't even get a PR yet." A line naming a
 # `#<n>`, a `.../pull/<n>` or a `<a>/<b>` branch is REFUSED at `new` and HOLDS
-# before a build, saying so — the form is gone, and reading one as a slug would
-# resolve a name nothing here has.
+# wherever WHEN IT IS OBSERVED says it holds, saying so — the form is gone, and
+# reading one as a slug would resolve a name nothing here has.
+#
+# WHEN IT IS OBSERVED — the whole of the timing, stated here and nowhere else.
+# TWO POINTS, both of them, on every run: AT `new`, BEFORE THE RESEARCH RAISE AND
+# BEFORE GATE 1; and again BEFORE A BUILD. Ruled by the practitioner, 2026-09-02:
+# "a brief can be dependant on a build … so making an item depend on another is a
+# new hold, not a refined hold, and i think it's always fine to make it that,
+# honestly — you never know what comes out of a build right — it might differ
+# slightly, or a lot, so the brief can sit at new, waiting." ONE mode and no
+# second: an unsatisfied name holds the item AT `new`, whatever `--until` he gave
+# — on `new --until X`, on `resume` and on `resume --until X` alike — because what
+# the named build actually ships is what this brief has to name, and a brief
+# refined before its dependency lands is refined against a guess the gate into
+# `refined` would pass, since that gate judges the brief and not the tree. The
+# check BEFORE A BUILD stays exactly where it was: an item already past `new` that
+# gains an unsatisfied name by a later edit, or whose dependency regressed, still
+# must not build. Both points ask the same question of the same line and stop with
+# the same reason, `depends on: <why>`; only the note beneath it says which point
+# it was, because at `new` no build was ever going to start.
+#
+# NOTHING WAKES A HELD ITEM. There is no auto-resume when the named item closes:
+# the road back in is his own `remit resume <slug>`, and the reason on the record
+# says so in those words. This paragraph is about WHEN the line is read and
+# changes nothing about WHAT satisfies it, which is the next one.
 #
 # WHAT SATISFIES ONE. Ruled by him, 2026-08-25: "a dependency is satisfied when
 # the named item's delivery is merged, however it closed." TWO ways, and no
@@ -305,7 +328,8 @@
 #
 # A LINE THAT IS THERE IS READ WHOLE OR NOT AT ALL. Ruled by him the same day:
 # a named line that cannot be fully read refuses, never truncates. So `remit new`
-# REFUSES such a brief, and a build HOLDS on it. THE VALUE is a comma-separated
+# REFUSES such a brief, and it HOLDS at both points WHEN IT IS OBSERVED names.
+# THE VALUE is a comma-separated
 # list of slugs, and HIS PROSE COMES LAST, beginning at the first ` — `: in
 # `raised-contexts-are-visible — the seam half, and nothing else` the comma in
 # that sentence is a comma. Before that point every comma-field must reduce to
@@ -331,7 +355,7 @@
 #
 # THE SUPERSEDED NAME IS NOT SILENTLY IGNORED. A brief carrying `**Builds on:**`
 # and no `**Depends on:**` is a brief written to the form this section replaced.
-# It is refused at `new` and holds before a build, naming the rename — because
+# It is refused at `new` and holds at both points above, naming the rename — because
 # the one failure this whole section exists to prevent is a dependency nobody
 # read.
 #
@@ -406,6 +430,14 @@
 #   REMIT_ROUND       the round number in the author/evaluate loop; 1 first time
 #   REMIT_MUSTFIX     absolute path of a file holding the must-fix being sent
 #                     back, or empty on a first attempt
+#   REMIT_RESEARCH_AUTHOR
+#                     `yes` for the ONE raise that is the gate into `refined`
+#                     evaluating an item whose authority asks for research, and
+#                     empty everywhere else. It is what tells that evaluator
+#                     `research.md` HAS an author, so a defective research pass
+#                     can carry a must-fix instead of a finding nobody may act on
+#                     — THE THREE GATES' one exception below. What the seam says
+#                     to the evaluator about it is that script's to word.
 #   REMIT_DELIVERY    the commit the LAST recorded delivery names, handed to the
 #                     `evaluate` raise at a gate after a delivery and EMPTY
 #                     everywhere else — at the gate into `refined`, which judges a
@@ -443,11 +475,15 @@
 # WHAT THE SEAM RETURNS, per role — this is the whole text contract, and the only
 # thing this script parses:
 #
-#   research      free text. Written to `research.md` beside the brief. This role
-#                 runs only when the item's authority carries a `**Research:**`
-#                 line — the practitioner's own words naming what to establish,
-#                 not a header line this script owns — and only while there is no
-#                 `research.md` beside the brief yet.
+#   research      free text. Written to `research.md` beside the brief, REPLACING
+#                 whatever was there. This role runs only when the item's
+#                 authority carries a `**Research:**` line — the practitioner's
+#                 own words naming what to establish, not a header line this
+#                 script owns — and it runs while there is no `research.md`
+#                 beside the brief yet, AND AGAIN on every later round of the
+#                 gate into `refined` where a must-fix against `research.md` is
+#                 coming back to it. THE ONE EXCEPTION under THE THREE GATES
+#                 below is the whole law of that second trigger.
 #   build         the builder's own final message. It authored the worktree; the
 #                 text is untrusted and travels into the pull request body inside
 #                 a code fence, below this script's provenance.
@@ -461,6 +497,18 @@
 #                       empty must-fix, and the same-must-fix stop compares that
 #                       exactly as it compares any other text)
 #         Finding: <text>                 (zero or more)
+#         Back to: research               (zero or one, and ONLY at the gate into
+#                       `refined` where the authority carries a `**Research:**`
+#                       line. It says the must-fix is against `research.md` — the
+#                       one artefact at that gate a fresh context may author — and
+#                       it is the whole of what sends the round back to the
+#                       research role. A verdict without it stops the item at
+#                       `new` for the practitioner, which is what every gate-1
+#                       must-fix did before this line existed, so an evaluator
+#                       that says nothing changes nothing. It moves nothing at
+#                       gates 2 and 3, where the author is the builder and needs
+#                       no naming. THE ONE EXCEPTION under THE THREE GATES below
+#                       is the law; this is only its line shape.)
 #
 #      and the CITATION LINES — the evaluator's four words, one per section of
 #      the gate file it was handed, each naming the rubric's id and the evidence:
@@ -588,10 +636,17 @@
 #
 #   - raise: <role> — <harness> — <seconds>s
 #   - raise: <role> — <harness> — not timed: <why>
-#     - model: <as served, or the id asked for with ` (asked)`>
+#     - model: <THE MODEL THAT AUTHORED, as served, or the id asked for with
+#               ` (asked)`>
+#     - models: <every model the run reported, with its tokens and cost — so an
+#                ancillary model is visible and is never read as the author>
+#     - consulted: <the run's own count of what it looked up outside itself,
+#                   where the harness reports one. EVIDENCE, not a verdict:
+#                   nothing here or in the seam concludes anything from it>
 #     - session: <the run id the harness reports>
 #     - run-log: <the seam's run directory>
 #     - boundary: <user|container|none — attested by …>
+#     - containment: <what actually held the raise, where the seam wrote it>
 #     - permission-mode: <where the harness has one>
 #     - sandbox: <where the harness has one>
 #     - scrub: <what crossed into the context's environment>
@@ -790,24 +845,57 @@
 # evaluator cited a `promote` — and never while it cited a `hold`, or while a
 # `fix` or any other must-fix stands.
 #
-# GATE 1 HAS NO AUTHOR, and that is the whole of the practitioner's ruling of
-# 2026-08-23: "file it, park it, idea, backlog — all just file the idea i write
-# verbatim. moving it to a brief, when i ask to, requires me — so you need to ask
-# me all the details you want for the rubric to be satisfied, you can't make that
-# shit up … nothing should update my brief."
+# GATE 1 HAS NO AUTHOR — THE BRIEF HAS NONE — and that is the whole of the
+# practitioner's ruling of 2026-08-23: "file it, park it, idea, backlog — all
+# just file the idea i write verbatim. moving it to a brief, when i ask to,
+# requires me — so you need to ask me all the details you want for the rubric to
+# be satisfied, you can't make that shit up … nothing should update my brief."
+# THE ONE EXCEPTION below is `research.md`, and it is the only one.
 #
 #   * The gate into `refined` is: research IF the brief carries a `**Research:**`
 #     line in his words, then evaluate. No fresh context writes into `brief.md`,
 #     ever, and there is no role in this script that can — the `draft` role left
 #     the chain with that ruling.
-#   * A FAIL there therefore has nowhere to go but to him. The item STOPS at
-#     `new`, ACTIVE, with the must-fix on the record and the stop naming it —
-#     `fix: <id>` where a `fix` rubric was cited, the must-fix's own first line
-#     otherwise. There is no second round: the loop and its two stops belong to
-#     gates 2 and 3, where a builder can act on what came back.
+#   * A FAIL there whose must-fix is the BRIEF'S has nowhere to go but to him.
+#     The item STOPS at `new`, ACTIVE, with the must-fix on the record and the
+#     stop naming it — `fix: <id>` where a `fix` rubric was cited, the must-fix's
+#     own first line otherwise. No second round is run for it, because there is
+#     nobody here who may act on it. Where the item carries research and the
+#     verdict said the must-fix is the RESEARCH'S, the loop runs instead: THE ONE
+#     EXCEPTION below.
 #   * The brief a repair proposal would amend is his too: escalation raises
 #     `repair-brief` at gates 2 and 3 and puts the proposal in `log.md`, and the
 #     brief is untouched until he rules.
+#
+# THE ONE EXCEPTION — `research.md` HAS AN AUTHOR. Ruled by the practitioner,
+# 2026-09-01, after a research pass that ignored its brief passed this gate with
+# seven substantive findings standing against it and nothing in the mechanism
+# could hold it, repair it or re-run it: an item evaluated for `refined` that
+# carries research needs the research reviewed, and "the fix round and amendments
+# to the research should carry through until escalate, the same way a build does
+# at gates 2 and 3." He is not disputing the law above — "a failed brief is mine
+# to own, that's remit working" — and the distinction is the whole of the
+# exception: `research.md` is not his. It is MACHINE-AUTHORED, exactly as a build
+# is, and it was the one machine-authored artefact sitting behind a rule written
+# to protect a human-authored one.
+#
+# So, and ONLY where the authority carries a `**Research:**` line:
+#
+#   * THE AUTHOR AT GATE 1 IS THE `research` ROLE, and the loop it runs in is the
+#     SAME LOOP gates 2 and 3 run — `run_gate` handed `research` where they hand
+#     it `build`. Rounds are numbered the same way, recorded the same way, and
+#     the two stops are the same two: the round cap ESCALATES, and the same
+#     must-fix twice ESCALATES.
+#   * A must-fix comes back to a FRESH research raise in `REMIT_MUSTFIX`, which
+#     authors a REPLACEMENT `research.md` and has its round recorded, exactly as
+#     a builder is sent back into a delivery.
+#   * THE BRIEF IS STILL UNTOUCHABLE BY EVERY RAISE. A gate-1 must-fix that can
+#     only be satisfied by changing the brief still stops for the practitioner,
+#     as it always has, and WHAT ROUTES IT IS THE EVALUATOR'S OWN WORD: the
+#     verdict line `Back to: research` (the seam contract above) says the
+#     must-fix is against `research.md`, and it is the only thing that starts a
+#     second round here. A verdict that does not carry it stops the item at
+#     `new`. Nothing in this script writes a brief, at this gate or any other.
 #
 # An item at `new` with nothing said runs no chain at all until it is resumed —
 # unless `refined.md` carries a `promote` that could carry it, which is the one
@@ -1004,10 +1092,12 @@ usage:
                          one gate at a time as far as the until says, or as far
                          as a promote rubric a gate's evaluator cited carries it,
                          and never past a hold it cited. Prints the row and why
-                         it stopped. Before every build it reads the brief's
+                         it stopped. At `new` before anything is raised, and
+                         again before every build, it reads the brief's
                          `**Depends on:**` line and stops the item where it is,
                          naming the dependency, when a work item it names has
-                         not closed.
+                         not closed — WHEN IT IS OBSERVED in this script's header
+                         is that rule, and this is not a second statement of it.
                          --park attaches to the --until beside it; on its own it
                          is refused — `remit park <slug>` is that instruction.
   remit park <slug>      attention -> parked. The stage does not move.
@@ -2746,9 +2836,12 @@ pr_from_record() {
 # that needed the marker could not answer for a chain whose marker a `stop` had
 # already disposed of — and the record answers for all three the same way.
 #
-# GATE 1 IS NOT IN THIS. It has one round by law — there is nobody to send a
-# brief back to, so the loop's rounds belong to gates 2 and 3 — and a resume
-# point for it would be a round number with nothing behind it.
+# GATE 1 IS NOT IN THIS, and it is the one gate that is not. Its rounds, where it
+# has an author at all — THE THREE GATES' one exception, `research.md` — belong to
+# the run that ran them: a resume finds the `research.md` the record already
+# carries and judges THAT, at its own first round, rather than continuing a
+# number from a gate whose author may not exist on this resume. Where the brief
+# is all there is, the gate has no author and no round to continue either way.
 #
 # WHAT IT CANNOT SEE, said rather than papered over: a chain that died BETWEEN
 # committing a delivery and recording it leaves a commit on the branch that the
@@ -2891,7 +2984,17 @@ raise_line() { # $1 role  $2 the epoch second it started  $3 the second it came 
 	# not swept yet, which is what the field failure of 2026-09-01 came down to.
 	# Every key the seam actually reported, and no line for one it did not: an
 	# absent key is absent, never invented and never filled with a default.
-	for _rl_k in model session run-log boundary permission-mode sandbox scrub effort cost; do
+	#
+	# `models` SITS BESIDE `model` and is not a duplicate of it: `model` is the one
+	# the seam names as the AUTHOR, `models` is everything the run billed. A reader
+	# who sees only the first cannot tell an author from an ancillary model, which
+	# is the field failure of 2026-09-01. `consulted` is the run's own count of what
+	# it looked up outside itself, carried for a reader or a rubric to cite; neither
+	# this script nor the seam concludes anything from it. `containment` is what
+	# actually held the raise. Each is carried only where the seam reported it —
+	# what those keys mean, and which seats can answer them at all, is
+	# `bin/remit-invoke`'s header and is not restated here.
+	for _rl_k in model models consulted session run-log boundary containment permission-mode sandbox scrub effort cost; do
 		_rl_v=$(prov "$_rl_k")
 		[ -n "$_rl_v" ] || continue
 		printf -- '  - %s: %s\n' "$_rl_k" "$_rl_v" >>"$RAISES"
@@ -3026,6 +3129,7 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 		REMIT_PROVENANCE="$WORK/prov" \
 		REMIT_ROUND="$ROUND" \
 		REMIT_DELIVERY="${EVAL_DELIVERY:-}" \
+		REMIT_RESEARCH_AUTHOR="${RESEARCH_AUTHOR:-}" \
 		REMIT_MUSTFIX="$_mf" \
 		sh "$INVOKE" "$_role" "$slug" "$_wt" >"$_out" 2>"$WORK/invoke.err" </dev/null &
 	RAISE_PID=$!
@@ -3774,19 +3878,29 @@ depends_on_one() { # $1 one slug -> 0 it satisfies, 1 it does not, with the why
 	return 1
 }
 
-# THE WHOLE LINE, BEFORE A BUILD. 0 = every work item it names satisfies, or it
-# names none; 1 = one does not, with DEPENDS_ON_STOP the reason a row will show and
-# DEPENDS_ON_NOTE the prose the record will carry.
+# THE WHOLE LINE, AT ONE OF THE TWO POINTS IT IS OBSERVED. 0 = every work item it
+# names satisfies, or it names none; 1 = one does not, with DEPENDS_ON_STOP the
+# reason a row will show and DEPENDS_ON_NOTE the prose the record will carry.
+#
+# WHICH POINT is the argument, and it changes NOTHING about the question or the
+# reason — only the one sentence of the note that says what did not happen, since
+# at `new` no build was ever going to start. WHEN IT IS OBSERVED in this script's
+# header is the law; this is only its code.
 #
 # The line is read from the item's AUTHORITY, and from the brief where a phase
 # file carries no line of its own: a part may depend on something the item as a
 # whole did not, and where it says nothing the item's own line still binds.
 DEPENDS_ON_STOP=''
 DEPENDS_ON_NOTE=''
-depends_on_ok() {
+depends_on_ok() { # $1 `new` — before the research raise and gate 1 — or `build`
 	DEPENDS_ON_STOP=''
 	DEPENDS_ON_NOTE=''
 	DEPENDS_ON_WHY=''
+	if [ "${1:-build}" = new ]; then
+		_didnot='Nothing was raised and the item stays at `new`'
+	else
+		_didnot='The build did not start'
+	fi
 
 	_src=$AUTHORITY
 	nocr "$_src" | grep -q -e '^\*\*Depends on:\*\*' -e '^\*\*Builds on:\*\*' || _src=$brief
@@ -3794,7 +3908,7 @@ depends_on_ok() {
 	if ! depends_on_names "$_src"; then
 		DEPENDS_ON_STOP='depends on: the line cannot be read whole'
 		DEPENDS_ON_NOTE="This brief's \`**Depends on:**\` line cannot be read whole: $DEPENDS_ON_BAD.
-The build did not start. Nothing here reads part of a line and starts on the rest —
+$_didnot. Nothing here reads part of a line and starts on the rest —
 naming one dependency and dropping the other is the incident this check exists for.
 One line from the practitioner, naming the work items by slug or the word \`none\`,
 lifts this."
@@ -3823,10 +3937,12 @@ lifts this."
 	DEPENDS_ON_STOP="depends on: $DEPENDS_ON_WHY"
 	DEPENDS_ON_NOTE="The brief's \`**Depends on:**\` line names a work item that does not satisfy it:
 $DEPENDS_ON_WHY.
-The build did not start — a delivery authored on a tree that lacks what it depends
-on is the incident this check exists for. The item waits here until that one closes
-through its gate or ends with its delivery merged, or until the practitioner rules
-that the line has changed."
+$_didnot — a brief written, or a delivery authored, against a tree that lacks what it
+depends on is the incident this check exists for, and what that build actually ships is
+what this brief has to name. The item waits here until that one closes through its gate
+or ends with its delivery merged, or until the practitioner rules that the line has
+changed. NOTHING WAKES IT: when that item satisfies, \`remit resume $slug\` is the road
+back in."
 	return 1
 }
 
@@ -3846,17 +3962,26 @@ that the line has changed."
 #
 # One run of this is ONE GATE. `$1` is the stage the gate leads into, and its
 # rubric file is what that gate's evaluator is handed. `$2` names the author a
-# must-fix goes back to — `build`, or `none` where there is nobody this script
+# must-fix goes back to — `build`, `research` at the gate into `refined` where
+# the authority asks for research, or `none` where there is nobody this script
 # may send it to. `$3` says whether that author runs before the first evaluate:
 # it does at the gate that produces a delivery, and it does NOT at the closing
 # gate, which judges what is already there — but it does on every later round of
-# that gate, because a must-fix goes back to a builder wherever it was raised.
+# that gate, because a must-fix goes back to an author wherever it was raised.
 #
-# `none` IS GATE 1, and it is the practitioner's ruling of 2026-08-23 in code:
-# only he changes a brief, so a must-fix there has no author to go to and no
-# second round to run. This returns 2 for that — distinct from the 1 that means
-# escalate — with LOOP_STOP carrying the reason his row will show, and the caller
-# stops the item where it is, for him.
+# `none` IS GATE 1 WITH NOTHING BUT A BRIEF, and it is the practitioner's ruling
+# of 2026-08-23 in code: only he changes a brief, so a must-fix there has no
+# author to go to and no second round to run. This returns 2 for that — distinct
+# from the 1 that means escalate — with LOOP_STOP carrying the reason his row
+# will show, and the caller stops the item where it is, for him.
+#
+# `research` IS GATE 1 WITH RESEARCH BESIDE THE BRIEF, and it is his ruling of
+# 2026-09-01 in code — THE THREE GATES' one exception in this script's header.
+# The author writes `research.md` and NEVER the brief, so a must-fix only comes
+# back to it when the gate's evaluator said the must-fix is the research's, on a
+# `Back to: research` line. Everything else about the round — the numbering, the
+# record, the cap and the same-must-fix stop — is what a build gets, because it
+# is the same loop.
 #
 # What the gate's evaluator cited is left in GATE_PROMOTE and GATE_HOLD for the
 # caller, which is the only thing that moves a stage.
@@ -3865,6 +3990,11 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 	STANDARDS_GATE=$1
 	_author=$2
 	_authornow=$3
+	# WHAT THE GATE'S EVALUATOR IS TOLD IT CAN REACH. It is one fact — whether
+	# `research.md` has an author at this gate — and it is set from the author
+	# this gate was given rather than from anything the seam works out for itself.
+	RESEARCH_AUTHOR=''
+	[ "$_author" = research ] && RESEARCH_AUTHOR=yes
 	GATE_PROMOTE=''
 	GATE_HOLD=''
 	LOOP_STOP_DETAIL=''
@@ -3903,6 +4033,31 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 			# Nothing authors here: either this gate has no author at all, or
 			# what it judges is already on disk from an earlier step.
 			_authornow=yes
+		elif [ "$_author" = research ]; then
+			# GATE 1'S AUTHOR, and the only one it has: `research.md`, never the
+			# brief. THE THREE GATES' one exception in this script's header is the
+			# law and this is its code. Nothing is built here, so there is no
+			# worktree and no delivery. The `**Depends on:**` line was already
+			# observed BEFORE this raise, at the entry from `new` in `resume` —
+			# WHEN IT IS OBSERVED in this script's header — so a research round
+			# that runs here is one nothing was waiting on. The round that ran is
+			# on the record with the research it wrote, in the `research` entry's
+			# shape.
+			mark_step "research round $ROUND, at the gate into $GATE"
+			if ! invoke research "$WORK/research" "$root" "$WORK/mustfix"; then
+				LOOP_STOP=${INVOKE_STOP:-"cannot act: remit-invoke"}
+				return 1
+			fi
+			chain_intact || { LOOP_STOP="authority changed"; return 1; }
+			cat "$WORK/research" >"$item/research.md"
+			commit_step "remit: $slug research" ".remit/work-items/$slug"
+			{
+				printf -- '- round: %s\n' "$ROUND"
+				[ -s "$WORK/mustfix" ] &&
+					printf -- '- a must-fix came back to a fresh research raise, and what it returned REPLACED the `research.md` the round before it wrote\n'
+				printf '\nWritten to `research.md` beside the brief.\n'
+			} | log_append "research — $(git -C "$root" rev-parse --short HEAD) — $(now)"
+			commit_step "remit: $slug record the research" ".remit/work-items/$slug"
 		else
 			# BEFORE THE BUILD, and before any worktree exists: what work items
 			# does this brief depend on, and does each satisfy? One that does not
@@ -3910,7 +4065,12 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 			# so nothing escalates. An archived item's merge is witnessed at the
 			# pull request, so `gh` can be asked here; a `gh` that is absent or
 			# cannot answer HOLDS the item too, and still does not escalate.
-			if ! depends_on_ok; then
+			#
+			# THE SECOND OF THE TWO POINTS. The first ran at the entry from `new`,
+			# and this one is not redundant with it: an item already past `new` can
+			# gain an unsatisfied name by a later edit, or see its dependency
+			# regress, between that entry and this build.
+			if ! depends_on_ok build; then
 				LOOP_STOP=$DEPENDS_ON_STOP
 				LOOP_STOP_NOTE=$DEPENDS_ON_NOTE
 				return 2
@@ -4094,11 +4254,22 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 		_mf=$(cat "$WORK/mustfix.new")
 		mv "$WORK/mustfix.new" "$WORK/mustfix"
 
-		# GATE 1: there is nobody to send it back to. Only the practitioner
-		# changes a brief, so the must-fix goes on the record and the item waits
-		# for him at the stage it is in. No round two, and no escalation either:
-		# nothing failed here except the brief, and that is his to rule on.
-		if [ "$_author" = none ]; then
+		# WHO MAY ACT ON A GATE-1 MUST-FIX, and it is the evaluator that says so.
+		# `Back to: research` names `research.md` — the one artefact at this gate
+		# a fresh context may author — and nothing else in the verdict routes
+		# anything. The first word is all that is read, so the evidence an
+		# evaluator writes after it costs nothing.
+		_backto=$(nocr "$WORK/verdict" | sed -n 's/^Back to: *//p' | sed -n 1p |
+			sed 's/[^A-Za-z-].*//' | tr 'A-Z' 'a-z')
+
+		# GATE 1 WITH NOBODY TO SEND IT TO. Only the practitioner changes a brief,
+		# so the must-fix goes on the record and the item waits for him at the
+		# stage it is in. No round two, and no escalation either: nothing failed
+		# here except the brief, and that is his to rule on. An item that carries
+		# research reaches this same stop whenever the verdict did NOT say the
+		# must-fix was the research's — the exception is narrow on purpose.
+		if [ "$_author" = none ] ||
+			{ [ "$_author" = research ] && [ "$_backto" != research ]; }; then
 			LOOP_STOP_DETAIL="a must-fix at the gate into $GATE"
 			if [ -n "$_fixid" ]; then
 				LOOP_STOP="fix: $_fixid"
@@ -4107,6 +4278,11 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 			else
 				LOOP_STOP="a must-fix with no text"
 			fi
+			[ "$_author" = research ] && LOOP_STOP_NOTE="The gate into \`$GATE\` returned a must-fix: $LOOP_STOP
+The verdict did not carry \`Back to: research\`, so this is not a must-fix a fresh
+research raise may discharge — and a brief is the practitioner's, his alone. The
+item waits at \`new\` with the must-fix on the record above, \`research.md\` was not
+re-run, and no second round was run."
 			return 2
 		fi
 
@@ -4222,11 +4398,18 @@ do_close() { # $1 authority for this closure, in words  $2 delivery text  $3 `cl
 
 # One line per shipped rubric: <gate> <section> <id> <criterion>, tab separated.
 # r0 is the universal first question, because an idea nobody could judge
-# delivered or not is not yet a brief. a4 and a5 are what a delivery owes its own
-# proof: what one of remit's own scripts decides is asserted, and what a third
-# party decides is asserted against that third party.
+# delivered or not is not yet a brief. r1 is the same question asked of the one
+# machine-authored artefact at that gate: research that was never looked up reads
+# exactly like research that was, and the only reader who can tell is the gate's
+# evaluator — dated 2026-09-01, on a research pass that made zero lookups against
+# a brief that asked for vendor documentation and stated its recall as fact. It
+# is the rubric a `Back to: research` verdict cites, so a defective research pass
+# comes back to a fresh researcher rather than passing whole. a4 and a5 are what
+# a delivery owes its own proof: what one of remit's own scripts decides is
+# asserted, and what a third party decides is asserted against that third party.
 rubrics_shipped() {
 	printf 'refined\tfix\tr0\tthere is enough here to evaluate — an outcome a stranger could judge delivered or not\n'
+	printf 'refined\tfix\tr1\tresearch states as established what it did not consult or verify — a claim with no source it read, or a vendor behaviour asserted from recall against a brief that asked for documentation\n'
 	printf 'accepted\tfix\ta4\ta change to what a script decides, reads, writes, refuses, reports or exits with lands a unit test for that behaviour in the same delivery\n'
 	printf 'accepted\tfix\ta5\ta behaviour that depends on a third party that can change under us — a CLI, an account, a model, a network — lands an integration assertion, or names itself uncovered with the reason\n'
 }
@@ -5528,27 +5711,45 @@ resume)
 		LOOP_STOP=''
 		case "$st" in
 		new)
-			# Research only when the brief asks for it, in the practitioner's own
-			# words: a `**Research:**` line naming what to establish.
-			if nocr "$AUTHORITY" | grep -q '^\*\*Research:\*\*' && [ ! -f "$item/research.md" ]; then
-				ROUND=1
-				GATE=''
-				STANDARDS_GATE=refined
-				mark_step "research, before the gate into refined"
-				invoke research "$WORK/research" "$root" || escalate "${INVOKE_STOP:-cannot act: remit-invoke}"
-				chain_intact || escalate "authority changed"
-				cat "$WORK/research" >"$item/research.md"
-				commit_step "remit: $slug research" ".remit/work-items/$slug"
-				printf 'Written to `research.md` beside the brief.\n' |
-					log_append "research — $(git -C "$root" rev-parse --short HEAD) — $(now)"
-				commit_step "remit: $slug record the research" ".remit/work-items/$slug"
+			# THE FIRST OF THE TWO POINTS the `**Depends on:**` line is observed
+			# at: HERE, at the entry from `new`, before the research raise and
+			# before gate 1 — WHEN IT IS OBSERVED in this script's header is the
+			# law and this is its code. A name that does not satisfy leaves the
+			# item at `new` with nothing raised and nothing spent: what the build
+			# it waits on actually ships is what this brief has to name, and the
+			# gate into `refined` judges the brief and not the tree, so it would
+			# pass a brief written against a guess. Held, never escalated — the
+			# same stop, the same reason, the practitioner's to lift.
+			if ! depends_on_ok new; then
+				STOP=$DEPENDS_ON_STOP
+				STOP_NOTE=$DEPENDS_ON_NOTE
+				break
 			fi
-			run_gate refined none no
+			# WHO AUTHORS AT THIS GATE, and whether the author runs before the
+			# first evaluate. Research only when the brief asks for it, in the
+			# practitioner's own words: a `**Research:**` line naming what to
+			# establish. That line is the whole of what gives gate 1 an author,
+			# what it authors is `research.md` and never the brief, and the loop it
+			# then runs is the one gates 2 and 3 run — THE THREE GATES' one
+			# exception in this script's header. Without the line the gate has no
+			# author at all, exactly as it never had.
+			_g1author=none
+			_g1now=no
+			if nocr "$AUTHORITY" | grep -q '^\*\*Research:\*\*'; then
+				_g1author=research
+				[ -f "$item/research.md" ] || _g1now=yes
+			fi
+			run_gate refined "$_g1author" "$_g1now"
 			_grc=$?
 			if [ "$_grc" = 2 ]; then
 				# The brief did not pass, and nothing here may rewrite it.
 				STOP=$LOOP_STOP
-				STOP_NOTE="The gate into \`refined\` returned a must-fix: $LOOP_STOP
+				# The loop says it in its own words where the item carried
+				# research and the verdict did not send the must-fix back to it;
+				# where there was never an author, this is the sentence it has
+				# always been.
+				STOP_NOTE=$LOOP_STOP_NOTE
+				[ -n "$STOP_NOTE" ] || STOP_NOTE="The gate into \`refined\` returned a must-fix: $LOOP_STOP
 Nothing in this mechanism may change a brief — that is the practitioner's, and
 his alone — so the item waits at \`new\` with the must-fix on the record above,
 and no second round was run."
