@@ -104,7 +104,11 @@ itself, so the objection is to the wording of the brief, and no further building
 which `bin/remit`'s header fixes. From an escalation those are: resume it as it stands, resume
 it `--until` a stop he names, amend the brief in his own hand and resume (which puts the stage
 back to new), rule on a proposal already written in the item's `log.md`, park it, or close it.
-An option is never work you thought of.
+An option is never work you thought of. And ZERO options is a valid answer — ruled by the
+practitioner, 2026-09-02: where the record and the verbs genuinely offer nothing, this
+section and the recommendation are simply ABSENT — not narrated as empty, not apologised
+for; the report ends with the facts. Not inventing an option is remit working, and an
+option invented to fill this section is the exact defect the section exists to prevent.
 
 **One recommendation.** One of those options, with the reason for it in a sentence.
 
