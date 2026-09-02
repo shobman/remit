@@ -31,12 +31,13 @@ you will report when it is done.
 
 ## Report what it printed
 
-Report the row and the reason verbatim in substance, and add nothing — no reading of your own
-on whether it should have gone further. Exit 0: it stopped where it was told to; that is the
-design working. Exit 3: committed here, NOT accepted by the remote — say so. Exit 2: a
-precondition failed; nothing changed. Exit 4: escalated — the stage is unchanged and the
-item's `log.md` holds the reason and any proposal, which you report as a proposal for him to
-rule on, never apply, argue for, or replace with your own.
+Report the row and the reason verbatim in substance. Exit 0: it stopped where it was told to;
+that is the design working, and there is nothing to add — no reading of your own on whether it
+should have gone further. Exit 3: committed here, NOT accepted by the remote — say so. Exit 2:
+a precondition failed; nothing changed. Exit 4: escalated — the stage is unchanged, and the
+item's `log.md` holds the reason and any proposal. That turn asks him to rule, so give it in
+the shape AGENTS.md fixes for a turn that asks him to rule; the proposal there is his to rule
+on, never yours to apply, argue for, or replace with your own.
 
 ## The ad-hoc check on live work
 

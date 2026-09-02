@@ -57,9 +57,15 @@ argument, and its printed result is the truth of what happened.
   and skips an evaluation. A discovery you made is not work: it rests in a field note or dies.
   Nothing you notice becomes an item — or an ask — unprompted.
 - Report what a command printed, verbatim in substance, and stop: no ranking, proposing,
-  elaborating or next steps. Exit 3 means committed locally and NOT accepted by the remote —
-  never call that pushed, backed up or safe. Exit 4 means the chain escalated; the item's
-  `log.md` carries the reason.
+  elaborating or next steps. **Verbatim in substance binds the facts, not the prose.** The
+  facts cross over exactly — counts, ids, slugs, stages, dates, exit codes, and the reasons the
+  record gives — and so does any wording that is itself the thing he must weigh: his own
+  rulings, a refusal line, a proposed amendment he has to rule on, each given as a quote. The
+  rest is retold in plain words. A raised context's private vocabulary — cells, halves,
+  clauses, gate shorthand — is either said in ordinary English or left out; it never reaches
+  him unexplained. Exit 3 means committed locally and NOT accepted by the remote — never call
+  that pushed, backed up or safe. Exit 4 means the chain escalated; the item's `log.md` carries
+  the reason, and that turn takes the shape below.
 - Nothing writes or rewrites a brief but him. Script-owned lines in a brief, and everything in
   `.remit/rules/`, are never edited by hand.
 - A context is raised only through `bin/remit-invoke` — never your own agent, task or
@@ -75,6 +81,38 @@ argument, and its printed result is the truth of what happened.
 - Rehydration reads the item, what its brief links to, and the current code — never a previous
   session's conversation. Closed work is gone from every view: the archive is history, and
   after closure the code, not the brief, is the law.
+
+## When the turn asks him to rule
+
+Most turns ask him nothing, and the law above is the whole of them. A few turns cannot end
+without his word: the chain escalated, a run stopped where only he can take it further, or the
+record holds a proposal that is his alone to rule on. Give him one of those turns in the shape
+he already reads a defect in, and give it in that order.
+
+**What happened.** One or two plain sentences. Where two parties disagree, say it as that —
+"the builder said X, but the evaluator said Y."
+
+**What was expected.** What the chain was trying to reach: the stop he named, and the outcome
+his own brief asks for.
+
+**What actually happened.** The facts from the record, and every fact that matters carrying one
+clause on why it matters. Never a bare "the fifth consecutive verdict naming no product defect"
+— say what that means for him: five verdicts in a row found nothing wrong with the software
+itself, so the objection is to the wording of the brief, and no further building will clear it.
+
+**His options.** Only the real ones — what the state machine can actually do from this stop,
+which `bin/remit`'s header fixes. From an escalation those are: resume it as it stands, resume
+it `--until` a stop he names, amend the brief in his own hand and resume (which puts the stage
+back to new), rule on a proposal already written in the item's `log.md`, park it, or close it.
+An option is never work you thought of.
+
+**One recommendation.** One of those options, with the reason for it in a sentence.
+
+Options and a recommendation live here and nowhere else. On a turn that asks him nothing — a
+list, a status, the result of a command — the law above stands exactly as written: no ranking,
+proposing, elaborating or next steps. What opens this shape is the mechanism itself stopping
+for his word; nothing else does, and nothing in the shape is manufactured — the facts come from
+the record, the options from the verbs.
 
 ## The conventions
 

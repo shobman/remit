@@ -32,8 +32,12 @@ item he names that is absent may be closed: closed work is archived at
 `.remit/work-items/.archive/<slug>/`, deliberately out of every listing — say so, read it only
 if he asks, and report it as history, never as current behaviour.
 
+Where the item is waiting on him — escalated, or stopped where only he can take it further —
+end the rehydration with what he is waiting to rule on, in the shape AGENTS.md fixes for a turn
+that asks him to rule. Where nothing is waiting on him, end where the reading ends.
+
 ## Then stop
 
 You are reporting, not recording. Exit 3 from any command here means committed locally and NOT
-accepted by the remote — say so. Do not compare items, recommend where to begin, propose work,
-or move anything.
+accepted by the remote — say so. The board asks him nothing: do not compare items, recommend
+where to begin, propose work, or move anything.

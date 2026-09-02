@@ -3248,8 +3248,72 @@ print_row() {
 	printf '%s\t%s\t%s\t%s\t%s\n' "$_at" "$_st" "$_re" "$slug" "$_ti"
 }
 
+# THE SAME STOP, AGAIN — said out loud rather than left to be counted. Dated
+# 2026-09-02, on an item that escalated four times running on one reason: every
+# entry was accurate, none of them said it was the fourth, and the practitioner
+# ruled on the same class of finding four times without the record ever putting
+# the repetition in front of him. The count IS the finding once it is above one,
+# and it was the one thing nowhere on the page.
+#
+# DERIVED FROM `log.md`, which already carries every escalation heading it needs —
+# no new file, no new header field, nothing to migrate and nothing that can drift
+# from the record it describes. Counts the trailing run of `## escalated` entries
+# whose reason is this one; a different reason ends the run and the count starts
+# again at one. Entries of other kinds between them are not escalations and do not
+# break the run.
+#
+# IT CHANGES NOTHING ELSE. Not the loop, not the four-round cap, not which stops
+# escalate, and above all NOT THE REASON LINE — `last_reason` reads it, the list
+# rows print it and `resume_point` is unaffected, so every existing reader sees
+# the same bytes it always did. The count is one extra sentence in the entry, and
+# a suffix on the line this run prints.
+escalation_run() { # $1 the reason -> how many consecutive escalations it makes, >= 1
+	_n=1
+	[ -f "$log" ] || { printf '%s\n' "$_n"; return 0; }
+	_n=$(nocr "$log" |
+		sed -n 's/^## escalated — \(.*\) — [0-9-]*$/\1/p' |
+		awk -v r="$1" '
+			{ seen[++c] = $0 }
+			END {
+				n = 1
+				for (i = c; i >= 1 && seen[i] == r; i--) n++
+				print n
+			}
+		')
+	case "$_n" in '' | *[!0-9]*) _n=1 ;; esac
+	printf '%s\n' "$_n"
+}
+
+# In words, because "4" in a sentence about a fourth time reads as a quantity of
+# something else. Past what is worth spelling, the numeral with its own suffix.
+ordinal() { # $1 a whole number >= 1
+	case "$1" in
+	1) printf 'first\n' ;;
+	2) printf 'second\n' ;;
+	3) printf 'third\n' ;;
+	4) printf 'fourth\n' ;;
+	5) printf 'fifth\n' ;;
+	6) printf 'sixth\n' ;;
+	7) printf 'seventh\n' ;;
+	8) printf 'eighth\n' ;;
+	9) printf 'ninth\n' ;;
+	10) printf 'tenth\n' ;;
+	*11 | *12 | *13) printf '%sth\n' "$1" ;;
+	*1) printf '%sst\n' "$1" ;;
+	*2) printf '%snd\n' "$1" ;;
+	*3) printf '%srd\n' "$1" ;;
+	*) printf '%sth\n' "$1" ;;
+	esac
+}
+
 escalate() { # $1 reason
 	_reason=$1
+	# Counted BEFORE this escalation is appended, so the run it counts is the one
+	# already on the record and this entry is the one being added to it.
+	_runlen=$(escalation_run "$_reason")
+	_repeat=''
+	[ "$_runlen" -gt 1 ] &&
+		_repeat="this is the $(ordinal "$_runlen") consecutive escalation on this reason"
 	# The brief-repair proposal is itself an invoke, and it can refuse like any
 	# other — a harness that is not here, a model that is not real. A refusal is
 	# recorded as what it is rather than dressed up as an analysis.
@@ -3262,6 +3326,8 @@ escalate() { # $1 reason
 	{
 		printf 'The chain stopped and could not move this item further.\n\n'
 		printf -- '- reason: %s\n' "$_reason"
+		[ -n "$_repeat" ] &&
+			printf -- '- repeating: %s.\n' "$_repeat"
 		[ -n "$LOOP_STOP_DETAIL" ] &&
 			printf -- '- the loop stopped: %s\n' "$LOOP_STOP_DETAIL"
 		[ -n "$GATE" ] &&
@@ -3284,7 +3350,11 @@ escalate() { # $1 reason
 	commit_step "remit: $slug escalated — $_reason" ".remit/work-items/$slug"
 	marker_release
 	say ""
-	say "ESCALATED — $_reason"
+	if [ -n "$_repeat" ]; then
+		say "ESCALATED — $_reason — $_repeat"
+	else
+		say "ESCALATED — $_reason"
+	fi
 	print_row
 	[ "$PUSH_FAILED" = yes ] && exit 3
 	exit 4
@@ -4588,12 +4658,38 @@ do_close() { # $1 authority for this closure, in words  $2 delivery text  $3 `cl
 # zero or absent count proves nothing — a kept fetch manifest is read on its
 # merits rather than overruled by a number that never covered it. What the count
 # does and does not cover is `bin/remit-invoke`'s header's to state, and this line
-# does not restate it. a4 and a5 are what
+# does not restate it.
+#
+# WHY r1 CARRIES A MATERIALITY BOUND, added the same day and the second half of
+# the same lesson. Reworded, r1 still had no stopping condition: its criterion was
+# a property of EVERY vendor-behaviour sentence, and a 700-line research document
+# has an unbounded supply of them. Four consecutive escalations on `fix: r1`
+# followed, each round repairing exactly what was named and each round growing the
+# prose that the next round judged, until the fourth citation asserted no falsehood
+# at all — "the fetch log lists retrieved pages but does not map these claims to a
+# specific page". Zero lines of infrastructure shipped across the four. So the
+# rubric now separates the defect it was written for, which is FINITE — a
+# fabricated quotation, a claim its source contradicts, a wrong assumption a design
+# rests on; repair reduces the count and the loop terminates — from mere mapping
+# incompleteness, which is not. The unmapped claim is still reported, as a
+# `Finding:` with no citation, which the seam already supports and `close` already
+# seals; it just does not stop the chain. Rounds one and two of that item still
+# fail under the bound, which is the test the wording was written against: a
+# fabricated Put Blob quotation and an assumption that role assignments survive a
+# storage failover both changed the design. THE BOUND IS IN THE RUBRIC'S OWN TEXT
+# and not in this script's parser, deliberately: what counts as a must-fix is a
+# judgement standard, and judgement standards are the practitioner's, stated in
+# gate files a retro can rewrite. The `fix` versus `Finding:` contract in this
+# header is neutral machinery and stays neutral. Contrast a4, which is also a `fix`
+# and also fired four times on one item and terminated: its subject is the script
+# decisions in a delivery, and there are finitely many of those.
+#
+# a4 and a5 are what
 # a delivery owes its own proof: what one of remit's own scripts decides is
 # asserted, and what a third party decides is asserted against that third party.
 rubrics_shipped() {
 	printf 'refined\tfix\tr0\tthere is enough here to evaluate — an outcome a stranger could judge delivered or not\n'
-	printf 'refined\tfix\tr1\tresearch states as established what its own kept evidence does not support — a claim whose cited source does not carry it, a claim with no source at all, or a vendor behaviour asserted from recall against a brief that asked for documentation. Judge the document against its own citations and against the fetch manifests kept for this item, read on their merits. A zero or absent `consulted` count is NOT evidence of non-consultation: it counts server-side web tools only, a client-side fetch path is counted in no channel this mechanism reads, and there a research pass that did the work looks identical to one that invented it\n'
+	printf 'refined\tfix\tr1\tresearch states as established what its own kept evidence contradicts or does not carry — a fabricated or misquoted source, a claim the source it cites does not support, or an unsourced vendor behaviour that BEARS ON A DECISION the brief asks this research to inform. Judge the document against its own citations and against the fetch manifests kept for this item, read on their merits. A claim that is merely UNMAPPED — not shown wrong, and changing no decision the brief asks for — is a `Finding:` and cites nothing, never a must-fix: unmapped sentences grow with the document and every repair round adds more, so a rubric satisfied only by total mapping has no stopping condition. A zero or absent `consulted` count is NOT evidence of non-consultation: it counts server-side web tools only, a client-side fetch path is counted in no channel this mechanism reads, and there a research pass that did the work looks identical to one that invented it\n'
 	printf 'accepted\tfix\ta4\ta change to what a script decides, reads, writes, refuses, reports or exits with lands a unit test for that behaviour in the same delivery\n'
 	printf 'accepted\tfix\ta5\ta behaviour that depends on a third party that can change under us — a CLI, an account, a model, a network — lands an integration assertion, or names itself uncovered with the reason\n'
 }
