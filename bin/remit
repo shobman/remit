@@ -641,8 +641,11 @@
 #     - models: <every model the run reported, with its tokens and cost — so an
 #                ancillary model is visible and is never read as the author>
 #     - consulted: <the run's own count of what it looked up outside itself,
-#                   where the harness reports one. EVIDENCE, not a verdict:
-#                   nothing here or in the seam concludes anything from it>
+#                   where the harness reports one, WITH THE SCOPE OF THAT COUNT
+#                   carried in the same line. EVIDENCE, not a verdict: nothing
+#                   here or in the seam concludes anything from it, and the scope
+#                   is there so nobody reading only this line can conclude more
+#                   from it than it covers>
 #     - session: <the run id the harness reports>
 #     - run-log: <the seam's run directory>
 #     - boundary: <user|container|none — attested by …>
@@ -930,9 +933,39 @@
 # evaluation on the record alone is worth more than no evaluation, and a silent
 # fallback is what made the field failure unreadable.
 #
+# AND WHATEVER IT IS ASKED TO JUDGE, IT CAN READ — which is a second rule, added
+# 2026-09-02, because the first one only put the evaluator in the right tree. The
+# guarantee is: at every gate, the item's kept run output AND the item's own
+# artefacts are on disk in the worktree the raise stands in, at
+# `.remit/work-items/<slug>/`, and they are the record's current copies. Two
+# mechanisms hold it up and both are stated at `runs_seed` and `item_seed` below:
+#
+#   personal-records mode  the item folder is in the records clone, outside the
+#                          repository, and a seat scoped to its worktree cannot
+#                          open it. Both seeds COPY IN — the runs home whole, and
+#                          the item's artefacts beside it.
+#   all-in mode            the item folder is committed, so it is already checked
+#                          out in `work/<slug>` — but as the SNAPSHOT that branch
+#                          was cut from, never refreshed, while every record
+#                          commit since has landed on the base branch. So both
+#                          seeds still run, and what they replace is a stale file
+#                          rather than a missing one. A copy already identical to
+#                          the record's is left untouched.
+#
+# The runs copy stays (its home ignores itself and can reach no commit); the item
+# copy is REMOVED again the moment the raise returns, because a tracked artefact
+# cannot be ignored out of the next `git add -A`. That asymmetry is the one thing
+# about these two that is not the same, and `item_seed` says why.
+#
+# THE FIELD FAILURE THIS SECOND RULE IS, dated 2026-09-02: an accepted gate
+# reported a present, 57KB `research.md` as absent in three consecutive verdicts,
+# and the builder could not fix it because nothing was broken on the builder's
+# side.
+#
 # NOTHING ELSE MOVES. The refined gate's mechanics, the rubric reading and the
 # citation vocabulary are untouched by this; only the third argument of the
-# `evaluate` raise and what the briefing says about evidence.
+# `evaluate` raise, what the briefing says about evidence, and what is on disk
+# when it says it.
 #
 # ==============================================================================
 # THE AUTHORITY LOCK — STOP, AMENDMENT AND THE PHASE QUEUE
@@ -1665,7 +1698,12 @@ itemarchive="$ITEMARCH/$slug"
 # the record does, so this one stays project-relative. `runs_harvest` below is
 # the crossing between them, and in personal mode it is the only way kept output
 # reaches the record at all.
-runs_rel=".remit/work-items/$slug/runs"
+# `$item_rel` is the same crossing for the ITEM FOLDER ITSELF, one level up, and
+# the two run names below are derived from it rather than spelled again: the path
+# shape an evaluator opens is stated once and `item_seed` and `runs_seed` cannot
+# drift from each other.
+item_rel=".remit/work-items/$slug"
+runs_rel="$item_rel/runs"
 runs="$ITEMS/$slug/runs"
 
 # ==============================================================================
@@ -3110,7 +3148,13 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 		_runs=$(runs_home "$_wt")
 		# A ROLE THAT READS what was kept is shown ALL of it, and is shown it
 		# somewhere it can actually open. `runs_seed` above is the whole of why.
-		[ "$_role" = evaluate ] && runs_seed "$_wt"
+		# `item_seed` beside it is the same guarantee for the item's OWN artefacts
+		# — the research, the phases, the brief — which are what the gate was
+		# asked to judge and which travelled with neither mode before it.
+		if [ "$_role" = evaluate ]; then
+			runs_seed "$_wt"
+			item_seed "$_wt"
+		fi
 	else
 		printf '%s: could not open the kept-output home at %s — this raise is told it has nowhere to keep what it runs.\n' \
 			"$ME" "$(runs_home "$_wt")" >&2
@@ -3149,6 +3193,11 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	# somebody will need to read.
 	raise_log_keep "$_role" "$_wt"
 	runs_harvest "$_wt"
+	# AND THE SEEDED ARTEFACTS COME BACK OUT, here and not later: this is the last
+	# point every road out of a raise passes through — a run that finished, one the
+	# seam refused, and one his `stop` ended — and the whole staging guarantee is
+	# that nothing seeded is on disk when the next round's `git add -A` runs.
+	item_unseed "$_wt"
 	# A raise that ENDED because his `stop` took the lock is not a raise that
 	# FAILED, and the difference is the whole of what the record says next: one
 	# would be an escalation naming the seam, the other is his word being carried
@@ -3469,8 +3518,17 @@ runs_home() { # $1 a working tree -> where a raise in it keeps its output
 	# two expressions are the same string when the record is in the project, so
 	# nothing about this changes for a repository that never asked for personal
 	# records.
-	[ "$1" = "$root" ] && { printf '%s\n' "$runs"; return 0; }
-	printf '%s\n' "$1/$runs_rel"
+	printf '%s/runs\n' "$(item_home "$1")"
+}
+
+# THE SAME CROSSING FOR THE ITEM FOLDER, and the one `runs_home` is now built on.
+# A raise in the PRIMARY worktree is standing beside the record itself wherever
+# the record lives; a raise in a build worktree is standing in a worktree of the
+# PROJECT repository, where the item folder is the project-relative path and
+# nothing else.
+item_home() { # $1 a working tree -> the item folder a raise in it can open
+	[ "$1" = "$root" ] && { printf '%s\n' "$item"; return 0; }
+	printf '%s\n' "$1/$item_rel"
 }
 
 # THE NAME A KEPT RUN TAKES, and the ONE copy of it. The sweep below keys on this
@@ -3561,6 +3619,119 @@ runs_seed() { # $1 the working tree the raise will run in
 		cp "$_ssf" "$_ssdst/${_ssf##*/}" && _ssn=$((_ssn + 1))
 	done
 	[ "$_ssn" -gt 0 ] && say "kept output: $_ssn file(s) copied into $runs_rel for this raise to read."
+	return 0
+}
+
+# THE ITEM'S OWN ARTEFACTS, put where the raise that has to JUDGE them can open
+# them. `runs_seed` above did this for `runs/`; this is the same mirror one level
+# up, and it exists because fixing the runs half left the other half broken in
+# BOTH modes at once, by two different mechanisms that end in the same sentence:
+# the gate could not read the artefact it was asked to judge.
+#
+#   * PERSONAL-RECORDS MODE — the item folder is in the records clone, outside
+#     the repository entirely. `research.md` sits beside `brief.md` there, so the
+#     runs copy never carried it, and a seat scoped to its worktree cannot open
+#     the clone at all. The accepted gate reported a present 57KB `research.md`
+#     as ABSENT in three consecutive verdicts. Field report, 2026-09-02.
+#   * ALL-IN MODE — the item folder is committed in the project repository, so it
+#     IS on disk in the evaluate worktree. It is a SNAPSHOT: `work/<slug>` is cut
+#     from the base branch once, at the first build, and is never merged or
+#     refreshed (`build_worktree` returns early on a worktree that exists, and
+#     NOTHING HERE MERGES). Every record commit after that — a later research
+#     round, every verdict, every log entry — lands on the base branch and never
+#     reaches it. So the file is there and STALE, which is worse than absent: an
+#     evaluator reads an old artefact believing it is the delivered one.
+#
+# ONE MECHANISM ENDS BOTH: before an evaluate raise, the record's own copy is put
+# in the worktree at `$item_rel`, the path shape the evaluator already expects
+# beside the seeded `runs/`. Both modes then reach the SAME GUARANTEE — the
+# item's artefacts are readable, and current, in the worktree the gate stands in.
+#
+# WHAT TRAVELS, decided from what the briefing actually points the evaluator at:
+# `brief.md` (so `the research.md beside the brief` resolves on disk as well as
+# in the briefing's inlined authority), `research.md`, the numbered phase files,
+# and any other regular file the practitioner keeps beside them — the header says
+# evidence files may sit there, and a whitelist would rebuild this same failure
+# under a filename nobody predicted. WHAT DOES NOT: `log.md`, because no briefing
+# names it and its relevant content already reaches the raise as the authority
+# and the must-fix — and because it carries every earlier round's verdict, which
+# a FRESH evaluator is deliberately not shown; the marker, which is machine state
+# and not an artefact; and `runs/`, which is `runs_seed`'s and is not done twice.
+#
+# IT IS TAKEN AWAY AGAIN, which is where this parts company with `runs_seed`, and
+# the reason is the staging guarantee. `runs_seed` may leave its copy because the
+# runs home holds a `*` `.gitignore` and nothing in it can reach a stage at all.
+# The item folder can carry no such file: in all-in mode those artefacts are
+# TRACKED, and an ignore rule would not hold a modified tracked file out of the
+# delivery seam's `git add -A` on the next round's build. So the guarantee here is
+# made the other way — exactly what was overwritten is put back, and what was not
+# there is removed, the moment the raise returns — and it is made for a stop and a
+# refusal as well as for a run that finished, because `invoke` unseeds beside the
+# harvest and before the kill check. Nothing this copies can be staged, because
+# by the time anything could stage it, it is gone.
+ITEM_SEEDED=''
+item_seed() { # $1 the working tree the raise will run in
+	ITEM_SEEDED=''
+	_isdst=$(item_home "$1")
+	[ "$_isdst" = "$item" ] && return 0
+	[ -d "$item" ] || return 0
+	ensure_dir "$_isdst" || {
+		printf '%s: could not open %s — this raise is not shown the item'"'"'s own artefacts.\n' \
+			"$ME" "$_isdst" >&2
+		return 1
+	}
+	_isbak="$WORK/item-seed"
+	rm -rf "$_isbak"
+	ensure_dir "$_isbak" || return 1
+	_isn=0
+	# `*` never matches a leading dot, so the marker and any ignore file beside it
+	# are out of this glob before the name test below runs; the test is there for
+	# a marker whose name stops starting with one.
+	for _isf in "$item"/*; do
+		[ -f "$_isf" ] || continue
+		_isb=${_isf##*/}
+		[ "$_isb" = log.md ] && continue
+		[ "$_isb" = "$marker_name" ] && continue
+		# A worktree copy that is already byte-for-byte the record's is left
+		# alone: nothing is seeded, so nothing has to be put back, and all-in
+		# mode on a fresh branch does no work at all.
+		cmp -s "$_isf" "$_isdst/$_isb" && continue
+		if [ -e "$_isdst/$_isb" ]; then
+			cp "$_isdst/$_isb" "$_isbak/$_isb" || {
+				printf '%s: could not set %s aside, so it was NOT replaced — the raise reads the worktree'"'"'s own copy.\n' \
+					"$ME" "$_isb" >&2
+				continue
+			}
+		fi
+		cp "$_isf" "$_isdst/$_isb" || continue
+		ITEM_SEEDED="$ITEM_SEEDED$_isb
+"
+		_isn=$((_isn + 1))
+	done
+	[ "$_isn" -gt 0 ] && say "item artefacts: $_isn file(s) copied into $item_rel for this raise to read."
+	return 0
+}
+
+# And put the worktree back exactly as it was found. Called after EVERY raise
+# that was seeded, whatever became of it.
+item_unseed() { # $1 the working tree the raise ran in
+	[ -n "$ITEM_SEEDED" ] || return 0
+	_iudst=$(item_home "$1")
+	_iubak="$WORK/item-seed"
+	printf '%s' "$ITEM_SEEDED" | while IFS= read -r _iub; do
+		[ -n "$_iub" ] || continue
+		if [ -f "$_iubak/$_iub" ]; then
+			cp "$_iubak/$_iub" "$_iudst/$_iub" ||
+				printf '%s: could not restore %s in %s — it still holds the record'"'"'s copy.\n' \
+					"$ME" "$_iub" "$_iudst" >&2
+		else
+			rm -f "$_iudst/$_iub" ||
+				printf '%s: could not remove the seeded %s from %s.\n' \
+					"$ME" "$_iub" "$_iudst" >&2
+		fi
+	done
+	rm -rf "$_iubak"
+	ITEM_SEEDED=''
 	return 0
 }
 
@@ -4404,12 +4575,25 @@ do_close() { # $1 authority for this closure, in words  $2 delivery text  $3 `cl
 # evaluator — dated 2026-09-01, on a research pass that made zero lookups against
 # a brief that asked for vendor documentation and stated its recall as fact. It
 # is the rubric a `Back to: research` verdict cites, so a defective research pass
-# comes back to a fresh researcher rather than passing whole. a4 and a5 are what
+# comes back to a fresh researcher rather than passing whole.
+#
+# WHAT r1 RESTS ON, and why it was reworded on 2026-09-02. Its first wording could
+# be satisfied by a COUNTER: an evaluator with a `consulted: … web_fetch=0` in
+# front of it read that zero as the finding and cited r1 against research that had
+# fetched twenty-seven pages and kept the manifest, four rounds running, to an
+# escalation whose own repair proposal would have made the blindness permanent.
+# The counter measures server-side web tools; a seat whose fetches are client-side
+# reports zero however much it read. So r1's evidence is now the DOCUMENT against
+# ITS OWN kept manifests and citations, and the rubric says in its own text that a
+# zero or absent count proves nothing — a kept fetch manifest is read on its
+# merits rather than overruled by a number that never covered it. What the count
+# does and does not cover is `bin/remit-invoke`'s header's to state, and this line
+# does not restate it. a4 and a5 are what
 # a delivery owes its own proof: what one of remit's own scripts decides is
 # asserted, and what a third party decides is asserted against that third party.
 rubrics_shipped() {
 	printf 'refined\tfix\tr0\tthere is enough here to evaluate — an outcome a stranger could judge delivered or not\n'
-	printf 'refined\tfix\tr1\tresearch states as established what it did not consult or verify — a claim with no source it read, or a vendor behaviour asserted from recall against a brief that asked for documentation\n'
+	printf 'refined\tfix\tr1\tresearch states as established what its own kept evidence does not support — a claim whose cited source does not carry it, a claim with no source at all, or a vendor behaviour asserted from recall against a brief that asked for documentation. Judge the document against its own citations and against the fetch manifests kept for this item, read on their merits. A zero or absent `consulted` count is NOT evidence of non-consultation: it counts server-side web tools only, a client-side fetch path is counted in no channel this mechanism reads, and there a research pass that did the work looks identical to one that invented it\n'
 	printf 'accepted\tfix\ta4\ta change to what a script decides, reads, writes, refuses, reports or exits with lands a unit test for that behaviour in the same delivery\n'
 	printf 'accepted\tfix\ta5\ta behaviour that depends on a third party that can change under us — a CLI, an account, a model, a network — lands an integration assertion, or names itself uncovered with the reason\n'
 }

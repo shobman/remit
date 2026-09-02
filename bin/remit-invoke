@@ -114,15 +114,24 @@
 #                  the ancillary model is VISIBLE — a reader can see what else
 #                  was billed — and can never again be mistaken for the author,
 #                  because the author is on its own line above.
-#   consulted:     `web_search=<n> web_fetch=<m>` — the run's OWN count of the
-#                  server-side searches and fetches it made, written ONLY when
-#                  the run reports them and absent, never zeroed, when it does
-#                  not. It is EVIDENCE FOR A READER OR A RUBRIC TO CITE, and
+#   consulted:     `server-side web_search=<n> web_fetch=<m>`, FOLLOWED BY THE
+#                  SCOPE OF THOSE TWO NUMBERS in the line itself. Written ONLY
+#                  when the run reports them and absent, never zeroed, when it
+#                  does not. It is EVIDENCE FOR A READER OR A RUBRIC TO CITE, and
 #                  this seam draws NO conclusion from it: it does not gate, warn,
-#                  fail or grade on the number. A research pass that consulted
-#                  nothing and one that consulted forty look the same to this
-#                  script and different to whoever reads the record.
-#                  WHICH SEATS CAN ANSWER IT is at THE ENVIRONMENT below.
+#                  fail or grade on the number.
+#                  THE SCOPE TRAVELS WITH THE NUMBERS AND IS NOT DECORATION. The
+#                  count is the API's own SERVER-SIDE tool counter and covers
+#                  nothing else — a CLI's CLIENT-SIDE fetches are invisible to it
+#                  — so a bare `web_fetch=0` beside a research pass that fetched
+#                  twenty-seven pages through its own tooling reads as a fact
+#                  about the run when it is only a fact about one channel. That
+#                  is the field failure of 2026-09-02, where a gate cited a
+#                  rubric against honest research on the strength of that zero,
+#                  four rounds to an escalation. The scope clause is its repair.
+#                  WHICH SEATS CAN ANSWER IT AT ALL, and what the envelope was
+#                  searched for before this was settled, is at THE ENVIRONMENT
+#                  below.
 #   model-check:   how the id was verified before the run, or why it was not
 #   boundary:      `<user|container|none> — attested by <header|export|disclosed>`:
 #                  codex is `user` by its run header, every other seat `none`.
@@ -529,11 +538,41 @@
 # WHETHER A RUN CAN SAY WHAT IT CONSULTED — the `consulted:` provenance key —
 # is a per-harness fact and this is the one place it is stated.
 #
-#   claude — YES, and it is the only seat here that answers. The `-p
-#     --output-format json` envelope carries a `server_tool_use` object with
-#     `web_search_requests` and `web_fetch_requests`: the run's own count of the
-#     server-side searches and fetches it made. This is read where the envelope
-#     carries it and written to `consulted:`.
+#   claude — YES, AND ONLY FOR THE SERVER SIDE, and it is the only seat here that
+#     answers at all. The `-p --output-format json` envelope carries a
+#     `server_tool_use` object with `web_search_requests` and
+#     `web_fetch_requests`: the API's own count of the SERVER-SIDE searches and
+#     fetches the run made. This is read where the envelope carries it and
+#     written to `consulted:` with its scope beside it.
+#     WHAT IT DOES NOT COVER, and this is the whole of why the line carries a
+#     scope. Claude Code's own `WebFetch` and `WebSearch` are CLIENT-SIDE tools:
+#     the CLI performs the request and hands the content to the model, and
+#     nothing about that reaches `server_tool_use`. A raise that fetched
+#     twenty-seven pages through them reports `web_fetch=0`, correctly, for a
+#     counter that was never measuring that path.
+#     NO OTHER ENVELOPE FIELD COUNTS A CLIENT-SIDE TOOL CALL. That is a SEARCHED
+#     negative, taken on 2026-09-02 off the shipped `claude` binary itself — the
+#     result envelope's own schema, recovered whole, is `type`, `subtype`,
+#     `duration_ms`, `duration_api_ms`, the `ttft_*`/`time_*` timings,
+#     `user_message_uuid`, `warm_spare_claimed`, `is_error`, `api_error_status`,
+#     `num_turns`, `result`, `stop_reason`, `total_cost_usd`, `usage`,
+#     `modelUsage`, `subagent_stats`, `permission_denials`, `queued_turn_count`,
+#     `structured_output`, `deferred_tool_use`, `terminal_reason`, the
+#     `fast_mode_*` pair, `origin`, `uuid` and `session_id`. Not one of them is a
+#     tool tally: `num_turns` counts assistant turns, `permission_denials` lists
+#     the calls that were REFUSED, `subagent_stats` is about sub-agents, and
+#     `usage` is the API usage block whose only tool member is the server-side
+#     counter above — which that binary's own cost model bills as a server-side
+#     line item, confirming what it is. The ONE channel in that CLI that would
+#     show a client-side fetch is `--output-format stream-json`, whose assistant
+#     messages carry the `tool_use` blocks themselves and could be counted; it is
+#     a different output mode and a different parse, this script asks for `json`,
+#     and nothing here infers a count from a trace it did not ask for.
+#     SO THE COUNT IS KEPT AND ITS SCOPE IS DECLARED, rather than the line being
+#     dropped. The counter is not vacuous for this seat — the server-side tools
+#     are reachable and are billed when they are used — so throwing it away would
+#     discard a real signal to fix a wording problem. What was wrong was never the
+#     number; it was a bare number that read as a scope it does not have.
 #   codex, copilot, devin, pi — NO EQUIVALENT COUNT IS RECORDED, and that is a
 #     searched negative over the shapes this script already parses and the probe
 #     records that captured them, not an assumption. codex's run header block
@@ -601,10 +640,13 @@
 #     Every model the run reports is written to `models:` beside it, so the
 #     ancillary is visible and is never the one the record calls the author. The
 #     rule, and the field failure that wrote it, are at THE PROVENANCE KEYS.
-#   * WHAT A RUN CONSULTED IS RECORDED, NOT JUDGED. Where a run reports its own
-#     web-search and web-fetch counts, `consulted:` carries them for a reader or
-#     a rubric to cite. This script draws no conclusion from the number, gates
-#     nothing on it, and writes no line at all for a seat that cannot report one.
+#   * WHAT A RUN CONSULTED IS RECORDED, NOT JUDGED, AND NEVER WITHOUT ITS SCOPE.
+#     Where a run reports its own web-search and web-fetch counts, `consulted:`
+#     carries them for a reader or a rubric to cite — and carries, in the same
+#     line, what those numbers do and do not cover, because a count read as
+#     wider than it is measures nothing and accuses something. This script draws
+#     no conclusion from the number, gates nothing on it, and writes no line at
+#     all for a seat that cannot report one.
 #   * There is NO enforced read boundary on claude, pi, copilot or devin here,
 #     and every provenance line says so rather than implying one.
 #   * An absent capability is reported before anything is invoked, and nothing
@@ -3189,7 +3231,15 @@ write_provenance() {
 		# it; it is here for a reader or a rubric to cite. Which seats can answer
 		# it, and why the other four write no line at all rather than a zero, is
 		# at THE ENVIRONMENT in this script's header.
-		[ -n "$CONSULTED" ] && printf 'consulted: %s\n' "$CONSULTED"
+		#
+		# THE SCOPE IS PART OF THE LINE AND IS WRITTEN HERE, once, rather than
+		# folded into the value `json_get` returns — that reader has two
+		# implementations and a sentence in both is a sentence that can differ in
+		# one. What it says is the header's law rendered for whoever reads the
+		# record without the header in front of them: a reader or a rubric that
+		# has only this line must not be able to mistake a server-side zero for a
+		# finding about the run. The field failure it repairs is dated 2026-09-02.
+		[ -n "$CONSULTED" ] && printf 'consulted: server-side %s — the API'\''s own count of the SERVER-SIDE web tools, which is the only tool count this envelope carries. A CLI'\''s CLIENT-SIDE fetches (Claude Code'\''s WebFetch and WebSearch) never reach it, so a zero here is NOT evidence that nothing was consulted.\n' "$CONSULTED"
 		[ -n "$MODEL_CHECK" ] && printf 'model-check: %s\n' "$MODEL_CHECK"
 		[ -n "$RUN_ID" ] && printf 'session: %s\n' "$RUN_ID"
 		case "$HARNESS" in

@@ -10,7 +10,7 @@
 #
 #   sh /path/to/remit/install.sh <target-repo>
 #
-# Shipped by remit v0.3.3. It fetches the CURRENT published dist, which may
+# Shipped by remit v0.3.4. It fetches the CURRENT published dist, which may
 # be newer. To pin an exact version, set REMIT_REF — but take the command from
 # README.md's Install section rather than composing one from the two forms above:
 # where the assignment goes differs between them, and the wrong placement pins
