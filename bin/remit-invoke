@@ -9,7 +9,7 @@
 #       [--effort <level>] [--provider <name>] [--sandbox <mode>]
 #       [--allowed-tools <spec>] [--exclude-tools <spec>] [--final-message <file>]
 #
-#       role in research | build | evaluate | repair-brief
+#       role in research | build | evaluate
 #
 #   sh bin/remit-invoke --probe-host    reads this host; raises nothing
 #
@@ -164,16 +164,19 @@
 #       }, …
 #     },
 #     "defaults": {
-#       "<research|build|evaluate|repair-brief>": {
+#       "<research|build|evaluate>": {
 #         "harness": "<a key of harnesses>",
 #         "model":   "<one of that harness's models>"
-#       }                                       all four roles, every one of them
+#       }                                       all three roles, every one of them
 #     }
 #   }
 #
 # Nothing else is allowed at either level: an unknown key, a key that is not one
-# of the four roles, and a harness or model the registry does not carry are each
-# refused BY NAME. THE SHAPE IS CHECKED ON READ, and a malformed file refuses
+# of the three roles, and a harness or model the registry does not carry are each
+# refused BY NAME — with ONE tolerated exception: `defaults.repair-brief`. That
+# role was retired on 2026-09-03 and every registry installed before that day
+# seats it; refusing the key would break every install on upgrade over a role
+# that raises nothing, so it is accepted, ignored, and dropped by `setup --write`. THE SHAPE IS CHECKED ON READ, and a malformed file refuses
 # EVERYTHING rather than half-applying — a syntax error reported with `jq`'s own
 # message, which names the line, and a shape error naming the key.
 #
@@ -676,7 +679,7 @@ usage:
       [--effort <level>] [--provider <name>] [--sandbox <mode>]
       [--allowed-tools <spec>] [--exclude-tools <spec>] [--final-message <file>]
 
-      role: research | build | evaluate | repair-brief
+      role: research | build | evaluate
 
   remit-invoke --probe-host
       Reads THIS HOST — which of the five harness CLIs are here, where, what
@@ -871,8 +874,13 @@ while [ $# -gt 0 ]; do
 done
 
 case "$ROLE" in
-research | build | evaluate | repair-brief) ;;
-*) die "unknown role '$ROLE' — the roles are research, build, evaluate and repair-brief" ;;
+research | build | evaluate) ;;
+# RETIRED, 2026-09-03, on the practitioner's word: "a brief fixer has no place
+# writing anything in my words that i don't admit myself". A stopped item is his
+# to rule on, with the record in front of him; nothing is raised to propose a
+# rewrite of his brief. Refused by name, so a caller that still asks is told.
+repair-brief) die "the 'repair-brief' role is retired (2026-09-03): an escalation raises nothing, and a failed brief is the practitioner's to rule on from the record" ;;
+*) die "unknown role '$ROLE' — the roles are research, build and evaluate" ;;
 esac
 
 case "$SLUG" in
@@ -950,7 +958,8 @@ SETTINGS_JQ='
 def E($m): "!\t" + $m;
 def nonempty: type == "string" and length > 0;
 . as $r
-| ["research","build","evaluate","repair-brief"] as $ROLES
+| ["research","build","evaluate"] as $ROLES
+| ["repair-brief"] as $RETIRED
 | ["claude","codex","pi","devin","copilot"] as $KNOWN
 | (
   if ($r | type) != "object" then
@@ -991,8 +1000,8 @@ def nonempty: type == "string" and length > 0;
       elif ($r.defaults | type) != "object" then
         [E("`defaults` is a \($r.defaults | type), not an object")]
       else
-        [ $r.defaults | keys[] | . as $k | select(($ROLES | index($k)) == null)
-          | E("`defaults.\($k)` is not a role remit has — those are research, build, evaluate and repair-brief") ]
+        [ $r.defaults | keys[] | . as $k | select(($ROLES | index($k)) == null and ($RETIRED | index($k)) == null)
+          | E("`defaults.\($k)` is not a role remit has — those are research, build and evaluate") ]
       + [ $ROLES[] | . as $k | select(($r.defaults | has($k)) | not)
           | E("`defaults.\($k)` is missing — every role takes a seat the practitioner registered, and a role with none can raise nothing") ]
       + [ $r.defaults | to_entries[] | . as $d | select(($ROLES | index($d.key)) != null) |
@@ -1665,17 +1674,6 @@ role_limits() {
 		printf '  named where you found it. Documentation is not evidence of behaviour. What\n'
 		printf '  you could not establish is reported as unestablished.\n'
 		;;
-	repair-brief)
-		printf 'You analyse an ESCALATION and propose an amendment to the brief.\n\n'
-		printf -- '- THE BRIEF IS UNTOUCHED until the practitioner rules. You edit no file at\n'
-		printf '  all: you return a proposal as text.\n'
-		printf -- '- You NEVER run `git` or `gh` AT ALL, and you NEVER run `bin/remit` or\n'
-		printf '  `bin/remit-invoke`. A raised context never runs either; the seam does.\n'
-		printf '  Your evidence is the record and the tree in front of you.\n'
-		printf -- '- You say which of the three is at fault — the brief, the proof, or the\n'
-		printf '  build — and why, from the record. A proposal with no evidence behind it is\n'
-		printf '  worse than none.\n'
-		;;
 	esac
 }
 
@@ -1703,7 +1701,7 @@ runs_section() {
 		printf '\nIt is not a scratch directory and it is not where you work. Put there what\n'
 		printf 'a reader would need to believe you, and nothing else.\n'
 		;;
-	evaluate | repair-brief)
+	evaluate)
 		printf 'The output kept by the contexts that worked on this item is in\n\n'
 		printf '  %s\n\n' "$RUNS"
 		printf 'That is where a proof somebody claims to have run is either legible or\n'
@@ -1776,7 +1774,6 @@ role_returns() {
 	case "$ROLE" in
 	build) printf 'Your final message. It is recorded as the delivery'\''s returned text, quoted\nand not endorsed. The tree you authored is the delivery; the message says what\nyou did, what you could not do, and what you left undone.\n' ;;
 	research) printf 'Your findings as free text. They are written to `research.md` beside the brief\nexactly as returned, REPLACING what is there — on a round after the first, what\nyou return is the whole of the research this item carries.\n' ;;
-	repair-brief) printf 'The proposed amendment, as text. It is appended to the record under the\nescalation, and the brief is not touched.\n' ;;
 	evaluate)
 		printf 'ONE verdict, in these line shapes. They are the only text the mechanism\n'
 		printf 'parses; every other line is carried into the record verbatim.\n\n'

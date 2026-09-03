@@ -374,7 +374,7 @@
 # ==============================================================================
 #
 #   bin/remit-invoke <role> <slug> <worktree>
-#       role in research | build | evaluate | repair-brief
+#       role in research | build | evaluate
 #
 # stdout is the step's text and nothing else. `REMIT_INVOKE=<path>` substitutes
 # the command (the test suite drives the chain with a scripted stand-in). That
@@ -489,8 +489,8 @@
 #   build         the builder's own final message. It authored the worktree; the
 #                 text is untrusted and travels into the pull request body inside
 #                 a code fence, below this script's provenance.
-#   repair-brief  the proposed amendment. Appended to the escalation entry. THE
-#                 BRIEF IS NOT TOUCHED — the practitioner rules on it.
+#   repair-brief  RETIRED 2026-09-03. An escalation raises nothing; THE THREE
+#                 GATES below says why, and the seam refuses the role by name.
 #   evaluate      a verdict. Parsed line by line:
 #
 #         Verdict: PASS | PASS WITH FINDINGS | FAIL      (required, first wins;
@@ -671,7 +671,7 @@
 # it lands in the item's runs home, under the naming convention, and the
 # `run-log:` line above names where it came from.
 #
-# `<role>` is the role that ran: research, build, evaluate or repair-brief.
+# `<role>` is the role that ran: research, build or evaluate.
 # `<harness>` is the provenance sidecar's `harness:`, or `an unreported harness`
 # where the seam named none. `<seconds>` is whole seconds of wall clock, taken
 # around the raise by this script and by nothing else — where the clock could not
@@ -869,9 +869,15 @@
 #     nobody here who may act on it. Where the item carries research and the
 #     verdict said the must-fix is the RESEARCH'S, the loop runs instead: THE ONE
 #     EXCEPTION below.
-#   * The brief a repair proposal would amend is his too: escalation raises
-#     `repair-brief` at gates 2 and 3 and puts the proposal in `log.md`, and the
-#     brief is untouched until he rules.
+#   * An escalation RAISES NOTHING and proposes nothing. Until 2026-09-03 it
+#     raised `repair-brief` to propose an amendment; on `lake-infra` that ran
+#     six times, cost a raise each time, and he ruled on none of them — a
+#     rewrite he had to read whole, where four one-line decisions were what the
+#     item needed. Retired on his word: "a brief fixer has no place writing
+#     anything in my words that i don't admit myself." The escalation entry
+#     carries the reason, the round, the repeat count and the authority; the
+#     verdicts above it are the analysis; the brief is his to amend, from the
+#     record, with the conductor answering what he asks of it.
 #   * A FAIL WITH NOTHING TO ACT ON — no `Must-fix:` line and no applied `fix:`
 #     citation — stops for him at EVERY gate, the same way: the item stays where
 #     it is, ACTIVE, the findings are on the record, and no round is run on an
@@ -3347,15 +3353,16 @@ escalate() { # $1 reason
 	_repeat=''
 	[ "$_runlen" -gt 1 ] &&
 		_repeat="this is the $(ordinal "$_runlen") consecutive escalation on this reason"
-	# The brief-repair proposal is itself an invoke, and it can refuse like any
-	# other — a harness that is not here, a model that is not real. A refusal is
-	# recorded as what it is rather than dressed up as an analysis.
-	: >"$WORK/repair"
-	if invoke repair-brief "$WORK/repair" "$root" "$WORK/mustfix"; then
-		_repair=$(cat "$WORK/repair")
-	else
-		_repair="The brief-repair proposal could not be produced: cannot act: remit-invoke. The item escalates anyway — an escalation the mechanism cannot analyse is still an escalation, and saying so is the whole point."
-	fi
+	# NOTHING IS RAISED HERE. Until 2026-09-03 an escalation raised `repair-brief`
+	# — a fresh context proposing an amendment to the brief — and on the one item
+	# where it ran six times the practitioner ruled on none of them: each was a
+	# rewrite he had to read whole, produced by a raise he paid for, and the four
+	# decisions the item actually needed were buried inside the sixth. Retired on
+	# his word: "a brief fixer has no place writing anything in my words that i
+	# don't admit myself." The verdicts above this entry ARE the analysis; what
+	# the brief needs is his, worked out from the record, and the entry carries
+	# what he needs to do that — the reason, the round, whether this road has been
+	# walked before, and the authority the run raised from.
 	{
 		printf 'The chain stopped and could not move this item further.\n\n'
 		printf -- '- reason: %s\n' "$_reason"
@@ -3375,9 +3382,8 @@ escalate() { # $1 reason
 		# that changed would be this script agreeing to it.
 		authority_lines
 		printf '\n'
-		printf 'Proposed repair of the brief, from a fresh context. THE BRIEF IS UNTOUCHED\n'
-		printf 'until the practitioner rules on it.\n\n'
-		printf '%s\n' "$_repair"
+		printf 'The brief is untouched, and what it needs is the practitioner'\''s: the verdicts\n'
+		printf 'above are the record he rules from.\n'
 	} | log_append "escalated — $_reason — $(now)"
 	put_header "$brief" escalated "$(hdr "$brief" Stage)" "$(hdr "$brief" Until)" KEEP
 	commit_step "remit: $slug escalated — $_reason" ".remit/work-items/$slug"
@@ -3612,7 +3618,7 @@ build_worktree() {
 # that call it.
 
 runs_home() { # $1 a working tree -> where a raise in it keeps its output
-	# A raise in the PRIMARY worktree — research, `repair-brief`, and the gate-1
+	# A raise in the PRIMARY worktree — research, and the gate-1
 	# evaluator the chain hands `$root` — is handed THE HOME itself, wherever the
 	# record lives, so its pointer aims at what a build's output was harvested
 	# into. A raise in a build worktree — every builder, and every evaluator at a
@@ -5473,7 +5479,7 @@ setup)
 	incomplete=no
 	note ''
 	note 'the seat each role takes'
-	for role in research build evaluate repair-brief; do
+	for role in research build evaluate; do
 		seat_h='' seat_m='' seat_src=''
 		cur_h=$(from_cur D "$role" 3)
 		cur_m=$(from_cur D "$role" 4)
@@ -5853,7 +5859,7 @@ migrate)
 					if (i == 0) next
 					r = substr(line, 1, i - 1)
 					gsub(/^[[:space:]]+|[[:space:]]+$/, "", r)
-					if (r != "research" && r != "build" && r != "evaluate" && r != "repair-brief") next
+					if (r != "research" && r != "build" && r != "evaluate") next
 					v = substr(line, i + 1)
 					gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
 					if (split(v, w, /[[:space:]]+/) != 2) next
@@ -5870,7 +5876,7 @@ migrate)
 						              | map({ key: .[0].key,
 						                      value: { cli: .[0].key, models: (map(.value) | unique) } })
 						              | from_entries ),
-						defaults:  ( ["research","build","evaluate","repair-brief"]
+						defaults:  ( ["research","build","evaluate"]
 						              | map( . as $r
 						                     | ($rows | map(select(.[0] == $r)) | first) as $hit
 						                     | { key: $r,

@@ -85,9 +85,11 @@ argument, and its printed result is the truth of what happened.
 ## When the turn asks him to rule
 
 Most turns ask him nothing, and the law above is the whole of them. A few turns cannot end
-without his word: the chain escalated, a run stopped where only he can take it further, or the
-record holds a proposal that is his alone to rule on. Give him one of those turns in the shape
-he already reads a defect in, and give it in that order.
+without his word: the chain escalated, or a run stopped where only he can take it further.
+Give him one of those turns in the shape he already reads a defect in, and give it in that
+order. An escalation proposes nothing — nothing is raised to rewrite his brief — so what the
+brief needs is worked out by him, from the record; answer what he asks of it, from the record,
+and propose nothing he did not ask for.
 
 **What happened.** One or two plain sentences. Where two parties disagree, say it as that —
 "the builder said X, but the evaluator said Y."
@@ -103,7 +105,7 @@ itself, so the objection is to the wording of the brief, and no further building
 **His options.** Only the real ones — what the state machine can actually do from this stop,
 which `bin/remit`'s header fixes. From an escalation those are: resume it as it stands, resume
 it `--until` a stop he names, amend the brief in his own hand and resume (which puts the stage
-back to new), rule on a proposal already written in the item's `log.md`, park it, or close it.
+back to new), park it, or close it.
 An option is never work you thought of. And ZERO options is a valid answer — ruled by the
 practitioner, 2026-09-02: where the record and the verbs genuinely offer nothing, this
 section and the recommendation are simply ABSENT — not narrated as empty, not apologised

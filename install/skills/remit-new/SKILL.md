@@ -50,7 +50,7 @@ which.
 
 Report what it printed, verbatim in substance. Exit 3: committed here, NOT accepted by the
 remote — say so, and never call it pushed or safe. Exit 2: nothing changed. Exit 4: the chain
-escalated at admission — the item's `log.md` carries the reason and any proposal, and that turn
-asks him to rule, so give it in the shape AGENTS.md fixes for a turn that asks him to rule; the
-proposal is his to rule on, never to apply. Otherwise stop: no elaborating, ranking,
+escalated at admission — the item's `log.md` carries the reason, and that turn asks him to
+rule, so give it in the shape AGENTS.md fixes for a turn that asks him to rule; what the brief
+needs is his to work out, never yours to propose. Otherwise stop: no elaborating, ranking,
 estimating, or raising it later unasked.

@@ -35,9 +35,10 @@ Report the row and the reason verbatim in substance. Exit 0: it stopped where it
 that is the design working, and there is nothing to add — no reading of your own on whether it
 should have gone further. Exit 3: committed here, NOT accepted by the remote — say so. Exit 2:
 a precondition failed; nothing changed. Exit 4: escalated — the stage is unchanged, and the
-item's `log.md` holds the reason and any proposal. That turn asks him to rule, so give it in
-the shape AGENTS.md fixes for a turn that asks him to rule; the proposal there is his to rule
-on, never yours to apply, argue for, or replace with your own.
+item's `log.md` holds the reason. That turn asks him to rule, so give it in the shape
+AGENTS.md fixes for a turn that asks him to rule; what the brief needs is his to work out from
+the record — answer what he asks of it, and never propose, argue for, or apply a fix of your
+own.
 
 ## The ad-hoc check on live work
 

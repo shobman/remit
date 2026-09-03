@@ -33,7 +33,7 @@ With nothing to record, close with empty input: `... close <slug> < /dev/null`.
 
 Report what it printed, verbatim in substance. Exit 3: committed here, NOT accepted by the
 remote — say so; the item is closed either way. Exit 2: nothing changed. Exit 4: the close
-escalated; the item's `log.md` carries the reason, and any proposal there is his to rule on.
+escalated; the item's `log.md` carries the reason, and that turn asks him to rule.
 
 Closure is final: the item leaves every listing and nothing about it returns as an
 instruction, a reminder, or an account of current behaviour. If a constraint from the work
