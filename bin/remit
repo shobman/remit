@@ -210,7 +210,9 @@
 # (a rubric the gate's evaluator cited stopped it here for his eyes), `fix:
 # <id>` (a rubric the gate's evaluator cited is the must-fix still standing),
 # `depends on: <the work item the line names that does not satisfy it, or what it
-# left unreadable>`, `<n> fails`, `same must-fix twice`, `cannot act: <what>`,
+# left unreadable>`, `<n> fails`, `same must-fix twice`, `FAIL with nothing to act
+# on` (the gate failed the work and attached that to no must-fix — findings for the
+# practitioner, nothing for a builder; THE THREE GATES below), `cannot act: <what>`,
 # `stalled: <what the seam said>` (a raised CLI stopped writing anything and the
 # seam ended it — THE IDLE BOUND in `bin/remit-invoke`'s header), `authority changed`
 # (it changed while the chain was running — THE AUTHORITY LOCK below), `stopped
@@ -493,9 +495,10 @@
 #
 #         Verdict: PASS | PASS WITH FINDINGS | FAIL      (required, first wins;
 #                       prose after the verdict word is kept, not read)
-#         Must-fix: <text>                (zero or more; a FAIL with none has an
-#                       empty must-fix, and the same-must-fix stop compares that
-#                       exactly as it compares any other text)
+#         Must-fix: <text>                (zero or more; a FAIL with none — and no
+#                       applied `fix:` citation — is a FAIL with nothing to act
+#                       on: no round runs on it and the item stops, ACTIVE, for
+#                       the practitioner. THE THREE GATES below)
 #         Finding: <text>                 (zero or more)
 #         Back to: research               (zero or one, and ONLY at the gate into
 #                       `refined` where the authority carries a `**Research:**`
@@ -869,6 +872,13 @@
 #   * The brief a repair proposal would amend is his too: escalation raises
 #     `repair-brief` at gates 2 and 3 and puts the proposal in `log.md`, and the
 #     brief is untouched until he rules.
+#   * A FAIL WITH NOTHING TO ACT ON — no `Must-fix:` line and no applied `fix:`
+#     citation — stops for him at EVERY gate, the same way: the item stays where
+#     it is, ACTIVE, the findings are on the record, and no round is run on an
+#     empty must-fix. An evaluator that fails the work and attaches it to
+#     nothing has spoken to a reader and not to a builder; running a builder on
+#     it spends a round on nothing and then stops on `same must-fix twice`,
+#     which names nothing that happened. Field failure, 2026-09-03, mukfork.
 #
 # THE ONE EXCEPTION — `research.md` HAS AN AUTHOR. Ruled by the practitioner,
 # 2026-09-01, after a research pass that ignored its brief passed this gate with
@@ -4495,6 +4505,28 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 		_mf=$(cat "$WORK/mustfix.new")
 		mv "$WORK/mustfix.new" "$WORK/mustfix"
 
+		# A FAIL WITH NOTHING TO ACT ON is the practitioner's, at once. A verdict
+		# that failed the work and attached that to no `Must-fix:` line and no
+		# applied `fix:` citation has said what is wrong to a reader and nothing
+		# to a builder: a round run on it is a fresh author briefed with an empty
+		# must-fix, and the round after that is "the same must-fix twice" — a
+		# stop that names nothing that happened. That was the field failure of
+		# 2026-09-03 on mukfork, twice in one session, at the gate into
+		# `accepted`. So the item stops where it is, ACTIVE, with the findings on
+		# the record above, under a stop that says exactly this — the same stop
+		# the evaluator's own briefing promises it for a finding it leaves with
+		# no disposition. Every gate, whoever the author is: an empty must-fix
+		# has nobody to go to anywhere.
+		if [ -z "$_mf" ]; then
+			LOOP_STOP_DETAIL="FAIL with nothing to act on at the gate into $GATE"
+			LOOP_STOP="FAIL with nothing to act on"
+			LOOP_STOP_NOTE="The gate into \`$GATE\` returned FAIL with no \`Must-fix:\` line and no
+\`fix:\` citation the gate file carries — findings, and nothing a fresh author could be
+sent back to discharge. No round was run on an empty must-fix and nothing escalated:
+the findings are on the record above, and what to do with them is the practitioner's."
+			return 2
+		fi
+
 		# WHO MAY ACT ON A GATE-1 MUST-FIX, and it is the evaluator that says so.
 		# `Back to: research` names `research.md` — the one artefact at this gate
 		# a fresh context may author — and nothing else in the verdict routes
@@ -4514,10 +4546,8 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 			LOOP_STOP_DETAIL="a must-fix at the gate into $GATE"
 			if [ -n "$_fixid" ]; then
 				LOOP_STOP="fix: $_fixid"
-			elif [ -n "$_mf" ]; then
-				LOOP_STOP=$(printf '%s\n' "$_mf" | sed -n 1p)
 			else
-				LOOP_STOP="a must-fix with no text"
+				LOOP_STOP=$(printf '%s\n' "$_mf" | sed -n 1p)
 			fi
 			[ "$_author" = research ] && LOOP_STOP_NOTE="The gate into \`$GATE\` returned a must-fix: $LOOP_STOP
 The verdict did not carry \`Back to: research\`, so this is not a must-fix a fresh

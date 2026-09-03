@@ -1780,7 +1780,12 @@ role_returns() {
 		printf '  Finding: <text>                               (zero or more)\n\n'
 		printf 'PASS means everything holds and nothing is worth recording. PASS WITH\n'
 		printf 'FINDINGS means the same, with findings recorded. FAIL means a must-fix\n'
-		printf 'stands, the boundary was crossed, or the proof does not hold.\n'
+		printf 'stands — and a crossed boundary, a proof that does not hold, or a defect\n'
+		printf 'no rubric names IS a must-fix: write it as a `Must-fix:` line, in words a\n'
+		printf 'fresh author can act on. A must-fix needs no rubric; a `fix:` citation is\n'
+		printf 'one way to raise one, not the only way. A FAIL that carries no must-fix\n'
+		printf 'sends nobody anything: the item stops for the practitioner with your\n'
+		printf 'findings, and no author is raised on it.\n'
 		;;
 	esac
 }
