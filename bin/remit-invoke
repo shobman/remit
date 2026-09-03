@@ -1602,6 +1602,11 @@ role_limits() {
 		printf -- '- An outcome you could not reach is reported as unreached. Nothing is\n'
 		printf '  invented, no proof is substituted for an easier one, and a capability that\n'
 		printf '  is absent is said to be absent.\n'
+		printf -- '- The register of your input is not the register of your output. A research\n'
+		printf '  document or a brief below may flag every uncertainty in bold, because a\n'
+		printf '  gate reads it; the code you write is read by someone maintaining it. A\n'
+		printf '  comment says what a reader of THAT file needs and no more; the reasoning\n'
+		printf '  behind a design goes in a README or the document that carries it, once.\n'
 		;;
 	evaluate)
 		printf 'You are an EVALUATOR. You JUDGE the work in front of you and you change\n'

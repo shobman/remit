@@ -1204,6 +1204,9 @@ usage:
   remit migrate          one-time: .remit/<slug>/ -> .remit/work-items/<slug>/,
                          evaluation.md -> log.md, **State:** -> **Attention:** +
                          **Stage:**, root field-reports/ -> .remit/field-reports/
+  remit version          `remit <version>`, from .remit/.install/manifest — the
+                         one place the installer wrote it. A copy nobody
+                         installed says so and exits 2. `--version` is the same.
   remit activate <slug>  retired into `resume` — it says so and exits 2
   remit kill <slug>      retired into `stop` — it says so and exits 2
 
@@ -1389,6 +1392,10 @@ rules)
 migrate)
 	[ $# -eq 0 ] || usage
 	;;
+version | --version)
+	cmd=version
+	[ $# -eq 0 ] || usage
+	;;
 -h | --help)
 	usage
 	;;
@@ -1452,6 +1459,22 @@ resolve_dir() { # $1 a directory
 PAYLOAD_ONLY=no
 if [ "$cmd" = rules ]; then
 	case "$rules_cmd" in ship | seed | read | apply) PAYLOAD_ONLY=yes ;; esac
+fi
+
+# `version` answers from the one place the installer wrote it and touches
+# nothing else: the manifest is installed payload, so it sits with the project
+# whatever `.remit/settings.local.json` says about where the record lives. A
+# copy nobody installed — a clone of remit itself — has no manifest and says so;
+# its version is its tag, and nothing here guesses one.
+if [ "$cmd" = version ]; then
+	_vroot=$(git rev-parse --show-toplevel 2>/dev/null) || _vroot=.
+	_vman="$_vroot/.remit/.install/manifest"
+	[ -f "$_vman" ] || die "no .remit/.install/manifest under $_vroot — this copy was not installed here, and the version is the installer's to write. A clone of remit is its tag."
+	_v=$(nocr "$_vman" | sed -n 's/^version //p' | sed -n 1p)
+	[ -n "$_v" ] || die "$_vman carries no \`version\` line"
+	printf 'remit %s
+' "$_v"
+	exit 0
 fi
 
 git_dir=''
@@ -4714,12 +4737,27 @@ do_close() { # $1 authority for this closure, in words  $2 delivery text  $3 `cl
 # and also fired four times on one item and terminated: its subject is the script
 # decisions in a delivery, and there are finitely many of those.
 #
+# WHY A MARKED UNKNOWN IS NOT A MUST-FIX, added 2026-09-03, the third half of the
+# lesson and the one the bound did not reach. The bound removed the tail — death
+# by a thousand unmapped sentences — and left the head: one decision-bearing
+# question no vendor page answers. r1 opens "states as established", and a claim
+# the research MARKS unestablished is not stated as established; but the
+# decision-bearing shape carried no such qualifier, and six consecutive
+# evaluators on `lake-infra` read it the strict way. The more honestly that
+# research flagged what it could not establish, the more uncitable must-fixes it
+# carried, and the further it moved from passing — until the item was closed
+# unshipped and the same research document, unchanged, was built from by hand.
+# There is no page to cite for "no page says this", so a rubric that demands one
+# has no stopping condition on exactly the honest case. The clause makes the
+# marked unknown a `Finding:` — reported, sealed at close, and the practitioner's
+# to rule on — which is what he ended up ruling by hand.
+#
 # a4 and a5 are what
 # a delivery owes its own proof: what one of remit's own scripts decides is
 # asserted, and what a third party decides is asserted against that third party.
 rubrics_shipped() {
 	printf 'refined\tfix\tr0\tthere is enough here to evaluate — an outcome a stranger could judge delivered or not\n'
-	printf 'refined\tfix\tr1\tresearch states as established what its own kept evidence contradicts or does not carry — a fabricated or misquoted source, a claim the source it cites does not support, or an unsourced vendor behaviour that BEARS ON A DECISION the brief asks this research to inform. Judge the document against its own citations and against the fetch manifests kept for this item, read on their merits. A claim that is merely UNMAPPED — not shown wrong, and changing no decision the brief asks for — is a `Finding:` and cites nothing, never a must-fix: unmapped sentences grow with the document and every repair round adds more, so a rubric satisfied only by total mapping has no stopping condition. A zero or absent `consulted` count is NOT evidence of non-consultation: it counts server-side web tools only, a client-side fetch path is counted in no channel this mechanism reads, and there a research pass that did the work looks identical to one that invented it\n'
+	printf 'refined\tfix\tr1\tresearch states as established what its own kept evidence contradicts or does not carry — a fabricated or misquoted source, a claim the source it cites does not support, or an unsourced vendor behaviour that BEARS ON A DECISION the brief asks this research to inform AND IS ASSERTED RATHER THAN MARKED. A claim the research itself records as unestablished — naming what it could not establish and why — is not stated as established: it is a `Finding:`, never a must-fix, however much it bears on a decision, because there is no page to cite for what no page says, and a research pass that marks its unknowns honestly must not read as one that invented them. Judge the document against its own citations and against the fetch manifests kept for this item, read on their merits. A claim that is merely UNMAPPED — not shown wrong, and changing no decision the brief asks for — is a `Finding:` and cites nothing, never a must-fix: unmapped sentences grow with the document and every repair round adds more, so a rubric satisfied only by total mapping has no stopping condition. A zero or absent `consulted` count is NOT evidence of non-consultation: it counts server-side web tools only, a client-side fetch path is counted in no channel this mechanism reads, and there a research pass that did the work looks identical to one that invented it\n'
 	printf 'accepted\tfix\ta4\ta change to what a script decides, reads, writes, refuses, reports or exits with lands a unit test for that behaviour in the same delivery\n'
 	printf 'accepted\tfix\ta5\ta behaviour that depends on a third party that can change under us — a CLI, an account, a model, a network — lands an integration assertion, or names itself uncovered with the reason\n'
 }
