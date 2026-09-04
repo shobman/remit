@@ -165,7 +165,7 @@
 <body>
   <header class="wrap site-head">
     <a class="wordmark" href="#top" aria-label="remit home">remit</a>
-    <span class="version">VERSION 0.3.10</span>
+    <span class="version">VERSION 0.3.11</span>
   </header>
 
   <main id="top">
@@ -220,7 +220,7 @@
           </article>
           <article class="anchor">
             <h3>Move between AI providers</h3>
-            <p>You name the model at each dispatch, so one model can build and a rival can review. The item moves between them without copy and paste — <a href="#harnesses">five harnesses run remit's builders</a>.</p>
+            <p>A registry you write names which harness and model each role sits on, so one model can build and a rival can judge — nothing is raised on a seat you did not register, and nothing falls back. The item moves between them without copy and paste — <a href="#harnesses">five harnesses run remit's builders</a>.</p>
           </article>
           <article class="anchor">
             <h3>Know who made each change</h3>
@@ -237,8 +237,8 @@
         <p class="section-intro">The work item survives a session ending or a model changing. Git carries the identity, boundary, decisions, state, and history.</p>
         <figure class="journey-shell">
           <svg viewBox="0 0 1080 500" role="img" aria-labelledby="journey-title journey-desc">
-            <title id="journey-title">A remit work item moving from capture to closure</title>
-            <desc id="journey-desc">Four connected steps. Capture creates a parked brief. The practitioner activates it. Dispatch sends a bounded builder and produces a draft pull request. Evaluate records a verdict from a fresh context. Close archives the item when the practitioner ends that work, whether delivered or abandoned.</desc>
+            <title id="journey-title">A remit work item moving through its four stages</title>
+            <desc id="journey-desc">Four stages, three gates. An item is admitted at new in the practitioner's words. The gate into refined judges the brief, and the research if it asked for any. The gate into accepted judges a delivery: a bounded builder authors a tree, the mechanism turns it into a draft pull request, and a fresh context returns a verdict; a must-fix goes back to a fresh builder, four rounds at most. The gate into closed judges the record, and closure is the practitioner's word. Every gate can stop the item for him instead of moving it.</desc>
             <defs>
               <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                 <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--signal)"/>
@@ -252,47 +252,46 @@
               <g transform="translate(40 116)">
                 <rect width="210" height="260" rx="18" fill="var(--paper)" stroke="var(--line)" stroke-width="2"/>
                 <text x="24" y="50" fill="var(--signal)" font-size="15" font-weight="750" letter-spacing="2">01</text>
-                <text x="24" y="88" fill="var(--ink)" font-size="28" font-weight="750">Capture</text>
-                <text x="24" y="122" fill="var(--muted)" font-size="16">brief.md records the</text>
-                <text x="24" y="146" fill="var(--muted)" font-size="16">outcome and boundary.</text>
-                <rect x="24" y="180" width="90" height="34" rx="17" fill="var(--signal-soft)"/>
-                <text x="69" y="203" text-anchor="middle" fill="var(--signal)" font-size="14" font-weight="750">parked</text>
-                <text x="24" y="238" fill="var(--muted)" font-size="13">practitioner activates</text>
-                <text x="186" y="238" text-anchor="end" fill="var(--accent)" font-size="13" font-weight="750">active</text>
+                <text x="24" y="88" fill="var(--ink)" font-size="28" font-weight="750">new</text>
+                <text x="24" y="122" fill="var(--muted)" font-size="16">brief.md, in the</text>
+                <text x="24" y="146" fill="var(--muted)" font-size="16">practitioner's words.</text>
+                <rect x="24" y="180" width="130" height="34" rx="17" fill="var(--signal-soft)"/>
+                <text x="89" y="203" text-anchor="middle" fill="var(--signal)" font-size="14" font-weight="750">gate: the brief</text>
+                <text x="24" y="238" fill="var(--muted)" font-size="13">research, if it asked for any</text>
               </g>
               <g transform="translate(300 116)">
                 <rect width="210" height="260" rx="18" fill="var(--paper)" stroke="var(--line)" stroke-width="2"/>
                 <text x="24" y="50" fill="var(--signal)" font-size="15" font-weight="750" letter-spacing="2">02</text>
-                <text x="24" y="88" fill="var(--ink)" font-size="28" font-weight="750">Dispatch</text>
+                <text x="24" y="88" fill="var(--ink)" font-size="28" font-weight="750">refined</text>
                 <text x="24" y="122" fill="var(--muted)" font-size="16">A bounded builder</text>
-                <text x="24" y="146" fill="var(--muted)" font-size="16">authors in isolation.</text>
+                <text x="24" y="146" fill="var(--muted)" font-size="16">authors a tree.</text>
                 <rect x="24" y="180" width="104" height="34" rx="17" fill="var(--signal-soft)"/>
                 <text x="76" y="203" text-anchor="middle" fill="var(--signal)" font-size="14" font-weight="750">draft PR</text>
-                <text x="24" y="238" fill="var(--muted)" font-size="13">builder gets a bounded task</text>
+                <text x="24" y="238" fill="var(--muted)" font-size="13">gate: the delivery, four rounds at most</text>
               </g>
               <g transform="translate(560 116)">
                 <rect width="210" height="260" rx="18" fill="var(--paper)" stroke="var(--line)" stroke-width="2"/>
                 <text x="24" y="50" fill="var(--signal)" font-size="15" font-weight="750" letter-spacing="2">03</text>
-                <text x="24" y="88" fill="var(--ink)" font-size="28" font-weight="750">Evaluate</text>
-                <text x="24" y="122" fill="var(--muted)" font-size="16">A fresh context judges</text>
-                <text x="24" y="146" fill="var(--muted)" font-size="16">the artifact.</text>
+                <text x="24" y="88" fill="var(--ink)" font-size="28" font-weight="750">accepted</text>
+                <text x="24" y="122" fill="var(--muted)" font-size="16">A passing verdict took</text>
+                <text x="24" y="146" fill="var(--muted)" font-size="16">the PR out of draft.</text>
                 <rect x="24" y="180" width="86" height="34" rx="17" fill="var(--signal-soft)"/>
                 <text x="67" y="203" text-anchor="middle" fill="var(--signal)" font-size="14" font-weight="750">verdict</text>
-                <text x="24" y="238" fill="var(--muted)" font-size="13">FAIL revises · PASS returns</text>
+                <text x="24" y="238" fill="var(--muted)" font-size="13">gate: the record; merging is his</text>
               </g>
               <g transform="translate(820 116)">
                 <rect width="210" height="260" rx="18" fill="var(--accent)" stroke="var(--accent)" stroke-width="2"/>
                 <text x="24" y="50" fill="var(--accent-ink)" opacity=".78" font-size="15" font-weight="750" letter-spacing="2">04</text>
-                <text x="24" y="88" fill="var(--accent-ink)" font-size="28" font-weight="750">Close</text>
-                <text x="24" y="122" fill="var(--accent-ink)" opacity=".86" font-size="16">The practitioner rules</text>
-                <text x="24" y="146" fill="var(--accent-ink)" opacity=".86" font-size="16">the item finished.</text>
+                <text x="24" y="88" fill="var(--accent-ink)" font-size="28" font-weight="750">closed</text>
+                <text x="24" y="122" fill="var(--accent-ink)" opacity=".86" font-size="16">On the practitioner's</text>
+                <text x="24" y="146" fill="var(--accent-ink)" opacity=".86" font-size="16">word, and only his.</text>
                 <rect x="24" y="180" width="100" height="34" rx="17" fill="var(--accent-ink)"/>
                 <text x="74" y="203" text-anchor="middle" fill="var(--accent)" font-size="14" font-weight="750">archived</text>
                 <text x="24" y="238" fill="var(--accent-ink)" opacity=".78" font-size="13">gone from current views</text>
               </g>
             </g>
           </svg>
-          <figcaption class="diagram-note">The item can be parked again while active. A failing verdict leaves the pull request as a draft and returns it for correction. A passing verdict is recorded before the draft is made ready. Acceptance and closure remain the practitioner's decisions.</figcaption>
+          <figcaption class="diagram-note">One word on the brief says how far the chain may run without him. At every gate a rubric he wrote can carry the item on or hold it for his eyes; a verdict with nothing a builder can act on, a question only he can answer, four failed rounds, or the same must-fix twice all stop the item where it is, on the record, and ask him. Nothing here merges a pull request or reads a check. Acceptance, rulings and closure are his.</figcaption>
         </figure>
       </div>
     </section>
@@ -301,15 +300,15 @@
       <div class="wrap">
         <p class="eyebrow">Every harness</p>
         <h2 id="harnesses-heading">Five harnesses, one work surface.</h2>
-        <p class="section-intro">The installer puts the same five conventions where each of them looks, and <code>bin/remit-invoke</code> demonstrates CLI invocation for all five. Open whichever one you feel like this morning: the item on the other side is the same item.</p>
+        <p class="section-intro">The installer puts the same six conventions where each of them looks, and <code>bin/remit-invoke</code> demonstrates CLI invocation for all five. Open whichever one you feel like this morning: the item on the other side is the same item.</p>
         <div class="harness-grid">
           <article class="harness">
             <h3>Claude Code</h3>
-            <p>Hands a bounded task to an isolated sub-agent of its own, or out through the CLI. Either way the dispatch names the model it wants.</p>
+            <p>Every context is raised through the CLI by one script, never through the harness's own sub-agent tool — a shipped hook refuses that, so the registry decides every seat. The conventions land in <code>.claude/skills/</code>.</p>
           </article>
           <article class="harness">
             <h3>Codex</h3>
-            <p>Nothing bespoke: the same five conventions in the path it reads, the same dispatch script, the same draft pull request at the end.</p>
+            <p>Nothing bespoke: the same six conventions in the path it reads, the same seam, the same draft pull request at the end.</p>
           </article>
           <article class="harness">
             <h3>Pi</h3>

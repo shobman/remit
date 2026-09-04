@@ -40,7 +40,7 @@ false on its own — a count, a version, a date, a status — belongs in no inst
 
 ```sh
 sh "$(git rev-parse --show-toplevel)/bin/remit" \
-   new|resume|park|stop|close|list|report|rules|setup|migrate ...
+   new|resume|answer|park|stop|close|list|report|rules|setup|migrate|version ...
 ```
 
 Run through a POSIX shell — on Windows, Git Bash's `sh` — from the primary worktree only.

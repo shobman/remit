@@ -5,11 +5,11 @@ judges it, and when it leaves your attention.
 
 AI can produce work faster than you can judge it. remit makes restraint part of the work: every
 admitted outcome gets a durable place, its boundary travels between sessions, and the decisions
-stay with the person who owns their consequences. It is two POSIX scripts and five conventions —
+stay with the person who owns their consequences. It is three POSIX scripts and six conventions —
 no service, no database, no daemon. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.3.10. Early, and in use.**
+**Version 0.3.11. Early, and in use.**
 
 ## One piece of work, start to finish
 
@@ -31,71 +31,93 @@ anything on his behalf. That is the whole shape of remit: an observation became 
 record waited without urgency, work began on the owner's word, one bounded builder built it, a
 fresh context judged it, and the owner decided the ending.
 
-## Work is captured without starting
+## Work is admitted in your words
 
-You say: **"I have an idea I want to add to our backlog."** The capture convention settles a short
-brief with you — title, outcome, boundary, stated constraints — and `bin/remit new` writes it under
-`.remit/` as a parked item, commits that change, and pushes when a remote is configured.
+You say: **"I have an idea I want to add to our backlog."** The admission convention settles a
+short brief with you — a title, the outcome, the boundary, what would count as proof — and
+`bin/remit new` files it under `.remit/work-items/<slug>/` exactly as you said it, commits that
+change, and pushes when a remote is configured. Nothing but you ever writes a brief: no context
+raised by remit edits it, proposes a rewrite of it, or fills in what you left out.
 
 A work item is an ordinary folder:
 
 ```text
-.remit/<slug>/
-|-- brief.md
-|-- evaluation.md     # when the item has been evaluated
-`-- ...               # decisions and evidence kept with this item
+.remit/work-items/<slug>/
+|-- brief.md        # your words, under a script-owned header: stage, attention, until
+|-- log.md          # append-only: every verdict, delivery, stop, escalation and ruling
+|-- research.md     # when the brief asked for research; machine-authored, judged like a build
+`-- runs/           # kept output — test runs, fetch manifests, the proof a reader needs
 ```
 
-The brief records the outcome, boundary, state and history; Git records every state change.
-Sessions can end and models can change without becoming the memory for the work.
+Git records every change to it. Sessions can end and models can change without becoming the
+memory for the work; closed items are archived whole to `.remit/work-items/.archive/`, out of
+every current view. Where the record lives is yours too: by default in the repository, or — with
+one local setting — in a records repository of your own, so nothing work-shaped reaches a project
+remote. A shadow install keeps remit itself out of the project's history entirely.
 
-Admitting an item, activating or parking it, opening a phase, accepting a result and deciding
-closure are yours alone; AI may observe that more seems needed, but an observation is not scope.
-Each phase you open narrows the admitted outcome and stays inside it — the item remains one item.
+## Work moves through four stages, and stops when it should
+
+An item is born active at **`new`**. `bin/remit resume <slug> --until <stage>` runs the chain —
+research if the brief asked for it, then evaluate, build, deliver, evaluate, close — as far as the
+stage you named and no further. Each step is a fresh context raised through `bin/remit-invoke`,
+briefed with the item's authority and nothing else, on a harness and model your registry seats
+it on. The one word `until` is how far the work may travel without you.
+
+| Into | What the gate judges | Who authors the fix |
+|---|---|---|
+| `refined` | the brief — and the research, when there is one | the brief: you. The research: a fresh researcher |
+| `accepted` | a delivery: a builder's tree, turned into a draft pull request by the mechanism | a fresh builder, four rounds at most |
+| `closed` | the record — every verdict and note on it | a fresh builder, if anything |
+
+A gate is a fresh context that did not author the work, judging it against the item's own brief
+and against **rubrics you wrote** in `.remit/rules/<gate>.md`. A rubric can carry the item past
+the gate whatever `until` said (`promote`), hold it for your eyes whatever else was cited
+(`hold`), name the standard a delivery missed (`fix`), or dispose of a finding (`accept`). The
+rubrics are yours alone, written through a retro; remit ships a few and migrates only its own on
+upgrade. A must-fix goes back to a fresh author with the finding and nothing else. The loop has
+stops, and every stop is a line on the record: four failed rounds, the same must-fix twice, a
+verdict that failed the work and named nothing a builder could act on, or a question only you
+can answer. An escalation raises nothing and proposes nothing — the verdicts above it are the
+analysis, and what the brief needs is worked out by you from the record.
+
+When an evaluator's judgement is that a decision is yours — which of two shapes, whether a thing is
+in scope — it asks, and the item stops with the questions numbered on the record.
+`bin/remit answer <slug> <n> "<your words>"` files your answer verbatim under `## Rulings` in the
+brief, beside the question, and resumes the chain where it stopped; every later context is told a
+ruling is settled ground. A conductor you have elevated to judge in your absence may answer with
+`--conductor`, and the line and the record say so.
+
+Merging a pull request is your decision and so is closing an item: nothing in the chain merges
+anything, reads a check, or accepts anything on your behalf. Closure is final, and it is an
+attention boundary — not acceptance, not a merge, not proof that the work succeeded.
 
 ## Work resumes in a fresh session
 
-Weeks later, in a new session, in the AI harness of your choice, ask for the state of play. Active
+Weeks later, in a new session, in the harness of your choice, ask for the state of play. Active
 work is listed without ranking; parked work appears only when you ask for it. Rehydrating an item
 reads its files, their authoritative links and the current code. There is no previous conversation
 to reconstruct and none is invented: where the record says nothing, the agent says so.
 
-## Work is dispatched to bounded builders
+## Work is built and judged by bounded contexts
 
-One bounded task goes to one isolated builder — research, documentation, wireframing, coding —
-carrying the outcome, boundary, constraints and proof in its brief. The builder authors files and
-runs no Git commands; `bin/remit` turns the tree it leaves into a draft pull request.
-Builders work in separate worktrees, so parallel work does not collide and the coordinator stays
-available to you while they run. Parallel work saves elapsed time. It grants no wider authority.
+One bounded task goes to one isolated context — research, build, evaluate — carrying the
+outcome, boundary, constraints and proof in its briefing. A builder authors files in its own
+worktree and runs no Git commands; `bin/remit` turns the tree it leaves into a draft pull request,
+naming in the commit the model that actually served the run. A failing verdict leaves the pull
+request in draft; a passing verdict is recorded with the item before the draft becomes ready.
 
-## Work is evaluated before it reaches you
-
-Evaluation happens by default: a fresh context that did not author the work judges it against the
-item's own brief, and leaves every repair to the loop that follows. The gate prefers a different
-model family, because a model favours its own output and a judge from another family decorrelates
-that bias ([Panickssery et al., 2024](https://arxiv.org/abs/2404.13076)). Agreement is never
-verification, so tests, linters and your own reading still carry evidence a second model cannot
-supply.
-
-A failing verdict leaves the pull request in draft; a passing verdict is recorded with the item
-before the draft becomes ready. Acceptance and merging stay with you in both cases.
-
-## Work closes on your word
-
-An item closes only on your instruction, and delivered and abandoned work can both close. The
-archive keeps the brief, decisions, evidence, evaluation record and confirmed delivery links;
-normal listings do not read it back. Closure is final, and it is an attention boundary — not
-acceptance, not a merge, not proof that the work succeeded.
+Seat the judge on a different model family from the builder — the registry lets one harness build
+and another judge — because a model favours its own output and a judge from another family
+decorrelates that bias
+([Panickssery et al., 2024](https://arxiv.org/abs/2404.13076)). Agreement is never verification, so
+tests, linters and your own reading still carry evidence a second model cannot supply — and the
+proof a builder ran is kept in `runs/`, where the next gate can read it.
 
 ## Let code carry the result
 
 The work item helps you get the work done. Once written, the code is the law and remains malleable:
 closing the item removes no constraint from the product and adds no document that fights later
 change. A rule that must survive belongs in code, a test, a name or a comment.
-
-Coming, and not yet shipped: the four stages `new`, `refined`, `accepted` and `closed`, one word
-saying how far an item may travel without you, and rubrics you write that carry work further or
-hold it for your eyes.
 
 ## Install remit
 
@@ -112,11 +134,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.3.10` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.3.11` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.10 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.11 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:
@@ -137,8 +159,9 @@ The installer adds:
 | Path | Purpose |
 |---|---|
 | `bin/remit` | Lists items and performs state changes. |
-| `bin/remit-invoke` | Raises a fresh context in a named harness and returns its text. |
-| `.claude/skills/`, `.agents/skills/`, `.pi/skills/` | The five conventions, in the discovery path each harness reads — see [Use your harness](#use-your-harness). |
+| `bin/remit-invoke` | The seam: raises a fresh context in a registered seat and returns its text. The only thing in remit that raises one. |
+| `bin/remit-exposure` | Counts the words you typed and the words said back, so attention can be read as a number. |
+| `.claude/skills/`, `.agents/skills/`, `.pi/skills/` | The six conventions — admit, resume, close, status, retro, exposure — in the discovery path each harness reads; see [Use your harness](#use-your-harness). |
 | `AGENTS.md` | One marker-delimited, shared section, without replacing existing content. |
 | `CONTRIBUTING.md` | How this repository takes a contribution — the file states that, and nothing here repeats it. The one file remit manages: a local edit to it is restored on the next upgrade, while a `CONTRIBUTING.md` the repository already had is not remit's and is kept. |
 | `<git>/hooks/pre-push` | The guard, when no hook exists; on re-run remit's own hook is updated or reported unchanged, and any other hook or custom hooks path is kept and reported. |
@@ -157,9 +180,9 @@ one it reads, to carry your seats forward and report drift against them.
 
 ## Use your harness
 
-remit is built for five harnesses, one to each heading below. The installer places the five
-conventions in the discovery path each one reads, and `bin/remit-invoke` demonstrates CLI
-invocation for all five. Change the harness without changing the item's identity, boundary,
+remit is built for five harnesses, one to each heading below. The installer places the six
+conventions in the discovery path each one reads, and `bin/remit-invoke` raises a context on
+any of the five. Change the harness without changing the item's identity, boundary,
 decisions, state or history; where one lacks an isolation or pull-request capability, the agent
 reports the absence and stops at what that harness can actually do.
 
@@ -176,8 +199,9 @@ know, and what its own command or local source said when I read it on 21 August 
 
 ### Claude Code
 
-Conventions at `.claude/skills/`. A dispatch goes either to the CLI or to a native sub-agent, and a
-native sub-agent dispatch must name its model. The CLI does not expose an account catalogue: its
+Conventions at `.claude/skills/`. Every context is raised through the CLI by `bin/remit-invoke`,
+never through Claude Code's own sub-agent tool — a shipped hook refuses that, so the registry
+decides every seat. The CLI does not expose an account catalogue: its
 top-level help and full command list offer no model query, `claude --help` documents only the
 selectors `fable`, `opus`, `sonnet` and the full-name example `claude-fable-5`, and the local
 account cache adds no list of what the account can use. So there is no honest list to print here.
