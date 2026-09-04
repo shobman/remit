@@ -72,6 +72,16 @@ argument, and its printed result is the truth of what happened.
   sub-agent tool, whatever this harness offers; a hook enforces this where the harness has
   one. Run a raise as a backgrounded task of your own harness with a generous explicit
   timeout — blocking the conversation on one is the failure.
+- A chain's end is its only event, and the backgrounded task already reports it. Nothing
+  watches the record while a chain runs: no monitor, tail or poll on `log.md` or the run
+  directory — every line it emits wakes you for a turn to learn that a commit happened. Five
+  chains are five backgrounded tasks and five completions, each at the one moment that
+  needs you.
+- When a chain ends at an `asked:` stop and he may have walked away, reach him where he is,
+  by whatever this harness has for that (Claude Code: `PushNotification`) — one line, the
+  item and the first question, nothing else. That is the one stop worth pulling him back
+  for; every other completion waits in the transcript. Where he has elevated you to judge
+  and the judgement is yours, answer with `--conductor` and do not reach him.
 - A fresh context judges AI-produced work before he is asked to accept it; only he skips
   that. Your own reading of work is never an independent judgement of it.
 - `git` and `gh` in a delivery path are the state machine's and the seam's, never yours and

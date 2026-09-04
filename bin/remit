@@ -727,9 +727,13 @@
 #   - rubric hold: <id>: <evidence>
 #   - rubric fix: <id>: <evidence>
 #
-# `close` seals every `- finding <n>:` that has no `- finding <n> disposition:`
-# as `pre-authorised`. That is what the closure did — never a ruling the
-# practitioner made on each one.
+# `close` seals every STANDING `- finding <n>:` that has no `- finding <n>
+# disposition:` as `pre-authorised` — standing meaning the last verdict at its
+# gate still carried it. A finding an earlier round raised and the gate's last
+# verdict does not carry was cleared by that round, and is not sealed (ruled
+# 2026-09-04, after a closure sealed 140 findings where 29 stood). That is what
+# the closure did — never a ruling the practitioner made on each one — and the
+# verb says the number.
 #
 # ==============================================================================
 # THE DELIVERY SEAM
@@ -4725,6 +4729,19 @@ re-run, and no second round was run."
 # the folder and leaves the stage exactly as it was, and a brief that depends on
 # that item is NOT let through by its archiving. Only work that went through the
 # gate reads `closed`.
+#
+# The one line the closing verb says about the seal, so that closing on his word
+# is informed by a number he can read rather than a scroll he cannot.
+SEALED=0
+seal_line() {
+	if [ "$SEALED" = 0 ]; then
+		printf 'No finding was standing.'
+	elif [ "$SEALED" = 1 ]; then
+		printf '1 finding standing at the last verdict, sealed pre-authorised — log.md names it.'
+	else
+		printf '%s findings standing at the last verdict, sealed pre-authorised — log.md names them.' "$SEALED"
+	fi
+}
 do_close() { # $1 authority for this closure, in words  $2 delivery text  $3 `closed` to stamp it
 	_auth=$1 _delivery=$2 _stamp=${3:-}
 	log_ensure
@@ -4732,20 +4749,38 @@ do_close() { # $1 authority for this closure, in words  $2 delivery text  $3 `cl
 	# leaves is what the move carries into the archive, and what it says is part
 	# of the entry composed below.
 	runs_sweep
+	# THE STANDING SET, not every round's. A judge restates a standing finding
+	# each round under a new number, and a finding a later round cleared is
+	# still on the record under its old one — so sealing every undisposed line
+	# sealed 140 findings on mukfork, 2026-09-04, where the final verdicts held
+	# 29. What stands is what the LAST verdict at each gate still carried: a
+	# finding an earlier round raised and that verdict does not carry was
+	# cleared, and is not his to have pre-authorised. A finding outside any
+	# verdict entry stands as written.
 	nocr "$log" | awk '
+		/^## verdict — evaluate — into / {
+			split($0, f, " — "); g = f[3]; sub(/^into /, "", g)
+			gate = g
+			for (k in seen) if (gateof[k] == g) delete seen[k]
+			next
+		}
+		/^## / { gate = ""; next }
 		/^- finding [0-9]+: / {
 			n = $3
 			sub(/:$/, "", n)
 			text[n] = substr($0, index($0, ": ") + 2)
-			order[++c] = n
+			gateof[n] = gate
+			seen[n] = 1
+			if (!(n in known)) { order[++c] = n; known[n] = 1 }
 		}
 		/^- finding [0-9]+ disposition: / { d[$3] = 1 }
 		END {
 			for (i = 1; i <= c; i++)
-				if (!(order[i] in d))
+				if ((order[i] in seen) && !(order[i] in d))
 					print "- finding " order[i] " disposition: pre-authorised — " text[order[i]]
 		}
 	' >"$WORK/seals"
+	SEALED=$(grep -c '^- finding ' "$WORK/seals" 2>/dev/null || printf 0)
 	{
 		printf -- '- authority: %s\n\n' "$_auth"
 		if [ -n "$_delivery" ]; then
@@ -4753,12 +4788,14 @@ do_close() { # $1 authority for this closure, in words  $2 delivery text  $3 `cl
 			printf '%s\n\n' "$_delivery"
 		fi
 		if [ -s "$WORK/seals" ]; then
-			printf 'Every finding that had no disposition is sealed by this closure as\n'
-			printf 'pre-authorised. That is what the closure did — never a ruling the\n'
-			printf 'practitioner made on each one.\n\n'
+			printf '%s standing finding(s) — those the last verdict at each gate still\n' "$SEALED"
+			printf 'carried, with no disposition — sealed by this closure as pre-authorised.\n'
+			printf 'That is what the closure did — never a ruling the practitioner made on\n'
+			printf 'each one. A finding an earlier round raised and the last verdict did not\n'
+			printf 'carry was cleared, and is not sealed.\n\n'
 			cat "$WORK/seals"
 		else
-			printf 'No finding was without a disposition.\n'
+			printf 'No finding was standing without a disposition.\n'
 		fi
 		printf '\n'
 		runs_report
@@ -5481,7 +5518,7 @@ close)
 	closing_stage=$(hdr "$brief" Stage)
 	do_close "the practitioner's word" "$delivery" ''
 	[ -n "$CRASH_NOTE" ] && say "crashed: $CRASH_NOTE. The marker is gone — archiving wiped it."
-	say "closed .remit/work-items/$slug — archived whole to .remit/work-items/.archive/$slug, at stage $closing_stage."
+	say "closed .remit/work-items/$slug — archived whole to .remit/work-items/.archive/$slug, at stage $closing_stage. $(seal_line)"
 	commit_and_push "remit: close $slug" ".remit/work-items/$slug" ".remit/work-items/.archive/$slug"
 	exit $?
 	;;
@@ -6405,7 +6442,7 @@ in the stage it is in, for the practitioner, whatever else was cited there."
 			fi
 			do_close "$_lic. Every finding nobody ruled on is sealed by this closure as pre-authorised, and never as a ruling made on each one" \
 				"$_del" closed
-			say "closed .remit/work-items/$slug — archived whole to .remit/work-items/.archive/$slug."
+			say "closed .remit/work-items/$slug — archived whole to .remit/work-items/.archive/$slug. $(seal_line)"
 			commit_step "remit: close $slug ($_licshort)" \
 				".remit/work-items/$slug" ".remit/work-items/.archive/$slug"
 			marker_release
