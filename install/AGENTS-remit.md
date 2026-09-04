@@ -105,7 +105,13 @@ itself, so the objection is to the wording of the brief, and no further building
 **His options.** Only the real ones — what the state machine can actually do from this stop,
 which `bin/remit`'s header fixes. From an escalation those are: resume it as it stands, resume
 it `--until` a stop he names, amend the brief in his own hand and resume (which puts the stage
-back to new), park it, or close it.
+back to new), park it, or close it. From an `asked:` stop, one more: answer a question the
+record carries — relay the numbered questions verbatim, and file his answer with
+`remit answer <slug> <n> "<his words>"`, his words exactly, which resumes the chain where it
+stopped without putting the stage back to new. Where he has elevated you to judge in his
+absence and the judgement is yours, the same verb with `--conductor`: the ruling is filed as
+yours and provisional, the record says so, and it is his to supersede when he returns. Never
+file your own judgement as his word.
 An option is never work you thought of. And ZERO options is a valid answer — ruled by the
 practitioner, 2026-09-02: where the record and the verbs genuinely offer nothing, this
 section and the recommendation are simply ABSENT — not narrated as empty, not apologised

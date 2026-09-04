@@ -1779,7 +1779,8 @@ role_returns() {
 		printf 'parses; every other line is carried into the record verbatim.\n\n'
 		printf '  Verdict: PASS | PASS WITH FINDINGS | FAIL     (required; the first wins)\n'
 		printf '  Must-fix: <text>                              (zero or more)\n'
-		printf '  Finding: <text>                               (zero or more)\n\n'
+		printf '  Finding: <text>                               (zero or more)\n'
+		printf '  Ask: <one question>                           (zero to four, in a FAIL only)\n\n'
 		printf 'PASS means everything holds and nothing is worth recording. PASS WITH\n'
 		printf 'FINDINGS means the same, with findings recorded. FAIL means a must-fix\n'
 		printf 'stands — and a crossed boundary, a proof that does not hold, or a defect\n'
@@ -1787,7 +1788,17 @@ role_returns() {
 		printf 'fresh author can act on. A must-fix needs no rubric; a `fix:` citation is\n'
 		printf 'one way to raise one, not the only way. A FAIL that carries no must-fix\n'
 		printf 'sends nobody anything: the item stops for the practitioner with your\n'
-		printf 'findings, and no author is raised on it.\n'
+		printf 'findings, and no author is raised on it.\n\n'
+		printf 'ASK ONLY FOR A DECISION THAT IS HIS. Where the work cannot proceed because\n'
+		printf 'the authority is silent on something no source can settle — which of two\n'
+		printf 'shapes, which resource, whether a thing is in scope — write ONE `Ask:` line\n'
+		printf 'directly under the Finding: or Must-fix: it descends from, naming the\n'
+		printf 'decision it unblocks. An `Ask:` that follows no finding is prose. Any\n'
+		printf 'question stops the item for the practitioner at once, whatever else this\n'
+		printf 'verdict carries, and his answer is filed under `## Rulings` in the\n'
+		printf 'authority. A question the record could answer, or one the research could\n'
+		printf 'establish, is not his and is not asked; four is the most one verdict\n'
+		printf 'carries.\n'
 		;;
 	esac
 }
@@ -1810,6 +1821,17 @@ role_returns() {
 		printf 'This is the whole of what you were given. It is not a summary of something\n'
 		printf 'else and there is nothing behind it. It came from `%s`; that path is TEXT,\n' "$AUTHORITY"
 		printf 'printed so you can name it, and there is no file for you to open.\n\n'
+		printf 'A `## Rulings` section in it, where there is one, is SETTLED GROUND: each\n'
+		printf 'line is a question an earlier evaluator asked and the answer given. Where\n'
+		printf 'one question carries more than one line, the LAST line stands. A line that\n'
+		printf 'says `ruled:` is the practitioner'\''s word: cite it as you would a source —\n'
+		printf '"ruled <date>" — build on it, and never re-open, re-derive or second-guess\n'
+		printf 'it; a ruling that is wrong is his to change, not yours to find. A line that\n'
+		printf 'says `ruled by the conductor, provisionally:` was decided on his behalf under\n'
+		printf 'an elevation he gave, and he has not yet reviewed it: build on it exactly\n'
+		printf 'the same — it is the decision in force — but where your own evidence shows\n'
+		printf 'it wrong, say so as a `Finding:` naming the ruling, and do not act against\n'
+		printf 'it. It is his to supersede, or the conductor'\''s; never yours.\n\n'
 		tr -d '\015' <"$AUTHORITY"
 	fi
 	if [ -n "$MUSTFIX" ] && [ -f "$MUSTFIX" ] && [ -s "$MUSTFIX" ]; then

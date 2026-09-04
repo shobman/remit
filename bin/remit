@@ -212,7 +212,10 @@
 # `depends on: <the work item the line names that does not satisfy it, or what it
 # left unreadable>`, `<n> fails`, `same must-fix twice`, `FAIL with nothing to act
 # on` (the gate failed the work and attached that to no must-fix — findings for the
-# practitioner, nothing for a builder; THE THREE GATES below), `cannot act: <what>`,
+# practitioner, nothing for a builder; THE THREE GATES below), `asked: <n>
+# question(s)` (the evaluator wrote `Ask:` lines — decisions that are his; the
+# questions are numbered on the entry and `answer` is the verb; THE THREE GATES
+# below), `cannot act: <what>`,
 # `stalled: <what the seam said>` (a raised CLI stopped writing anything and the
 # seam ended it — THE IDLE BOUND in `bin/remit-invoke`'s header), `authority changed`
 # (it changed while the chain was running — THE AUTHORITY LOCK below), `stopped
@@ -500,6 +503,14 @@
 #                       on: no round runs on it and the item stops, ACTIVE, for
 #                       the practitioner. THE THREE GATES below)
 #         Finding: <text>                 (zero or more)
+#         Ask: <text>                     (zero to four, read only in a FAIL and
+#                       only following a `Finding:`, `Must-fix:`, `fix:` or
+#                       another `Ask:` line — a question descends from a finding
+#                       or it is prose. One question, naming the decision it
+#                       unblocks. ANY question stops the item for the
+#                       practitioner, whatever else the verdict carries: a
+#                       decision that is his is not something a fresh author can
+#                       be sent back to discharge. THE THREE GATES below.)
 #         Back to: research               (zero or one, and ONLY at the gate into
 #                       `refined` where the authority carries a `**Research:**`
 #                       line. It says the must-fix is against `research.md` — the
@@ -878,6 +889,30 @@
 #     carries the reason, the round, the repeat count and the authority; the
 #     verdicts above it are the analysis; the brief is his to amend, from the
 #     record, with the conductor answering what he asks of it.
+#   * AN EVALUATOR MAY ASK. Ruled by the practitioner, 2026-09-04, from
+#     lake-infra: what unblocked a build that six escalations could not was
+#     "four narrow questions with four one-line answers". An `Ask:` line in a
+#     FAIL verdict stops the item for him under `asked: <n> question(s)`, the
+#     questions numbered on the entry, and nothing is raised — at every gate,
+#     whatever else the verdict carries. His answer comes back through `answer`:
+#     filed VERBATIM under `## Rulings` in the authority beside the question it
+#     answers, recorded as a `## ruling` with the new digest, and the chain
+#     resumes AT THE STAGE IT IS AT. An answer is a ruling, not an amendment —
+#     a hand amendment resets the stage to `new` because the brief's meaning
+#     changed; an answer adds a decision the brief was missing, and re-judging
+#     everything before it would cost the whole chain again. A question he
+#     leaves unanswered blocks nothing: a resume proceeds, and what is still
+#     unestablished is reported as such. The authority's `## Rulings` are
+#     SETTLED GROUND to every later raise — the seam says so in every briefing.
+#     WHOSE RULING is on the line and on the record, ruled the same day for the
+#     conductors he runs elevated: `--conductor` files the words as the
+#     conductor's, PROVISIONAL, built on by later raises and flagged where
+#     found wrong, never defended as his. A question may be answered again by
+#     anyone — the conductor superseding its own ruling when it loops, or his
+#     where it judges that right, and he superseding anything, always — the
+#     latest line stands, nothing above it is edited, and the record names what
+#     each answer superseded. That the override is VISIBLE is what makes it
+#     safe to allow; a ruling nobody could tell from his would not be.
 #   * A FAIL WITH NOTHING TO ACT ON — no `Must-fix:` line and no applied `fix:`
 #     citation — stops for him at EVERY gate, the same way: the item stays where
 #     it is, ACTIVE, the findings are on the record, and no round is run on an
@@ -1210,6 +1245,22 @@ usage:
   remit migrate          one-time: .remit/<slug>/ -> .remit/work-items/<slug>/,
                          evaluation.md -> log.md, **State:** -> **Attention:** +
                          **Stage:**, root field-reports/ -> .remit/field-reports/
+  remit answer <slug> <n> "<words>" [--conductor]
+                         answer question <n> of the item's last `asked:` stop.
+                         The words are appended VERBATIM under `## Rulings` in
+                         the authority, beside the question, as a RULING — not an
+                         amendment: the stage does not go back to `new`. The
+                         record carries the ruling and the new digest, and the
+                         chain then resumes exactly as `resume` would, at the
+                         stage it is at. Without --conductor the words are the
+                         practitioner's and the ruling is settled; with it they
+                         are the conductor's, under the elevation he gave it,
+                         and the line and the record say so — provisional, and
+                         his to supersede. A question may be answered again by
+                         anyone: the latest line stands and the record names
+                         what it superseded. Refused (exit 2, nothing written)
+                         only when the record carries no open question by that
+                         number.
   remit version          `remit <version>`, from .remit/.install/manifest — the
                          one place the installer wrote it. A copy nobody
                          installed says so and exits 2. `--version` is the same.
@@ -1331,6 +1382,30 @@ resume)
 	if [ "$want_park" = yes ] && [ -z "$want_until" ]; then
 		die "--park at a resume attaches to the --until beside it. To park this item where it is, run: $ME park $slug"
 	fi
+	;;
+answer)
+	# `answer <slug> <n> "<words>" [--conductor]` — the question number is the
+	# record's, the words are filed verbatim. Without the flag they are HIS and
+	# the ruling is settled; with it they are the conductor's, under the standing
+	# elevation he gave it, and the ruling is provisional and says so. Both are
+	# checked against the record before anything is written, in `record_answer`.
+	[ $# -ge 3 ] || usage
+	slug=$1
+	answer_n=$2
+	answer_text=$3
+	shift 3
+	answer_by=practitioner
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--conductor) answer_by=conductor; shift ;;
+		*) usage ;;
+		esac
+	done
+	check_slug "$slug"
+	case "$answer_n" in
+	'' | *[!0-9]* | 0*) die "the question is named by its number on the record — not '$answer_n'" ;;
+	esac
+	[ -n "$(printf '%s' "$answer_text" | tr -d '[:space:]')" ] || die "an answer is his words, and there are none here"
 	;;
 park | stop | close)
 	[ $# -eq 1 ] || usage
@@ -4546,6 +4621,34 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 		# the evaluator's own briefing promises it for a finding it leaves with
 		# no disposition. Every gate, whoever the author is: an empty must-fix
 		# has nobody to go to anywhere.
+		# AN EVALUATOR MAY ASK — THE THREE GATES in this script's header is the
+		# law; this is only the read. Anchored: an `Ask:` counts only after a
+		# `Finding:`, `Must-fix:`, `fix:` or `Ask:` line, and four is the bound.
+		_asked=$(nocr "$WORK/verdict" | awk '
+			/^(Finding|Must-fix): / { anchored = 1; next }
+			/^fix: / { anchored = 1; next }
+			/^Ask: / {
+				if (anchored && n < 4) { n++; print "- question " n ": " substr($0, 6) }
+				anchored = 1
+				next
+			}
+			{ anchored = 0 }
+		')
+		if [ -n "$_asked" ]; then
+			_nq=$(printf '%s\n' "$_asked" | grep -c '^- question ')
+			_qs=questions
+			[ "$_nq" = 1 ] && _qs=question
+			LOOP_STOP_DETAIL="asked: $_nq $_qs at the gate into $GATE"
+			LOOP_STOP="asked: $_nq $_qs"
+			LOOP_STOP_NOTE="The gate into \`$GATE\` asked $_nq $_qs. A decision that is the practitioner's
+is not something a fresh author can be sent back to discharge, so no round was run and
+nothing escalated; the findings and any must-fix are on the record above. Answer one
+with \`$ME answer $slug <n> \"<your words>\"\`, and the chain resumes where it is.
+
+$_asked"
+			return 2
+		fi
+
 		if [ -z "$_mf" ]; then
 			LOOP_STOP_DETAIL="FAIL with nothing to act on at the gate into $GATE"
 			LOOP_STOP="FAIL with nothing to act on"
@@ -5090,6 +5193,95 @@ if [ "$cmd" = new ]; then
 	fi
 	[ "$_nrc" = 2 ] && exit 2
 	[ "$_nrc" = 3 ] && PUSH_FAILED=yes
+	cmd=resume
+	want_until=''
+	want_park=no
+fi
+
+# ==============================================================================
+# answer — his words filed as a ruling, then the road resume takes
+# ==============================================================================
+#
+# The law is AN EVALUATOR MAY ASK under THE THREE GATES; this is only its verb.
+# Everything below READS before it writes, so a refusal changes nothing; the one
+# write is the append to the authority and the entry that records it, and then
+# the verb becomes `resume` — the same code, the same stops, the until already
+# on the brief — because an answer that did not move the item would be a
+# ruling nobody acted on.
+record_answer() {
+	[ -f "$brief" ] || die "no work item '$slug' — expected .remit/work-items/$slug/brief.md"
+	[ "$(hdr "$brief" Stage)" = closed ] && die "'$slug' is closed. Closed work has left every view; nothing answers it."
+	[ -f "$log" ] || die "'$slug' has no record, so it carries no question to answer"
+	# The LAST `asked:` stop, and the questions it numbered. Read from the record
+	# and never from memory: the number he gives is the number the entry gave.
+	_ans_block=$(nocr "$log" | awk '
+		/^## stopped — asked: / { inblock = 1; block = ""; next }
+		/^## / { inblock = 0; next }
+		inblock && /^- question [0-9]+: / { block = block $0 "\n" }
+		END { printf "%s", block }
+	')
+	[ -n "$_ans_block" ] || die "'$slug' carries no open question: no \`asked:\` stop is on its record"
+	_ans_q=$(printf '%s' "$_ans_block" | sed -n "s/^- question $answer_n: //p" | sed -n 1p)
+	[ -n "$_ans_q" ] || die "'$slug' carries no question $answer_n — the record numbers $(printf '%s' "$_ans_block" | grep -c '^- question ') at its last stop"
+	# WHOSE RULING STANDS ON THIS QUESTION ALREADY, if any: the last `## ruling`
+	# for this number after the last asked stop, and whether the conductor made
+	# it. NOTHING IS REFUSED FOR HAVING BEEN ANSWERED. Ruled by the practitioner,
+	# 2026-09-04: the conductor may supersede its own ruling when it loops, and
+	# may even override his where it judges that right; his word supersedes
+	# anything, always. Every answer appends, the latest line for a question
+	# stands, and the record shows the sequence and whose each was — which is
+	# the whole of what makes an override safe to allow.
+	_ans_prior=$(nocr "$log" | awk '
+		/^## stopped — asked: / { after = 1; prior = ""; next }
+		after && /^## ruling — Q'"$answer_n"' answered/ {
+			prior = (index($0, "by the conductor") > 0) ? "conductor" : "practitioner"
+		}
+		END { print prior }
+	')
+	_ans_head="ruling — Q$answer_n answered"
+	_ans_mark=''
+	if [ "$answer_by" = conductor ]; then
+		_ans_head="$_ans_head by the conductor, provisionally"
+		_ans_mark=' by the conductor, provisionally'
+	fi
+	case "$_ans_prior" in
+	conductor) _ans_head="$_ans_head, superseding the conductor's ruling" ;;
+	practitioner) _ans_head="$_ans_head, superseding the practitioner's ruling" ;;
+	esac
+	resolve_authority
+	case "$AUTHORITY" in
+	AMBIGUOUS) die "'$slug' names more than one **Current phase:** — the smallest ruling that unsticks this is which one" ;;
+	"DANGLING "*) die "'$slug' points at a phase file that is not there: ${AUTHORITY#DANGLING }" ;;
+	esac
+	[ -f "$AUTHORITY" ] || die "'$slug' has no authority file to carry a ruling"
+	# THE ONE WRITE. A `## Rulings` heading once, at the end; then one line per
+	# answer — the date, the question it answers (the evaluator's words, marked
+	# as asked), whose the ruling is where it is not his, and the words as
+	# given. A later answer to the same question is one more line below it: the
+	# latest stands, and nothing above it is edited. Nothing else in the file
+	# is touched.
+	{
+		nocr "$AUTHORITY" | grep -q '^## Rulings' || printf '\n## Rulings\n'
+		printf '\n- %s — asked: %s — ruled%s: %s\n' "$(now)" "$_ans_q" "$_ans_mark" "$answer_text"
+	} >>"$AUTHORITY" || die "could not write the ruling into $AUTHORITY_REL"
+	resolve_authority
+	{
+		printf -- '- question %s: %s\n' "$answer_n" "$_ans_q"
+		printf -- '- ruled%s: %s\n' "$_ans_mark" "$answer_text"
+		[ "$answer_by" = conductor ] &&
+			printf -- '- by: the conductor, under the standing elevation the practitioner gave it — provisional until he reviews it, and his to supersede\n'
+		[ -n "$_ans_prior" ] &&
+			printf -- '- supersedes: the %s'\''s ruling on this question above; the latest stands\n' "$_ans_prior"
+		printf -- '- filed under `## Rulings` in `%s`, verbatim; the stage is unchanged and the chain resumes where it is\n' "$AUTHORITY_REL"
+		printf '\n'
+		authority_lines
+	} | log_append "$_ans_head — $(now)"
+	commit_step "remit: $slug $_ans_head" ".remit/work-items/$slug"
+	say "ruling: question $answer_n answered${_ans_mark}, filed under \`## Rulings\` in \`$AUTHORITY_REL\`. Resuming."
+	return 0
+}
+if [ "$cmd" = answer ]; then
+	record_answer
 	cmd=resume
 	want_until=''
 	want_park=no
