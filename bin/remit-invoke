@@ -239,6 +239,15 @@
 #                            a raised Windows CLI created a literal, unexpanded
 #                            `%SystemDrive%/ProgramData/...` tree in the
 #                            worktree, which the delivery seam then committed.
+#   USERPROFILE, APPDATA,    Windows only, POINTED AT THIS RAISE'S SCRATCH — the
+#   LOCALAPPDATA             three roots a program writes its profile under.
+#                            Without them (miq, 2026-09-04) Windows' Python
+#                            install manager wrote 167 MB into the worktree and
+#                            two deliveries carried it; NuGet threw before any
+#                            `dotnet` restore. An install now lands in the
+#                            scratch and goes with the run.
+#   PROGRAMDATA, ProgramFiles, Windows only, passed through as the machine's:
+#   ProgramFiles(x86)        roots a program reads and never writes.
 #   the harness's own        so a CLI whose credentials live in the real home
 #   config variable          can still find them under a scratch HOME:
 #                              claude    CLAUDE_CONFIG_DIR   -> <home>/.claude
@@ -942,6 +951,42 @@ fi
 	die "no registry at $SETTINGS — every seat this script raises comes from one the practitioner registered there, and there is no standing default left to fall back on. \`sh bin/remit setup\` proposes one from what is on this host, and \`sh bin/remit setup --write\` saves it"
 [ -s "$SETTINGS" ] || die "the registry $SETTINGS is empty — a registry that registers nothing can raise nothing"
 
+# A SEAT THAT REFUSED IS A FACT ABOUT THE HOST, NOT THE ITEM. miq, 2026-09-04:
+# the evaluate seat ran out of credits and five chains, one after another over
+# forty minutes, each spent a build round delivering into a gate that could not
+# answer, and each escalated on its own. The mark below is written beside the
+# git dir — machine state, never record — when a run FAILS with a signature that
+# names the seat rather than the run: credits, quota, authentication. It carries
+# the harness, the time and the reason. `bin/remit` reads it before a chain
+# raises anything and stops while it is fresh; a run on that harness that
+# completes clears it, and so does `remit setup --write`. ONLY those signatures:
+# a dead execution host or a crashed CLI is one run's failure and marks nothing,
+# or one item's bad hour would stop every other chain on the host.
+REFUSAL_SIGNATURES='out of credits|insufficient credits|quota exceeded|exceeded your quota|not logged in|not authenticated|unauthori[sz]ed|invalid api key|HTTP 401|HTTP 402|HTTP 429|429 Too Many'
+refusal_mark_file() { # -> the mark's path, or nothing where there is no git dir to keep it in
+	_rmf=$(git -C "$(dirname "$SETTINGS")" rev-parse --git-common-dir 2>/dev/null) || return 0
+	[ -n "$_rmf" ] || return 0
+	case "$_rmf" in /*) ;; *) _rmf="$(dirname "$SETTINGS")/$_rmf" ;; esac
+	printf '%s/remit-refused\n' "$_rmf"
+}
+refusal_mark_write() { # $1 harness  $2 reason (one line)
+	_rmp=$(refusal_mark_file)
+	[ -n "$_rmp" ] || return 0
+	_now=$(date +%s 2>/dev/null) || return 0
+	{ [ -f "$_rmp" ] && { grep -v "^$1	" "$_rmp" || :; }; printf '%s\t%s\t%s\n' "$1" "$_now" "$2"; } >"$_rmp.new" 2>/dev/null
+	mv -f "$_rmp.new" "$_rmp" 2>/dev/null
+	return 0
+}
+refusal_mark_clear() { # $1 harness
+	_rmp=$(refusal_mark_file)
+	[ -n "$_rmp" ] && [ -f "$_rmp" ] || return 0
+	# `grep -v` exits 1 when it removed the only line, which is the common case
+	# here and not a failure; the move must not hang on its status.
+	{ grep -v "^$1	" "$_rmp" || :; } >"$_rmp.new" 2>/dev/null
+	mv -f "$_rmp.new" "$_rmp" 2>/dev/null
+	return 0
+}
+
 command -v jq >/dev/null 2>&1 ||
 	die "no 'jq' on PATH — the registry $SETTINGS is JSON and this script reads it with jq. It will not guess at a parse it cannot make; install jq, or nothing here is raised"
 
@@ -1412,7 +1457,7 @@ ENVLIST="$RUNDIR/envlist"
 # across in the spelling that CLI can open.
 REAL_HOME=$(one_namespace "${HOME:-}")
 SCRUB_HOME="$RUNDIR/home"
-mkdir -p "$SCRUB_HOME" || die "cannot create the scratch home under $RUNDIR"
+mkdir -p "$SCRUB_HOME" "$SCRUB_HOME/AppData/Roaming" "$SCRUB_HOME/AppData/Local" || die "cannot create the scratch home under $RUNDIR"
 
 # THE ONE WRITABLE SCRATCH ROOT, and why it is in the worktree rather than beside
 # the run log. A sandboxed seat — codex on Windows runs as a dedicated local
@@ -1567,6 +1612,27 @@ scrub_list() {
 	# about to stage. The block at the top of this file says which incident
 	# this came from.
 	[ -n "${SYSTEMDRIVE:-}" ] && printf 'SYSTEMDRIVE=%s\n' "$SYSTEMDRIVE"
+	# THE WINDOWS PROFILE, POINTED AT THE SCRATCH. miq, 2026-09-04: with
+	# LOCALAPPDATA unset, Windows' Python install manager wrote a 167 MB
+	# distribution relative to the builder's cwd — the worktree — and two
+	# deliveries carried it; with PROGRAMFILES(X86) unset, NuGet's machine-wide
+	# config lookup threw before any `dotnet` restore could start. So on a
+	# Windows host the three profile roots a program writes under go to THIS
+	# RAISE'S SCRATCH, the way HOME already does — an install lands there and
+	# is removed with the run — and the three machine roots a program only reads
+	# pass through as they are. A PATH is not a credential; nothing here widens
+	# what a context can reach, only where it can write without landing in the
+	# tree. Absent on any other host, because absent is what they are there.
+	if [ -n "${SYSTEMROOT:-}" ]; then
+		printf 'USERPROFILE=%s\n' "$SCRUB_HOME"
+		printf 'APPDATA=%s/AppData/Roaming\n' "$SCRUB_HOME"
+		printf 'LOCALAPPDATA=%s/AppData/Local\n' "$SCRUB_HOME"
+		[ -n "${PROGRAMDATA:-}" ] && printf 'PROGRAMDATA=%s\n' "$PROGRAMDATA"
+		[ -n "${PROGRAMFILES:-}" ] && printf 'PROGRAMFILES=%s\n' "$PROGRAMFILES"
+		[ -n "${ProgramFiles:-}" ] && printf 'ProgramFiles=%s\n' "$ProgramFiles"
+		_pf86=$(printenv 'ProgramFiles(x86)' 2>/dev/null || printenv 'PROGRAMFILES(X86)' 2>/dev/null)
+		[ -n "$_pf86" ] && printf 'ProgramFiles(x86)=%s\n' "$_pf86"
+	fi
 	# The harness's own config variable — a PATH to its configuration, never a
 	# credential. Where the coordinator already sets one, that value is what is
 	# passed; otherwise it is computed from the coordinator's real home.
@@ -1704,8 +1770,23 @@ runs_section() {
 	evaluate)
 		printf 'The output kept by the contexts that worked on this item is in\n\n'
 		printf '  %s\n\n' "$RUNS"
-		printf 'That is where a proof somebody claims to have run is either legible or\n'
-		printf 'absent. READ it. You write nothing there and you remove nothing from it.\n'
+		# AT THE GATE INTO `refined` NOTHING HAS BEEN BUILT. miq, 2026-09-04: two
+		# gate-1 evaluators went looking for a delivery and a proof — "the runs
+		# directory contained only .gitignore" — and judged their absence. The
+		# gate judges the brief, and the research beside it where there is one.
+		case "${RUBRICS##*/}" in
+		refined.md)
+			printf 'AT THIS GATE NOTHING HAS BEEN BUILT AND NOTHING IS EXPECTED TO HAVE BEEN\n'
+			printf 'KEPT THERE. You judge the brief — and the research beside it, where the\n'
+			printf 'brief asked for research — not a delivery, not a proof of one. Where a\n'
+			printf 'research pass kept a fetch manifest there, read it; an empty directory is\n'
+			printf 'the expected state and is not a finding.\n'
+			;;
+		*)
+			printf 'That is where a proof somebody claims to have run is either legible or\n'
+			printf 'absent. READ it. You write nothing there and you remove nothing from it.\n'
+			;;
+		esac
 		[ -n "$RUNS_NAMING" ] && printf '\nWhat a file there is named, so you can tell one run from another: %s\n' "$RUNS_NAMING"
 		;;
 	esac
@@ -3339,9 +3420,34 @@ if [ -n "$STALLED" ]; then
 	exit 8
 fi
 
+# A DEAD EXECUTION HOST IS NOT A VERDICT. miq, 2026-09-04: two codex evaluate
+# raises exited 0 within seventy seconds, their stderr carrying `code-mode host
+# exited during handshake` three to eight times each, and their text a verdict
+# on a brief neither had read — one a FAIL with an UNRUN finding, the other a
+# `fix: r0` must-fix against the brief. Both went on the record as judgements
+# and stopped their items for the practitioner; both passed on the retry. A
+# run whose own stderr says its tools never came up is a run that did not
+# happen, whatever its exit code, and is reported as the run-level failure it
+# is — which the chain escalates as `cannot act`, and a resume picks up clean.
+# ONE signature, the one seen, matched on the CLI's stderr and nowhere else.
+if [ "$HARNESS_EXIT" -eq 0 ] && [ "$HARNESS" = codex ] &&
+	grep -q 'code-mode host exited during handshake' "$ERRFILE" 2>/dev/null; then
+	HARNESS_EXIT=1
+	final_note="${final_note:+$final_note; }the codex execution host exited during handshake: no tool call could have run, so the returned text is not a verdict and is not returned"
+	say "RUN-LEVEL FAILURE: $CLI exited 0, but its stderr says its execution host exited during handshake — no tool call could have run. Reported as a failed run; the returned text is NOT a verdict and is not returned."
+	write_provenance
+	print_harness_stderr
+	exit 5
+fi
+
 if [ "$HARNESS_EXIT" -ne 0 ]; then
 	write_provenance
 	say "RUN-LEVEL FAILURE: $CLI exited $HARNESS_EXIT. Reported as it happened; nothing substituted, and no text is returned."
+	_refused=$(grep -i -E -m1 "$REFUSAL_SIGNATURES" "$ERRFILE" 2>/dev/null | tr -d '\015' | cut -c1-160)
+	if [ -n "$_refused" ]; then
+		refusal_mark_write "$HARNESS" "$_refused"
+		say "the seat refused, not the run: $_refused — marked on this host, and no chain raises into $HARNESS while the mark is fresh (bin/remit's header, A REFUSED SEAT)."
+	fi
 	print_harness_stderr
 	exit 5
 fi
@@ -3385,6 +3491,7 @@ if [ "$HARNESS" = devin ]; then
 fi
 
 write_provenance
+refusal_mark_clear "$HARNESS"
 
 [ -n "$final_note" ] && say "note: $final_note"
 say "the run's own output stays in $RUNDIR and is not printed — a context's exploration and diff do not reach the coordinator."

@@ -499,9 +499,13 @@
 #         Verdict: PASS | PASS WITH FINDINGS | FAIL      (required, first wins;
 #                       prose after the verdict word is kept, not read)
 #         Must-fix: <text>                (zero or more; a FAIL with none — and no
-#                       applied `fix:` citation — is a FAIL with nothing to act
-#                       on: no round runs on it and the item stops, ACTIVE, for
-#                       the practitioner. THE THREE GATES below)
+#                       applied `fix:` citation — has its `Finding:` lines
+#                       promoted to the must-fix by the mechanism, once, where
+#                       the author is a builder; with no findings either, or
+#                       after a promoted round, it is a FAIL with nothing to act
+#                       on: the item stops, ACTIVE, for the practitioner.
+#                       THE THREE GATES below. Markdown emphasis around any of
+#                       these line shapes is stripped before the line is read.)
 #         Finding: <text>                 (zero or more)
 #         Ask: <text>                     (zero to four, read only in a FAIL and
 #                       only following a `Finding:`, `Must-fix:`, `fix:` or
@@ -917,13 +921,20 @@
 #     latest line stands, nothing above it is edited, and the record names what
 #     each answer superseded. That the override is VISIBLE is what makes it
 #     safe to allow; a ruling nobody could tell from his would not be.
-#   * A FAIL WITH NOTHING TO ACT ON — no `Must-fix:` line and no applied `fix:`
-#     citation — stops for him at EVERY gate, the same way: the item stays where
-#     it is, ACTIVE, the findings are on the record, and no round is run on an
-#     empty must-fix. An evaluator that fails the work and attaches it to
-#     nothing has spoken to a reader and not to a builder; running a builder on
-#     it spends a round on nothing and then stops on `same must-fix twice`,
-#     which names nothing that happened. Field failure, 2026-09-03, mukfork.
+#   * A FAIL'S FINDINGS ARE ITS MUST-FIX WHEN IT NAMES NONE — ONCE. Ruled
+#     2026-09-05 from mukfork's lead-hand day: six findings-only FAILs on two
+#     evaluator seats, after the 0.3.7 wording that asked for a `Must-fix:`
+#     line, every one a defect a builder could have discharged. So where the
+#     author is a builder (gates 2 and 3) and a FAIL carries findings and no
+#     must-fix text, the mechanism promotes the findings to the must-fix, says
+#     so on the record (`## promoted`), and runs one builder round on them.
+#   * A FAIL WITH NOTHING TO ACT ON — no must-fix text, and either no findings
+#     or findings that were already promoted once — stops for him: the item
+#     stays where it is, ACTIVE, the findings on the record, no further round.
+#     At gate 1 a finding on the brief is his and is never promoted. Running a
+#     builder on an EMPTY must-fix spends a round on nothing and then stops on
+#     `same must-fix twice`, which names nothing that happened — the field
+#     failure of 2026-09-03 — and that road stays closed.
 #
 # THE ONE EXCEPTION — `research.md` HAS AN AUTHOR. Ruled by the practitioner,
 # 2026-09-01, after a research pass that ignored its brief passed this gate with
@@ -1843,6 +1854,15 @@ require_title() { # $1 file
 		die "$1 has no '# Title' heading — the header has nowhere to go"
 }
 
+# The pull request's title is the brief's own — the practitioner's words, not
+# the slug. Falls back to the slug where the brief has no heading a raise could
+# be started from, which `require_title` refuses before a chain runs anyway.
+pr_title() {
+	_pt=$(nocr "$brief" | sed -n 's/^# //p' | sed -n 1p)
+	[ -n "$_pt" ] || _pt=$slug
+	printf '%s: %s\n' "$slug" "$_pt"
+}
+
 # Re-emit the whole script-owned header as one block directly under the title.
 # Every existing header line is removed first, so this is idempotent and cannot
 # leave two of anything. An empty value omits the line entirely.
@@ -2090,6 +2110,41 @@ lock_drop() {
 # remote is a durability problem; a marker that could not be untracked is not.
 # So a sweep that goes wrong says so, once, and the record commit still stands.
 MARKER_SWEPT=no
+
+# THE ITEM FOLDER IS RECORD, NOT SCRATCH. Twice now a raised context's tooling
+# has written a toolchain into a work item's folder — 167 MB of Python, 2,737
+# files, on client-telemetry, 2026-09-04 — and `git add -A` on the folder
+# carried every file into the record's commit and onto main, where it stays in
+# history. What an item folder holds is known: `brief.md`, `log.md`,
+# `research.md`, the phase files a brief names (any `*.md` at the top), and
+# `runs/` (kept output). Anything else under it is NOT record: it is left where
+# it is, UNSTAGED — nothing here decides what a stray file is worth, so nothing
+# here deletes it — and the run says what it left and where, once. Applied to
+# the archive the same way, since `close` moves the folder whole.
+record_only() { # $@ the pathspecs about to be committed
+	_ro_left=''
+	for _ro_p in "$@"; do
+		case "$_ro_p" in
+		*/.remit/work-items/* | .remit/work-items/*) ;;
+		*) continue ;;
+		esac
+		for _ro_f in $(git -C "$CIN_ROOT" diff --cached --name-only -- "$_ro_p" 2>/dev/null); do
+			_ro_rel=${_ro_f#"$_ro_p"/}
+			[ "$_ro_rel" = "$_ro_f" ] && continue
+			case "$_ro_rel" in
+			*/*)
+				case "$_ro_rel" in runs/*) continue ;; esac
+				;;
+			*.md | "$marker_name") continue ;;
+			esac
+			git -C "$CIN_ROOT" reset -q -- "$_ro_f" 2>/dev/null
+			_ro_left="${_ro_left:+$_ro_left }$_ro_f"
+		done
+	done
+	[ -n "$_ro_left" ] &&
+		printf '%s: not record, left unstaged — a work item holds brief.md, log.md, research.md, its phase files and runs/, and nothing else: %s\n' "$ME" "$_ro_left" >&2
+	return 0
+}
 markers_untrack() {
 	MARKER_SWEPT=no
 	# Read against HEAD as well as the index: after a rejected push has been
@@ -2185,6 +2240,7 @@ commit_locked() { # $1 message, then every path this change occupies
 	markers_untrack
 	git -C "$CIN_ROOT" add -A -- "$@" "$marker_exclude" ||
 		{ printf '%s: could not stage %s\n' "$ME" "$*" >&2; return 2; }
+	record_only "$@"
 	if git -C "$CIN_ROOT" diff --cached --quiet -- "$@" "$marker_exclude" 2>/dev/null; then
 		# Nothing of THIS change is left to record. A sweep may still have made a
 		# commit of its own, and that one has a remote to reach.
@@ -2318,6 +2374,44 @@ rubrics_dump() {
 	done
 }
 
+# NO REGISTRY, NO RAISE — SAID BEFORE A CHAIN STARTS. miq, 2026-09-04: a fresh
+# install had no `.remit/settings.json`, and nothing in `list`, `migrate` or the
+# install said so; a `resume` would have committed a ruling and then escalated
+# `cannot act: remit-invoke` at the first gate. The seam refuses an absent or
+# empty registry (its header, THE REGISTRY); this asks the same question first,
+# where the answer costs nothing. Only the verbs that RUN A CHAIN ask it: a
+# registry is host configuration, and `list`, `park` and `close` need none.
+registry_check() { # -> dies 2 when no chain could raise anything
+	[ -s "$SETTINGSFILE" ] ||
+		die "no registry at .remit/settings.json — nothing can be raised on this host until one names its seats. \`$ME setup\` reads the host and proposes one; \`$ME setup --write\` saves it."
+	refused_check
+	return 0
+}
+
+# A REFUSED SEAT. `bin/remit-invoke` marks the host — `<git dir>/remit-refused`,
+# one line per harness: name, epoch, the line the CLI said — when a run fails
+# with a signature that names the seat and not the run: out of credits, quota,
+# not authenticated. Its header says which signatures and why only those. This
+# reads the mark before a chain raises anything and REFUSES while a line is
+# fresh, because miq's 2026-09-04 was five chains, one after another, each
+# spending a build round to deliver into an evaluate seat that had already said
+# it could not answer. Fresh is thirty minutes; a completed run on that harness
+# clears its line, `setup --write` clears them all, and so does deleting the
+# file. Nothing is changed by the refusal: the chain never started.
+REFUSED_FRESH=1800
+refused_check() {
+	_rf="$common_dir/remit-refused"
+	[ -f "$_rf" ] || return 0
+	_rnow=$(now_secs)
+	[ -n "$_rnow" ] || return 0
+	while IFS="$TAB" read -r _rh _rt _rr; do
+		case "$_rt" in '' | *[!0-9]*) continue ;; esac
+		_rage=$((_rnow - _rt))
+		[ "$_rage" -lt "$REFUSED_FRESH" ] || continue
+		die "the $_rh seat refused $((_rage / 60)) minute(s) ago on this host — \"$_rr\" — and no chain raises into it while that is fresh (${REFUSED_FRESH}s). Re-seat it with \`$ME setup --write\`, wait, or remove $_rf if the seat is back."
+	done <"$_rf"
+	return 0
+}
 rubrics_check() {
 	_bad=$(rubrics_dump | grep '^!' | head -5)
 	[ -z "$_bad" ] && return 0
@@ -2566,6 +2660,9 @@ marker_field() { # $1 key -> the value, or empty
 mark_step() { # $1 the step
 	[ -f "$marker" ] || return 0
 	marker_write "$1"
+	# Said as well as marked, so a `.out` capture of a resume can be followed
+	# without reading the marker (miq, 2026-09-04: "the stream is sparse").
+	say "step: $1"
 }
 
 # The pid of the raise IN FLIGHT, empty between raises. It is on the marker and
@@ -3508,6 +3605,25 @@ deliver() { # $1 worktree  $2 file holding the builder's returned text
 		DELIVER_ERR="the build changed nothing — an empty stage is not a delivery"
 		return 1
 	fi
+	# THE DELIVERY'S SIZE IS READ BEFORE IT IS COMMITTED, and a delivery past
+	# the ceiling is not a delivery. miq, 2026-09-04: two pull requests carried
+	# 5,533 and 2,758 files — a Python distribution a builder's tool had
+	# installed into the tree — and three evaluators judged the first without
+	# naming it. Files added and bytes staged are counted here from the index,
+	# recorded on the delivery entry, and past REMIT_DELIVERY_FILES (2000) or
+	# REMIT_DELIVERY_MB (100) the delivery stops as `cannot act` with both
+	# numbers, before a commit exists: what a builder authored is never that
+	# large, and what is that large is never what it authored.
+	DELIVERY_FILES=$(git -C "$_wt" diff --cached --name-only --diff-filter=A | wc -l | tr -d ' ')
+	DELIVERY_BYTES=$(git -C "$_wt" diff --cached --name-only --diff-filter=AM -z | (cd "$_wt" && xargs -0 wc -c 2>/dev/null) | awk 'END { print ($1 + 0) }')
+	DELIVERY_MB=$(( (DELIVERY_BYTES + 524288) / 1048576 ))
+	_dfc=${REMIT_DELIVERY_FILES:-2000}
+	_dmc=${REMIT_DELIVERY_MB:-100}
+	if [ "$DELIVERY_FILES" -gt "$_dfc" ] || [ "$DELIVERY_MB" -gt "$_dmc" ]; then
+		git -C "$_wt" reset -q 2>/dev/null
+		DELIVER_ERR="delivery too large: $DELIVERY_FILES files added, $DELIVERY_MB MB staged — past the ceiling of $_dfc files / $_dmc MB (REMIT_DELIVERY_FILES / REMIT_DELIVERY_MB). Nothing was committed; the tree is as the builder left it at $_wt, for a reader to see what grew"
+		return 1
+	fi
 
 	_model=$(prov model)
 	_session=$(prov session)
@@ -3613,7 +3729,7 @@ deliver() { # $1 worktree  $2 file holding the builder's returned text
 		PR_DRAFT=true
 		delivery_section create >"$WORK/pr-body"
 		if ! out=$(cd "$_wt" && gh pr create --draft --base "$BASE" --head "$_branch" \
-			--title "$slug: delivery from the build role" --body-file "$WORK/pr-body" 2>&1); then
+			--title "$(pr_title)" --body-file "$WORK/pr-body" 2>&1); then
 			DELIVER_ERR="gh pr create failed — committed as $SHA and pushed, but no pull request was opened: $(printf '%s' "$out" | tr '\n' ' ')"
 			return 1
 		fi
@@ -4385,6 +4501,8 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 	# sameness that is really two absences.
 	_prev=''
 	_have_prev=no
+	_promoted_prev=no
+	_seen_mf=''
 	: >"$WORK/mustfix"
 	while :; do
 		chain_intact || { LOOP_STOP="authority changed"; return 1; }
@@ -4454,8 +4572,10 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 				LOOP_STOP="cannot act: $DELIVER_ERR"
 				return 1
 			fi
-			printf 'Commit `%s` on `work/%s`%s\n' "$SHA" "$slug" "${PR_URL:+, pull request $PR_URL}" |
-				log_append "delivery — ${PR_URL:-$SHA} — $(now)"
+			{
+				printf 'Commit `%s` on `work/%s`%s\n\n' "$SHA" "$slug" "${PR_URL:+, pull request $PR_URL}"
+				printf -- '- delivery size: %s file(s) added, %s MB staged\n' "${DELIVERY_FILES:-?}" "${DELIVERY_MB:-?}"
+			} | log_append "delivery — ${PR_URL:-$SHA} — $(now)"
 			commit_step "remit: $slug record delivery $SHA" ".remit/work-items/$slug"
 			if [ "$_drc" = 2 ]; then
 				LOOP_STOP="cannot act: gh"
@@ -4490,6 +4610,16 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 			return 1
 		fi
 		chain_intact || { LOOP_STOP="authority changed"; return 1; }
+		# A LINE WRITTEN IN EMPHASIS IS STILL THE LINE. tombstone-v2, 2026-09-05:
+		# `**Verdict: FAIL**` escalated as `cannot act: verdict` — a person reads
+		# it without difficulty. Markdown emphasis around a parsed line shape —
+		# `*`, `_`, backticks, before the keyword and after the colon or at the
+		# end — is stripped before anything below reads it. The verbatim copy the
+		# record carries is the normalised one, so what was read is what is kept.
+		nocr "$WORK/verdict" | sed \
+			-e 's/^[*_`]\{1,3\}\(Verdict\|Must-fix\|Finding\|Ask\|Back to\|fix\|hold\|promote\|accept\):[*_`]\{0,3\} */\1: /' \
+			-e '/^\(Verdict\|Must-fix\|Finding\|Ask\|Back to\|fix\|hold\|promote\|accept\): /s/[*_`]\{1,3\}$//' \
+			>"$WORK/verdict.plain" && mv "$WORK/verdict.plain" "$WORK/verdict"
 		_v=$(nocr "$WORK/verdict" | sed -n 's/^Verdict: *//p' | sed -n 1p)
 		case "$_v" in
 		FAIL*) V=FAIL ;;
@@ -4653,13 +4783,50 @@ $_asked"
 			return 2
 		fi
 
+		# A FAIL'S FINDINGS ARE ITS MUST-FIX WHEN IT NAMES NONE — once. Ruled
+		# 2026-09-05 from the lead-hand day: six findings-only FAILs on two
+		# evaluator seats, after the wording that asked the evaluator to write a
+		# `Must-fix:` line, and every one a defect a builder could have
+		# discharged. The wording did not cure it, so the mechanism does what the
+		# wording asked for: the findings go to a fresh builder as the must-fix,
+		# promoted by this script and said so on the record. Only where the
+		# author is a builder — at gate 1 a finding on the brief is his — and only
+		# once: a second findings-only FAIL after a promoted round is the stop.
+		_promoted_now=no
+		if [ -z "$_mf" ] && [ "$_author" = build ] && [ "$_promoted_prev" != yes ]; then
+			_findings=$(nocr "$WORK/verdict" | sed -n 's/^Finding: //p')
+			if [ -n "$_findings" ]; then
+				printf '%s\n' "$_findings" >"$WORK/mustfix"
+				_mf=$_findings
+				_promoted_now=yes
+				{
+					printf 'The verdict above failed the work and attached that to no `Must-fix:` line\n'
+					printf 'and no `fix:` citation. Its findings are promoted to the must-fix by the\n'
+					printf 'mechanism and go to a fresh builder as one round; a second such verdict\n'
+					printf 'after it stops for the practitioner.\n\n'
+					printf '%s\n' "$_findings" | sed 's/^/- must-fix: /'
+				} | log_append "promoted — the findings are the must-fix — round $ROUND — $(now)"
+				say "promoted: the verdict named findings and no must-fix; the findings go to a builder as the must-fix, once."
+			fi
+		fi
+
+		_mf_key="<$(printf '%s' "$_mf" | tr '\n' ' ')>"
+
 		if [ -z "$_mf" ]; then
 			LOOP_STOP_DETAIL="FAIL with nothing to act on at the gate into $GATE"
 			LOOP_STOP="FAIL with nothing to act on"
-			LOOP_STOP_NOTE="The gate into \`$GATE\` returned FAIL with no \`Must-fix:\` line and no
-\`fix:\` citation the gate file carries — findings, and nothing a fresh author could be
-sent back to discharge. No round was run on an empty must-fix and nothing escalated:
-the findings are on the record above, and what to do with them is the practitioner's."
+			if [ "$_promoted_prev" = yes ]; then
+				LOOP_STOP_NOTE="The gate into \`$GATE\` returned FAIL with no \`Must-fix:\` line and no
+\`fix:\` citation the gate file carries, for the second time running: the findings of
+the first were handed to a fresh builder as the must-fix, and the gate still names
+nothing a builder can act on. No further round was run and nothing escalated: the
+findings are on the record above, and what to do with them is the practitioner's."
+			else
+				LOOP_STOP_NOTE="The gate into \`$GATE\` returned FAIL with no \`Must-fix:\` line and no
+\`fix:\` citation the gate file carries — and no findings either, so nothing a fresh
+author could be sent back to discharge. No round was run on an empty must-fix and
+nothing escalated: what to do with it is the practitioner's."
+			fi
 			return 2
 		fi
 
@@ -4709,7 +4876,33 @@ re-run, and no second round was run."
 			[ -n "$_fixid" ] && LOOP_STOP="fix: $_fixid"
 			return 1
 		fi
+		# THE RECORD ARGUING WITH ITSELF. miq, 2026-09-04, head-http-transport: a
+		# brief that said both "the server side needs nothing new" and "nothing
+		# changes for the user" had round 2 failed for adding a server-side ref,
+		# round 3 failed for removing it, round 4 failed for restoring it, and
+		# the cap caught it two rounds late. A must-fix that RETURNS after being
+		# displaced — A, B, A — is not a builder's to discharge: the two verdicts
+		# want opposite things, and only the brief's author can say which. So
+		# the loop stops for him at the round the return shows, with both
+		# must-fixes named. `same must-fix twice` is the consecutive case and
+		# escalates; this is its sibling, and it is a stop, not an escalation.
+		case "$_seen_mf" in
+		*"$_mf_key"*)
+			LOOP_STOP_DETAIL="the record is arguing with itself at the gate into $GATE"
+			LOOP_STOP="the record is arguing with itself"
+			LOOP_STOP_NOTE="Round $ROUND's must-fix is one an earlier round at this gate already raised and a
+round between them displaced: the verdicts want opposite things, and no builder can
+satisfy both. That is the brief's to settle, not a round's. No further round was run
+and nothing escalated; the must-fixes are on the record above.
+
+- returned: $(printf '%s\n' "$_mf" | sed -n 1p)"
+			return 2
+			;;
+		esac
+		_seen_mf="${_seen_mf}
+${_mf_key}"
 		_prev=$_mf
+		_promoted_prev=$_promoted_now
 		_have_prev=yes
 		ROUND=$((ROUND + 1))
 	done
@@ -4813,6 +5006,13 @@ do_close() { # $1 authority for this closure, in words  $2 delivery text  $3 `cl
 		put_header "$brief" '' "$(hdr "$brief" Stage)" "$(hdr "$brief" Until)" KEEP
 	fi
 	ensure_dir "$ITEMARCH" || die "could not create $ITEMARCH"
+	# THE MARKER GOES BEFORE THE FOLDER MOVES. A chain that closes its own item
+	# still holds its marker at this line; the move carried it into the archive,
+	# where the exit trap could no longer find it, and `git status` showed
+	# `.archive/<slug>/.working` for every item a chain had closed (miq,
+	# 2026-09-04). A marker is machine state and never record.
+	marker_release
+	[ -f "$item/$marker_name" ] && ! marker_alive "$item/$marker_name" && rm -f "$item/$marker_name"
 	mv "$item" "$itemarchive" || die "could not archive $slug"
 }
 
@@ -5090,7 +5290,22 @@ SHA=''
 PR_NUM=''
 PR_URL=''
 FINALTEXT=''
-BASE=$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'main\n')
+# THE BASE IS THE REPOSITORY'S DEFAULT BRANCH, never whatever the primary
+# worktree happens to have checked out. mukfork, 2026-09-05: the primary sat on
+# a design branch, two deliveries were cut from it and merged into it, and a
+# hand cherry-picked them back to main. Origin's HEAD says which branch is the
+# default; failing a remote that says, `main`; failing that, `master`; and only
+# with none of those the current branch.
+BASE=$(git -C "$root" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+if [ -z "$BASE" ]; then
+	if git -C "$root" show-ref --verify --quiet refs/heads/main 2>/dev/null; then
+		BASE=main
+	elif git -C "$root" show-ref --verify --quiet refs/heads/master 2>/dev/null; then
+		BASE=master
+	else
+		BASE=$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'main\n')
+	fi
+fi
 AUTHORITY="$brief"
 AUTHORITY_REL=''
 AUTHORITY_HASH=''
@@ -5144,6 +5359,7 @@ LOOP_STOP_NOTE=''
 CHAIN=no
 create_item() {
 	rubrics_check
+	[ -n "$want_until" ] && registry_check
 	[ -e "$item" ] && die "work item '$slug' already exists at .remit/work-items/$slug"
 	[ -e "$itemarchive" ] && die "'$slug' is already archived at .remit/work-items/.archive/$slug"
 	ensure_dir "$item" || die "could not create $item"
@@ -5866,6 +6082,9 @@ setup)
 	cat "$proposal" >"$SAVETMP" || die "could not write beside $SETTINGS_REL — nothing was changed"
 	mv -f "$SAVETMP" "$SETTINGSFILE" || die "could not put $SETTINGS_REL in place — nothing was changed"
 	SAVETMP=''
+	# A rewritten registry is his word that the seats are as he means them; any
+	# refusal mark on this host is stale by that word. A REFUSED SEAT, below.
+	rm -f "$common_dir/remit-refused" 2>/dev/null
 
 	if [ "$had_registry" = yes ]; then
 		err "REPLACED $SETTINGS_REL. What it registered was read first and carried forward"
@@ -6133,6 +6352,7 @@ migrate)
 
 resume)
 	rubrics_check
+	registry_check
 	[ -f "$brief" ] || die "no work item '$slug' — expected .remit/work-items/$slug/brief.md"
 	att=$(hdr "$brief" Attention)
 	st=$(hdr "$brief" Stage)

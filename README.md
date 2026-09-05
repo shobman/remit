@@ -9,7 +9,7 @@ stay with the person who owns their consequences. It is three POSIX scripts and 
 no service, no database, no daemon. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.3.12. Early, and in use.**
+**Version 0.3.13. Early, and in use.**
 
 ## One piece of work, start to finish
 
@@ -74,11 +74,18 @@ and against **rubrics you wrote** in `.remit/rules/<gate>.md`. A rubric can carr
 the gate whatever `until` said (`promote`), hold it for your eyes whatever else was cited
 (`hold`), name the standard a delivery missed (`fix`), or dispose of a finding (`accept`). The
 rubrics are yours alone, written through a retro; remit ships a few and migrates only its own on
-upgrade. A must-fix goes back to a fresh author with the finding and nothing else. The loop has
-stops, and every stop is a line on the record: four failed rounds, the same must-fix twice, a
-verdict that failed the work and named nothing a builder could act on, or a question only you
-can answer. An escalation raises nothing and proposes nothing — the verdicts above it are the
-analysis, and what the brief needs is worked out by you from the record.
+upgrade. A must-fix goes back to a fresh author with the finding and nothing else; a verdict that
+fails the work with findings and no must-fix has its findings handed to a builder as the must-fix,
+once. The loop has stops, and every stop is a line on the record: four failed rounds, the same
+must-fix twice, a must-fix that returns after being displaced (the brief is arguing with itself),
+a second verdict with nothing a builder can act on, or a question only you can answer. An
+escalation raises nothing and proposes nothing — the verdicts above it are the analysis, and what
+the brief needs is worked out by you from the record.
+
+A delivery is measured before it is committed: files added and megabytes staged are recorded on
+the record, and past 2,000 files or 100 MB (`REMIT_DELIVERY_FILES`, `REMIT_DELIVERY_MB`) it is
+not committed at all — what a builder authored is never that large, and what is that large is
+never what it authored.
 
 When an evaluator's judgement is that a decision is yours — which of two shapes, whether a thing is
 in scope — it asks, and the item stops with the questions numbered on the record.
@@ -134,11 +141,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.3.12` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.3.13` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.12 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.13 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:
@@ -153,6 +160,14 @@ it requires only Git and a POSIX shell. On Windows, use Git Bash's `sh`, not Pow
 `install.sh` to upgrade — it updates content that still matches the prior install, preserves local
 edits save in the one file it manages below, reports each result, commits touched paths in the
 target repository, and never pushes them.
+
+On Windows, two things a first day there taught: a raised context's `USERPROFILE`, `APPDATA` and
+`LOCALAPPDATA` point at that raise's scratch, so a tool that installs itself (Python's install
+manager, NuGet's caches) lands there and goes with the run rather than into your tree; and every
+worktree that builds a listener will trip Windows Defender Firewall's prompt once per path —
+`Set-NetFirewallProfile -All -NotifyOnListen False` in an elevated PowerShell ends that. Running
+remit from WSL on a clone kept on the Linux filesystem avoids both, and runs the test suite in
+minutes rather than most of an hour.
 
 The installer adds:
 
@@ -193,6 +208,12 @@ file — what its shape is, how a `--harness` or `--model` is resolved against i
 refusal means. The pull request names the model that actually served the run, read back from the
 run's own report where the harness prints one; where that report is silent it records the model as
 unconfirmed rather than assuming the dispatch got what it asked for.
+
+A chain refuses to start without a registry, naming `setup`. And a seat that refuses — out of
+credits, a quota, not authenticated — marks the host for thirty minutes, and no chain raises
+into that seat while the mark is fresh: one refusal is a fact about the host, not the item, and
+five chains queued behind it should not each spend a build round finding out. A run that
+completes on that seat clears the mark; so does `setup --write`.
 
 Each heading gives where that harness's conventions land, what it does with a model id it does not
 know, and what its own command or local source said when I read it on 21 August 2026.
