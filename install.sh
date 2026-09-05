@@ -41,7 +41,7 @@
 #                                  person's own records repository and is theirs
 #                                  and not the project's. Reported with the same
 #                                  installed/unchanged/kept outcomes as any other
-#                                  write. A line he has since taken out is not put
+#                                  write. A line they have since taken out is not put
 #                                  back. Not written at all under `--shadow`
 #   <git>/hooks/pre-push           the push guards, in the shared hooks dir so
 #                                  every linked worktree inherits them
@@ -92,7 +92,7 @@
 #
 # It is also the one thing here NOT migrated file by file, and that is the point
 # of this item: a gate file holds both remit's rubrics and the practitioner's, so
-# an upgrade that judged the file whole would either overwrite what he wrote or
+# an upgrade that judged the file whole would either overwrite what they wrote or
 # never reach what remit changed. It is migrated RUBRIC BY RUBRIC instead, with
 # the same honest outcomes read per rubric. What that decides, and why, is at
 # "the rubrics" below and nowhere else.
@@ -1070,7 +1070,7 @@ else
 fi
 
 # --- the exposure record stays local ------------------------------------------
-# Ruled by the practitioner, 2026-08-23, on seeing his own sessions recorded:
+# Ruled by the practitioner, 2026-08-23, on seeing their own sessions recorded:
 # "perhaps it is git-ignore, or else it's a bit like spying is it? if my team all
 # had it, i sort of have this new thing i can do to check in on my team — so git
 # ignore for now." So this is a write, not an offer, and it takes the same four
@@ -1078,10 +1078,10 @@ fi
 #
 # The line is matched EXACTLY and on its own, so the comment above it can be
 # reworded, moved or deleted without this installer deciding the line is gone.
-# And the manifest is what tells a first install from a line he has since taken
+# And the manifest is what tells a first install from a line they have since taken
 # out: absent from the manifest means remit never wrote it and this is the first
-# time; present in the manifest with the line gone means he removed it, and a
-# decision he made is not undone by re-running an installer.
+# time; present in the manifest with the line gone means they removed it, and a
+# decision they made is not undone by re-running an installer.
 # TWO LINES, and the SET is the unit. `.remit/settings.local.json` joined the
 # exposure record here because it is per-user by definition — it names the
 # practitioner's own records repository, and committing it would publish where
@@ -1089,7 +1089,7 @@ fi
 # though it were the project's. The outcomes below read the set: all present is
 # `unchanged`, any missing on a first install is `updated` with only those
 # appended, and any missing where the manifest says remit wrote them is a
-# decision he made and is not undone by re-running an installer.
+# decision they made and is not undone by re-running an installer.
 IGNORE_PATHS=".remit/exposure/ .remit/settings.local.json"
 IGNORE_ABS="$TGT/.gitignore"
 # ANCHORED, like every other hash here — see `hash_of` above. An unanchored
@@ -1127,7 +1127,7 @@ elif [ ! -e "$IGNORE_ABS" ]; then
 elif [ -z "$(ignore_missing)" ]; then
 	record ignore "$ignore_id" .gitignore
 	report unchanged ".gitignore" "already ignores $IGNORE_PATHS"
-# A LINE THAT WAS NEVER OFFERED IS NOT A LINE HE REMOVED, and the manifest tells
+# A LINE THAT WAS NEVER OFFERED IS NOT A LINE THEY REMOVED, and the manifest tells
 # the two apart without a second field. `$ignore_old` is what the last install
 # recorded for this file: when it is the id of the set as it stands TODAY, every
 # line in that set was written and anything missing now went out on purpose. When
@@ -1535,7 +1535,7 @@ fi
 
 # --- what this installer OFFERS, and does not write ---------------------------
 # `bin/remit-exposure` records nothing until Claude Code is told to call it, and
-# telling it means editing a settings file — which is the practitioner's, and his
+# telling it means editing a settings file — which is the practitioner's, and their
 # decision. The two lines are stated ONCE, in that script's own header, and are
 # printed here straight out of it, so there is no second copy to fall out of step
 # with the first. Nothing below is written anywhere by this installer.

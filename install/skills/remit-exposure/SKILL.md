@@ -1,11 +1,11 @@
 ---
 name: remit-exposure
-description: Report this repository's recorded exposure — the words the practitioner said and the words he was told, per channel, never summed. Use when he asks "how much have I said today", "exposure", "what's this session cost me", "where am I today", or the same numbers for one item or session, or the movement over time — "am I taking on more", "how many items am I carrying", "the trend".
+description: Report this repository's recorded exposure — the words the practitioner said and the words they were told, per channel, never summed. Use when they ask "how much have I said today", "exposure", "what's this session cost me", "where am I today", or the same numbers for one item or session, or the movement over time — "am I taking on more", "how many items am I carrying", "the trend".
 ---
 
 # Exposure
 
-Run the one that matches what he asked:
+Run the one that matches what they asked:
 
 ```sh
 sh "$(git rev-parse --show-toplevel)/bin/remit-exposure" today             # the default
@@ -21,7 +21,7 @@ another harness, run its scan first and pass its stated limits on with the numbe
 sh "$(git rev-parse --show-toplevel)/bin/remit-exposure" scan <codex|copilot|pi|devin>
 ```
 
-Do not run a scan he did not ask about.
+Do not run a scan they did not ask about.
 
 ## Report, verbatim, and stop
 

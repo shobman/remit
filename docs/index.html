@@ -165,17 +165,17 @@
 <body>
   <header class="wrap site-head">
     <a class="wordmark" href="#top" aria-label="remit home">remit</a>
-    <span class="version">VERSION 0.3.16</span>
+    <span class="version">VERSION 0.3.17</span>
   </header>
 
   <main id="top">
     <div class="wrap hero">
-      <p class="eyebrow">For one person with a repository</p>
-      <h1>Give your judgement room to work.</h1>
-      <p class="hero-copy">remit lets AI do the housekeeping around each piece of work. Work waits without nagging and survives between sessions. A fresh context evaluates the result before it reaches you. You keep the freedom to create and decide.</p>
+      <p class="eyebrow">For the person who owns the result</p>
+      <h1>Let AI work without keeping you on call.</h1>
+      <p class="hero-copy">remit keeps each piece of AI work in Git, in the words and boundary you gave it. Separate contexts build and judge the result while the record survives between sessions. Work waits silently when it can, stops when it needs your judgement, and never starts or ends on your behalf.</p>
       <div class="actions">
         <a class="button" href="https://github.com/shobman/remit">Get remit from GitHub</a>
-        <a class="button secondary" href="#how-it-works">See how an item moves</a>
+        <a class="button secondary" href="#how-it-works">See what reaches you</a>
       </div>
     </div>
 
@@ -187,11 +187,11 @@
         <div class="problem-grid">
           <article class="problem">
             <h3>AI creates work you did not ask for</h3>
-            <p>Anthropic's own guidance documents Opus 5 expanding a task's scope and adding steps you did not request. One request becomes several decisions about what the task should include.</p>
+            <p>One request becomes several decisions about what the task should include, each of them yours to notice and unwind.</p>
           </article>
           <article class="problem">
             <h3>Review falls behind the output</h3>
-            <p>DORA found that code generation can outrun review and deployment capacity. The decision to ship still lands with you.</p>
+            <p>Generation outruns the capacity to review and ship it. The decision to ship still lands with you.</p>
           </article>
           <article class="problem">
             <h3>Decision volume wears you down</h3>
@@ -201,30 +201,52 @@
       </div>
     </section>
 
-    <section aria-labelledby="restraints-heading">
+    <section aria-labelledby="asks-heading">
       <div class="wrap">
-        <p class="eyebrow">What ships</p>
-        <h2 id="restraints-heading">Five restraints, kept with the work.</h2>
+        <p class="eyebrow">Your attention</p>
+        <h2 id="asks-heading">It asks for a word at three moments, and nothing between them.</h2>
+        <p class="section-intro">One to start, one at each stop that is genuinely yours, one to end. Everything else is housekeeping, and it happens without you.</p>
         <div class="anchor-grid">
           <article class="anchor">
-            <h3>Keep talking while builders build</h3>
-            <p>Isolated builders do the legwork while the coordinator keeps its context and stays available to you.</p>
+            <h3>One word to start</h3>
+            <p>The brief is in your words, filed as you said it, with one word for how far the work may go before it waits for you. Nothing raised by remit edits it, rewrites it, or fills in what you left out.</p>
           </article>
           <article class="anchor">
-            <h3>Resume without reconstructing a chat</h3>
-            <p>The context that matters stays with the item. Days later, the work continues where it stopped.</p>
+            <h3>A stop only where one is needed</h3>
+            <p>A question only you can answer. A rule you wrote that said hold. A run that failed four times. Each is one row on the record, waiting; nothing is pushed at you, and nothing proposes what you should do about it.</p>
           </article>
           <article class="anchor">
-            <h3>Receive work after fresh evaluation</h3>
-            <p>A fresh context judges the result against its brief before the work reaches you.</p>
+            <h3>Nothing to reconstruct</h3>
+            <p>Weeks later, in a new session, in a different harness, the item reads the same. The context that matters stays with the work, so no chat is ever the memory for it.</p>
           </article>
           <article class="anchor">
-            <h3>Move between AI providers</h3>
-            <p>A registry you write names which harness and model each role sits on, so one model can build and a rival can judge — nothing is raised on a seat you did not register, and nothing falls back. The item moves between them without copy and paste — <a href="#harnesses">five harnesses run remit's builders</a>.</p>
+            <h3>A verdict, not a builder's account of itself</h3>
+            <p>A fresh context that did not write the work judges it against your brief and your rubrics before it reaches you. Seat that judge on a rival model family, and read a verdict instead of a self-report. Agreement is never verification, so the proof a builder ran is kept where the judge can read it.</p>
           </article>
           <article class="anchor">
-            <h3>Know who made each change</h3>
-            <p>The commit names the human, model, and session. Months later, <code>git log</code> still carries the answer.</p>
+            <h3>A number for what it cost you</h3>
+            <p>The words you typed and the words said back to you, per session and per item, never summed into a score. Every context raised is on the record with its harness, its model, and its cost where the harness reports one.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="never-heading">
+      <div class="wrap">
+        <p class="eyebrow">The boundary</p>
+        <h2 id="never-heading">What it never does.</h2>
+        <div class="problem-grid">
+          <article class="problem">
+            <h3>Never on your behalf</h3>
+            <p>It never starts work, merges a pull request, reads a check, edits your brief, or closes an item. Closure is yours, and it is an attention boundary, not an acceptance.</p>
+          </article>
+          <article class="problem">
+            <h3>Never on a seat you did not name</h3>
+            <p>A registry you write says which harness and model each role sits on. Nothing is raised elsewhere, nothing falls back when a seat refuses, and every refusal happens before anything is billed.</p>
+          </article>
+          <article class="problem">
+            <h3>Never out of reach</h3>
+            <p>One command ends a running chain and every context it raised, discards the in-flight tree, and leaves the item where it last stopped. A context starts with an emptied environment: no token or key crosses, and its CLI logs in as you through its own configuration directory.</p>
           </article>
         </div>
       </div>
@@ -233,12 +255,18 @@
     <section id="how-it-works" aria-labelledby="journey-heading">
       <div class="wrap">
         <p class="eyebrow">One item, end to end</p>
-        <h2 id="journey-heading">The state stays visible.</h2>
-        <p class="section-intro">The work item survives a session ending or a model changing. Git carries the identity, boundary, decisions, state, and history.</p>
+        <h2 id="journey-heading">The state stays visible, and a stop reaches you as one row.</h2>
+        <p class="section-intro">Four stages, three gates. You say how far it may go; it stops at that stage, or earlier where a word of yours is needed, and the record says which.</p>
+        <figure class="install-command" aria-labelledby="stop-heading">
+          <figcaption id="stop-heading" class="visually-hidden">A stop, as it reaches the practitioner</figcaption>
+          <pre><code>active    refined    asked: 1 question    heart-button    Heart a recipe
+1. Should a heart on a deleted creator's recipe still count? The brief does not say.</code></pre>
+        </figure>
+        <p class="section-intro">One command files your answer in your words and the chain resumes where it stopped. A conductor may answer for you only under an elevation you wrote, at most twice per item; the third is yours.</p>
         <figure class="journey-shell">
           <svg viewBox="0 0 1080 500" role="img" aria-labelledby="journey-title journey-desc">
             <title id="journey-title">A remit work item moving through its four stages</title>
-            <desc id="journey-desc">Four stages, three gates. An item is admitted at new in the practitioner's words. The gate into refined judges the brief, and the research if it asked for any. The gate into accepted judges a delivery: a bounded builder authors a tree, the mechanism turns it into a draft pull request, and a fresh context returns a verdict; a must-fix goes back to a fresh builder, four rounds at most. The gate into closed judges the record, and closure is the practitioner's word. Every gate can stop the item for him instead of moving it.</desc>
+            <desc id="journey-desc">Four stages, three gates. An item is admitted at new in the practitioner's words. The gate into refined judges the brief, and the research if it asked for any. The gate into accepted judges a delivery: a bounded builder authors a tree, the mechanism turns it into a draft pull request, and a fresh context returns a verdict; a must-fix goes back to a fresh builder, four rounds at most. The gate into closed judges the record, and closure is the practitioner's word. Every gate can stop the item for them instead of moving it.</desc>
             <defs>
               <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                 <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--signal)"/>
@@ -277,21 +305,21 @@
                 <text x="24" y="146" fill="var(--muted)" font-size="16">the PR out of draft.</text>
                 <rect x="24" y="180" width="86" height="34" rx="17" fill="var(--signal-soft)"/>
                 <text x="67" y="203" text-anchor="middle" fill="var(--signal)" font-size="14" font-weight="750">verdict</text>
-                <text x="24" y="238" fill="var(--muted)" font-size="13">gate: the record; merging is his</text>
+                <text x="24" y="238" fill="var(--muted)" font-size="13">gate: the record; merging is theirs</text>
               </g>
               <g transform="translate(820 116)">
                 <rect width="210" height="260" rx="18" fill="var(--accent)" stroke="var(--accent)" stroke-width="2"/>
                 <text x="24" y="50" fill="var(--accent-ink)" opacity=".78" font-size="15" font-weight="750" letter-spacing="2">04</text>
                 <text x="24" y="88" fill="var(--accent-ink)" font-size="28" font-weight="750">closed</text>
                 <text x="24" y="122" fill="var(--accent-ink)" opacity=".86" font-size="16">On the practitioner's</text>
-                <text x="24" y="146" fill="var(--accent-ink)" opacity=".86" font-size="16">word, and only his.</text>
+                <text x="24" y="146" fill="var(--accent-ink)" opacity=".86" font-size="16">word, and only theirs.</text>
                 <rect x="24" y="180" width="100" height="34" rx="17" fill="var(--accent-ink)"/>
                 <text x="74" y="203" text-anchor="middle" fill="var(--accent)" font-size="14" font-weight="750">archived</text>
                 <text x="24" y="238" fill="var(--accent-ink)" opacity=".78" font-size="13">gone from current views</text>
               </g>
             </g>
           </svg>
-          <figcaption class="diagram-note">One word on the brief says how far the chain may run without him. At every gate a rubric he wrote can carry the item on or hold it for his eyes; a question only he can answer, four failed rounds, the same must-fix twice, a must-fix that returns after being displaced, or a second verdict with nothing a builder can act on all stop the item where it is, on the record, and ask him. A delivery too large to be a builder's is not committed. Nothing here merges a pull request or reads a check. Acceptance, rulings and closure are his.</figcaption>
+          <figcaption class="diagram-note">Every gate is a fresh context judging against your brief and your rubrics, and every stop is a line on the record. What a closed item's last verdicts left standing stays readable, and one fresh context can attest, against the code now, what still stands.</figcaption>
         </figure>
       </div>
     </section>
@@ -299,31 +327,31 @@
     <section id="harnesses" aria-labelledby="harnesses-heading">
       <div class="wrap">
         <p class="eyebrow">Every harness</p>
-        <h2 id="harnesses-heading">Five harnesses, one work surface.</h2>
-        <p class="section-intro">The installer puts the same six conventions where each of them looks, and <code>bin/remit-invoke</code> demonstrates CLI invocation for all five. Open whichever one you feel like this morning: the item on the other side is the same item.</p>
+        <h2 id="harnesses-heading">Use the agents you already pay for.</h2>
+        <p class="section-intro">The installer puts the same seven conventions where each of the five looks, and one seam raises a context on any of them. Open whichever you feel like this morning: the item on the other side is the same item, with its history. What holds a context in place differs by harness, and each pull request says which applied.</p>
         <div class="harness-grid">
           <article class="harness">
             <h3>Claude Code</h3>
-            <p>Every context is raised through the CLI by one script, never through the harness's own sub-agent tool — a shipped hook refuses that, so the registry decides every seat. The conventions land in <code>.claude/skills/</code>.</p>
+            <p>Every context is raised through the CLI by one script, never through the harness's own sub-agent tool: a deny flag and a hook written for the run refuse it. No enforced read boundary — a context runs on your machine under your login.</p>
           </article>
           <article class="harness">
             <h3>Codex</h3>
-            <p>Nothing bespoke: the same six conventions in the path it reads, the same seam, the same draft pull request at the end.</p>
+            <p>The one seat with an enforced sandbox: its own workspace and nothing else, read back from the run's own header after every run and refused on a downgrade.</p>
           </article>
           <article class="harness">
             <h3>Pi</h3>
-            <p>Serves whatever the providers configured on your own machine are ready to run. A dispatch is refused unless that machine's own catalogue lists the id.</p>
+            <p>Serves whatever the providers on your own machine are ready to run; a dispatch is refused unless that machine's catalogue lists the id. Built-in tools only, extensions off. No enforced read boundary.</p>
           </article>
           <article class="harness">
             <h3>Devin</h3>
-            <p>Needs no path of its own, discovering the installed conventions natively. An unknown model id is turned away before the run starts.</p>
+            <p>Discovers the installed conventions natively. An allow list written for the run ends the run on anything outside it, and an unknown model id is turned away before the run starts. No enforced read boundary.</p>
           </article>
           <article class="harness">
             <h3>Copilot CLI</h3>
-            <p>The only one here that takes a reasoning effort as well as a model, and checks both before it bills anything. A hook written for the run keeps its builder off git and gh, and the dispatch tests that before it trusts it. There is no read boundary beyond that: the builder runs on your own machine under your own credentials, and every pull request says so.</p>
+            <p>The only one here that takes a reasoning effort as well as a model, and checks both before it bills anything. A hook written for the run keeps its builder off git and gh in any wrapping, and a throwaway run tests that before the real one. No enforced read boundary.</p>
           </article>
         </div>
-        <p class="harnesses"><a href="https://github.com/shobman/remit#use-your-harness">The README's model list</a> was read on 21 August 2026. The models available to you depend on your subscription, and vendors change their model offerings often. Not every model is available at every subscription level. remit does not maintain a compatibility matrix, so check the sources beside the list for what your subscription includes today. The pull request records which model actually served each run.</p>
+        <p class="harnesses">Nothing raised by remit carries your API keys or tokens; each CLI logs in as you through its own configuration directory. <a href="https://github.com/shobman/remit#the-boundary-before-you-install">The README states the boundary in full</a>, and its model lists carry the date they were read.</p>
       </div>
     </section>
 
@@ -332,7 +360,7 @@
         <div>
           <p class="eyebrow">Install</p>
           <h2 id="install-heading">Bring the discipline into your repository.</h2>
-          <p class="section-intro">The README explains how to inspect or pin the installer before you run it.</p>
+          <p class="section-intro">Three scripts, the conventions, one section of AGENTS.md and a folder for the work, every file recorded in a manifest. No service, no daemon, nothing to operate. The README explains how to inspect or pin the installer before you run it.</p>
           <a href="https://github.com/shobman/remit#install-remit">Read the install guide on GitHub</a>
           <p class="harnesses">One installer serves <a href="#harnesses">all five harnesses</a>.</p>
         </div>
@@ -342,14 +370,14 @@
         </figure>
       </div>
       <div class="wrap">
-        <p class="aside"><a href="https://github.com/shobman/aidos">AIDOS</a> calls its manifesto &quot;The Hard Part Isn't the Code&quot;. It is separate from remit and complementary by design: AIDOS helps teams that start, park, and resume work together establish that work is warranted before development starts. remit sits on the engineering side, bounded by AIDOS or completely adjacent to it.</p>
+        <p class="aside"><a href="https://github.com/shobman/aidos">AIDOS</a> is separate from remit and complementary by design: it helps teams establish that work is warranted before development starts. remit sits on the engineering side, bounded by AIDOS or completely adjacent to it.</p>
       </div>
     </section>
 
     <section class="closing" aria-labelledby="closing-heading">
       <div class="wrap">
         <h2 id="closing-heading">The housekeeping stays out of your way.</h2>
-        <p>The AI keeps the record, so work can wait without getting lost. Fresh evaluation helps you ship with confidence. The creating and deciding stay with you.</p>
+        <p>The record keeps the work, so it can wait without getting lost. A fresh context judges it before it reaches you. The creating and the deciding stay with you, and they reach you only where a word of yours is needed.</p>
         <a class="button" href="https://github.com/shobman/remit">Open the remit repository</a>
       </div>
     </section>

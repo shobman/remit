@@ -1,6 +1,6 @@
 ---
 name: remit-resume
-description: 'Move a work item in this repository''s .remit/ work location as far as the practitioner said it may go, and report where it stopped. Use on his words for putting an item back in motion — "pick up X", "carry on with X", "resume it", "unpark it", "run it to refined", "take it to accepted", "take it all the way", "keep going" — and after it stopped or escalated and he has ruled. Use it too on "stop it", "kill it" about a run in progress. Also the one place an ad-hoc check is raised: "check this", "is this any good", "have someone look at this" on work in the conversation.'
+description: 'Move a work item in this repository''s .remit/ work location as far as the practitioner said it may go, and report where it stopped. Use on their words for putting an item back in motion — "pick up X", "carry on with X", "resume it", "unpark it", "run it to refined", "take it to accepted", "take it all the way", "keep going" — and after it stopped or escalated and they have ruled. Use it too on "stop it", "kill it" about a run in progress. Also the one place an ad-hoc check is raised: "check this", "is this any good", "have someone look at this" on work in the conversation.'
 ---
 
 # Resume
@@ -12,7 +12,7 @@ and stop there yourself.
 sh "$(git rev-parse --show-toplevel)/bin/remit" resume <slug> [--until refined|accepted|closed [--park]]
 ```
 
-Give `--until` only when he named a stop just now. Parking outright and ending a running chain
+Give `--until` only when they named a stop just now. Parking outright and ending a running chain
 are their own commands — `park <slug>` and `stop <slug>`. `resume` is also the one verb that
 continues a `crashed` row.
 
@@ -33,18 +33,23 @@ you will report when it is done.
 
 Report the row and the reason verbatim in substance. Exit 0: it stopped where it was told to;
 that is the design working, and there is nothing to add — no reading of your own on whether it
-should have gone further. Exit 3: committed here, NOT accepted by the remote — say so. Exit 2:
+should have gone further. An `asked:` stop is the one exception: where `.remit/elevation.md`
+covers the question — the record or the code already determines the answer, and ruling changes
+neither outcome nor boundary — answer it with `remit answer <slug> <n> "<words>" --conductor`,
+say what you ruled, and go on; the mechanism refuses the third ruling on an item since their last
+word and any question you already ruled on, and that refusal is relayed to them in the ruling
+shape, never argued with. Outside the elevation, the question is theirs. Exit 3: committed here, NOT accepted by the remote — say so. Exit 2:
 a precondition failed; nothing changed. Exit 4: escalated — the stage is unchanged, and the
-item's `log.md` holds the reason. That turn asks him to rule, so give it in the shape
-AGENTS.md fixes for a turn that asks him to rule; what the brief needs is his to work out from
-the record — answer what he asks of it, and never propose, argue for, or apply a fix of your
+item's `log.md` holds the reason. That turn asks them to rule, so give it in the shape
+AGENTS.md fixes for a turn that asks them to rule; what the brief needs is theirs to work out from
+the record — answer what they ask of it, and never propose, argue for, or apply a fix of your
 own.
 
 ## The ad-hoc check on live work
 
-When he asks for work in the conversation to be checked and there is no item to move, raise
+When they ask for work in the conversation to be checked and there is no item to move, raise
 one fresh context to judge it. This is the only place any of these conventions runs
-`bin/remit-invoke` directly. Write a briefing that states, in his words, the outcome the work
+`bin/remit-invoke` directly. Write a briefing that states, in their words, the outcome the work
 was for, its boundary, and what would show it delivered — then:
 
 ```sh

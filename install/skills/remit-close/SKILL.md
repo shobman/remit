@@ -5,25 +5,25 @@ description: 'Close a work item in this repository''s .remit/ work location and 
 
 # Close
 
-The practitioner has ruled a piece of work over. Closure is his alone: never infer it, never
+The practitioner has ruled a piece of work over. Closure is theirs alone: never infer it, never
 raise it, and never read a merged pull request or a green suite as a reason to.
 
-Show him what his ruling covers first — every finding still without a disposition is sealed by
+Show them what their ruling covers first — every finding still without a disposition is sealed by
 closure as pre-authorised:
 
 ```sh
 grep -n '^- finding ' .remit/work-items/<slug>/log.md
 ```
 
-Read that list to him plainly, with no recommendation. Then ask whether any commit or pull
-request shipped the work, offering what the repository actually shows — never a link he has
+Read that list to them plainly, with no recommendation. Then ask whether any commit or pull
+request shipped the work, offering what the repository actually shows — never a link they have
 not confirmed. Abandoned work has no links, and that is fine.
 
 ## The command
 
 ```sh
 sh "$(git rev-parse --show-toplevel)/bin/remit" close <slug> <<'DELIVERY'
-- <a link he confirmed, one per line>
+- <a link they confirmed, one per line>
 DELIVERY
 ```
 
@@ -33,10 +33,10 @@ With nothing to record, close with empty input: `... close <slug> < /dev/null`.
 
 Report what it printed, verbatim in substance. Exit 3: committed here, NOT accepted by the
 remote — say so; the item is closed either way. Exit 2: nothing changed. Exit 4: the close
-escalated; the item's `log.md` carries the reason, and that turn asks him to rule.
+escalated; the item's `log.md` carries the reason, and that turn asks them to rule.
 
 Closure is final: the item leaves every listing and nothing about it returns as an
 instruction, a reminder, or an account of current behaviour. If a constraint from the work
 still governs the software, it belongs in the code — a test, a name, a comment; say that once.
-When he deliberately asks for closed work, read it from `.remit/work-items/.archive/<slug>/`
+When they deliberately ask for closed work, read it from `.remit/work-items/.archive/<slug>/`
 and report it as the past — after closure the code, not the brief, is the law. Then stop.

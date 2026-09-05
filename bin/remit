@@ -37,7 +37,7 @@
 #
 #              plus **Migrated:** — written only by `remit migrate`.
 #
-#              and **Depends on:** — HIS line. Optional, read before every
+#              and **Depends on:** — THEIR line. Optional, read before every
 #              build, written by nobody here; `put_header` leaves it where it
 #              is, as it does `**Research:**` and `**Current phase:**`. WHAT A
 #              BRIEF DEPENDS ON below is its law.
@@ -229,7 +229,7 @@
 #
 # A FINDING ATTESTED `fixed` IS NOT RE-JUDGED: it leaves the standing set, for
 # this projection and for the seal alike. `stands` and `moot` stay standing, and
-# what becomes of them is his — admit one as an item, or leave it.
+# what becomes of them is theirs — admit one as an item, or leave it.
 #
 # ==============================================================================
 # WHAT A BRIEF DEPENDS ON
@@ -240,21 +240,21 @@
 #   **Depends on:** raised-contexts-are-visible, every-pr-names-its-item — both
 #                   from the retro
 #
-# ONE LINE, HIS WORDS, and it names WORK ITEMS BY SLUG. Nothing else: not a pull
+# ONE LINE, THEIR WORDS, and it names WORK ITEMS BY SLUG. Nothing else: not a pull
 # request, not a branch, not a URL. A line naming a `#<n>`, a `.../pull/<n>` or
 # a `<a>/<b>` branch is REFUSED at `new` and HOLDS wherever the line is
 # observed, saying so.
 #
 # WHEN IT IS OBSERVED — TWO POINTS, on every run: AT `new`, BEFORE THE RESEARCH
 # RAISE AND BEFORE GATE 1; and again BEFORE A BUILD. An unsatisfied name holds
-# the item AT `new`, whatever `--until` he gave: what the named build actually
+# the item AT `new`, whatever `--until` they gave: what the named build actually
 # ships is what this brief has to name, and the gate into `refined` judges the
 # brief and not the tree. An item already past `new` that gains an unsatisfied
 # name by a later edit, or whose dependency regressed, still must not build.
 # Both points stop with the same reason, `depends on: <why>`; only the note
 # beneath it says which point it was.
 #
-# NOTHING WAKES A HELD ITEM. The road back in is his own `remit resume <slug>`.
+# NOTHING WAKES A HELD ITEM. The road back in is their own `remit resume <slug>`.
 #
 # WHAT SATISFIES ONE — TWO ways, and no third. FIRST, the named item's
 # **Stage:** reads `closed` — only the closing gate stamps that. SECOND, the
@@ -269,11 +269,11 @@
 # record names on a `## delivery —` entry, never by sha, because deliveries are
 # squash merged. Where the record names no delivery, where an entry names a
 # commit and no pull request, where `gh` is absent, or where a state cannot be
-# read, THE DEPENDENCY HOLDS and the reason says which. A hold is his to lift,
+# read, THE DEPENDENCY HOLDS and the reason says which. A hold is theirs to lift,
 # never an escalation.
 #
-# The value is comma-separated slugs, and his prose starts at the first ` — `;
-# everything after it is his and is not resolved. `**Builds on:**` is the
+# The value is comma-separated slugs, and their prose starts at the first ` — `;
+# everything after it is theirs and is not resolved. `**Builds on:**` is the
 # superseded name and is refused, never silently read as `none`.
 #
 # ==============================================================================
@@ -401,7 +401,7 @@
 #      file actually carries a rubric with that id, in that section. One that
 #      does not is recorded `— NOT APPLIED: <id> is not a rubric this gate
 #      carries` and changes NOTHING. The one stop that needs no rubric is a
-#      plain `Must-fix:` line. Discretion, where it is wanted, is a rubric he
+#      plain `Must-fix:` line. Discretion, where it is wanted, is a rubric they
 #      writes.
 #
 #      Every other line is carried into `log.md` verbatim. The WHOLE returned
@@ -444,7 +444,7 @@
 # PRECEDENCE, once: a `hold` beats a `promote`; a `promote` beats the
 # practitioner's `until`; a missed `fix` sends the work back before any of
 # that; a parked item moves for nothing; an empty folder changes nothing —
-# every gate waits for him. An `until` recorded `, then park` is a CEILING on
+# every gate waits for them. An `until` recorded `, then park` is a CEILING on
 # the promotes, not a brake on the run.
 #
 # ==============================================================================
@@ -473,7 +473,7 @@
 #   - authority: <file, relative to the item folder>
 #   - authority hash: <its digest>
 #
-# That pair is how a later `resume` knows the practitioner changed his mind: it
+# That pair is how a later `resume` knows the practitioner changed their mind: it
 # hashes the authority in hand and compares it with the last pair on the record.
 # A resume records the pair IT RAN FROM, never one that appeared under it while
 # it ran.
@@ -574,7 +574,7 @@
 #
 #   * NOTHING HERE MERGES. There is no `gh pr merge` in this script. The closing
 #     gate licenses the CLOSURE of the item, never a merge; the pull request is
-#     left open for the host repository and for him.
+#     left open for the host repository and for them.
 #   * NOTHING HERE READS A CHECK. Not `gh pr checks`, not `gh run view`, not a
 #     workflow file. CI is the host repository's business.
 #   * `gh pr ready` STAYS, at the gate into `accepted` and nowhere else: a
@@ -635,36 +635,36 @@
 # brief; no role here can. So:
 #
 #   * The gate into `refined` is: research IF the brief carries a
-#     `**Research:**` line in his words, then evaluate.
-#   * A FAIL there whose must-fix is the BRIEF'S has nowhere to go but to him.
+#     `**Research:**` line in their words, then evaluate.
+#   * A FAIL there whose must-fix is the BRIEF'S has nowhere to go but to them.
 #     The item STOPS at `new`, ACTIVE, with the must-fix on the record and the
 #     stop naming it — `fix: <id>` where a `fix` rubric was cited, the
 #     must-fix's own first line otherwise. No second round is run for it.
 #   * An escalation RAISES NOTHING and proposes nothing. The entry carries the
 #     reason, the round, the repeat count and the authority; the verdicts above
-#     it are the analysis; the brief is his to amend, from the record.
+#     it are the analysis; the brief is theirs to amend, from the record.
 #   * AN EVALUATOR MAY ASK. An `Ask:` line in a FAIL verdict stops the item for
-#     him under `asked: <n> question(s)`, the questions numbered on the entry,
+#     them under `asked: <n> question(s)`, the questions numbered on the entry,
 #     and nothing is raised — at every gate, whatever else the verdict carries.
-#     His answer comes back through `answer`: filed VERBATIM under `## Rulings`
+#     Their answer comes back through `answer`: filed VERBATIM under `## Rulings`
 #     in the authority beside the question it answers, recorded as a `## ruling`
 #     with the new digest, and the chain resumes AT THE STAGE IT IS AT. An
 #     answer is a ruling, not an amendment: a hand amendment resets the stage to
-#     `new`; an answer adds a decision the brief was missing. A question he
+#     `new`; an answer adds a decision the brief was missing. A question they
 #     leaves unanswered blocks nothing. The authority's `## Rulings` are
 #     SETTLED GROUND to every later raise. `--conductor` files the words as the
 #     conductor's, PROVISIONAL, built on by later raises and flagged where found
-#     wrong, never defended as his. A question may be answered again by anyone;
-#     the latest line stands, nothing above it is edited, and the record names
-#     what each answer superseded.
+#     wrong, never defended as theirs — THE OUTER LOOP below bounds it. A
+#     question may be answered again; the latest line stands, nothing above it
+#     is edited, and the record names what each answer superseded.
 #   * A FAIL'S FINDINGS ARE ITS MUST-FIX WHEN IT NAMES NONE — ONCE. Where the
 #     author is a builder (gates 2 and 3) and a FAIL carries findings and no
 #     must-fix text, the mechanism promotes the findings to the must-fix, says
 #     so on the record (`## promoted`), and runs one builder round on them.
 #   * A FAIL WITH NOTHING TO ACT ON — no must-fix text, and either no findings
-#     or findings that were already promoted once — stops for him: the item
+#     or findings that were already promoted once — stops for them: the item
 #     stays where it is, ACTIVE, the findings on the record, no further round.
-#     At gate 1 a finding on the brief is his and is never promoted.
+#     At gate 1 a finding on the brief is theirs and is never promoted.
 #
 # THE ONE EXCEPTION — `research.md` HAS AN AUTHOR. It is MACHINE-AUTHORED,
 # exactly as a build is. So, ONLY where the authority carries a `**Research:**`
@@ -685,6 +685,37 @@
 # An item at `new` with nothing said runs no chain at all until it is resumed —
 # unless `refined.md` carries a `promote` that could carry it, which is the one
 # thing `new` asks the gate for on its own.
+#
+# ==============================================================================
+# THE OUTER LOOP — A CONDUCTOR'S RULINGS, AND THEIR BOUND
+# ==============================================================================
+#
+# The inner loop is author and evaluate, capped at four rounds and stopped by a
+# must-fix that repeats. An `asked:` stop leaves it and waits for a word. A
+# conductor supplying that word with `answer --conductor` is an OUTER LOOP: each
+# ruling re-enters the chain at the same stage. Unbounded, it is the conductor
+# deciding an item a question at a time; bounded, it is the inner loop's caps
+# one level up. Three refusals, each exit 2 with nothing written, and none of
+# them reads what the question was about:
+#
+#   * NO ELEVATION, NO RULING. `.remit/elevation.md` is the practitioner's
+#     words on what the conductor may rule — its SCOPE: an answer the record or
+#     the code already determines, and a ruling that changes neither outcome
+#     nor boundary, is the shape it is written for. Absent or empty, nothing
+#     rules on their behalf. It is theirs to write, and nothing here writes it.
+#   * TWO PER ITEM, THEN THEIRS. At most two conductor rulings on an item since
+#     the practitioner's last `## ruling` on it — an answer of their own, or an
+#     `until` — and the third is theirs. Derived from `log.md`: the trailing
+#     run of `## ruling` entries `by the conductor`, exactly as the escalation
+#     run is counted. Their own answer resets it.
+#   * A RETURNING QUESTION IS THEIRS. A question the conductor has already
+#     ruled on — the same words, wherever it was asked, in this stop or an
+#     earlier one — is refused to the conductor. A question that comes back
+#     after being answered is the pattern that takes judgement.
+#
+# The practitioner's own `answer` is bound by none of this, and supersedes
+# anything, always. What the conductor rules is filed as its own and
+# provisional, on the brief and on the record, for them to supersede.
 #
 # ==============================================================================
 # WHERE AN EVALUATOR IS RAISED
@@ -727,10 +758,10 @@
 # ==============================================================================
 #
 # Every cell below is decided by the STAGE and by WHETHER THE MARKER EXISTS.
-# Nothing here reads what he said, and nothing here judges what a half-built
+# Nothing here reads what they said, and nothing here judges what a half-built
 # tree is worth.
 #
-#   | state                 | `remit stop`               | he adds "also do Y"    |
+#   | state                 | `remit stop`               | they add "also do Y"    |
 #   |-----------------------|----------------------------|------------------------|
 #   | new, stopped          | refused, nothing running   | brief edited; the next |
 #   |                       |                            | resume runs gate 1     |
@@ -758,12 +789,12 @@
 # WHILE THE MARKER EXISTS the authority is LOCKED. The chain re-hashes it before
 # every raise and before every commit; a digest that no longer matches is
 # refused — nothing is raised against text nobody judged, and no delivery is
-# committed or pull request touched for a round built against text he has
+# committed or pull request touched for a round built against text they have
 # since replaced — and the item escalates at the stage it could not leave, with
-# `authority changed` on the record. The escalation's own commit carries what he
-# wrote, as his change and not as anything this run judged, and the record's
+# `authority changed` on the record. The escalation's own commit carries what they
+# wrote, as their change and not as anything this run judged, and the record's
 # authority pair still names what the run raised from — so it is still a change
-# at his next resume. What is NOT locked: a new item elsewhere, and a phase
+# at their next resume. What is NOT locked: a new item elsewhere, and a phase
 # file written beside the brief.
 #
 # AT A STOP the same comparison decides one thing: an authority whose digest
@@ -780,13 +811,13 @@
 # `accepted` with one waiting — resting there, or arriving there — the chain
 # STOPS at `accepted` and hands over: the lowest such file is named in that
 # section and the pointer moved to it, the stage goes to `new`, the pull request
-# goes back to draft, and the run ENDS. His next resume evaluates the phase.
+# goes back to draft, and the run ENDS. Their next resume evaluates the phase.
 # That is the whole of what this script writes inside a brief, and it never
 # runs while a chain that could be building from that brief is in flight. The
-# item is left ACTIVE at `new`, even where his `until` carried a `, then park`
-# he had just reached: work he queued is not work he parked.
+# item is left ACTIVE at `new`, even where their `until` carried a `, then park`
+# they had just reached: work they queued is not work they parked.
 #
-# `remit stop` is his word that the in-flight work is gone. It ends the CHAIN,
+# `remit stop` is their word that the in-flight work is gone. It ends the CHAIN,
 # not the item: abandoning the item is `close`. It refuses only when there is
 # NO MARKER AT ALL, and IN THIS ORDER: it ends the tree of the RAISE the marker
 # names; it sends TERM to the chain's own pid; it WAITS for that pid to be gone,
@@ -805,12 +836,12 @@
 # THE ROAD BACK IN
 # ==============================================================================
 #
-# A chain that stopped — his `stop`, an escalation, or a crash — RESUMES AT THE
+# A chain that stopped — their `stop`, an escalation, or a crash — RESUMES AT THE
 # STEP IT STOPPED AT AND NEVER EARLIER. The record says where that is, and
 # `resume_point` is the whole of how it is read.
 #
 # ONLY `resume` CONTINUES A CRASHED RUN, and it is never automatic: it stays on
-# his board until he deals with it. Every OTHER verb wipes the marker as part of
+# their board until they deal with it. Every OTHER verb wipes the marker as part of
 # doing its own job — `stop` ends the dead chain and says so, `park` parks,
 # `close` archives — so no verb ever refuses until a person hand-deletes a file.
 # That is `crash_take`.
@@ -856,7 +887,7 @@ usage:
                          --park attaches to the --until beside it; on its own it
                          is refused — `remit park <slug>` is that instruction.
   remit park <slug>      attention -> parked. The stage does not move.
-  remit stop <slug>      end the chain running on this item — his word that the
+  remit stop <slug>      end the chain running on this item — their word that the
                          in-flight work is gone. Refused only when there is no
                          marker at all.
                          Ends the fresh context it had raised and everything
@@ -900,7 +931,7 @@ usage:
   remit report close <name>  archive it to field-reports/.archive/
   remit rules init       lay down .remit/rules/ — refined.md, accepted.md,
                          closed.md — with the four section headings the
-                         practitioner writes his rubrics under, and the rubrics
+                         practitioner writes their rubrics under, and the rubrics
                          remit ships. Idempotent; it never overwrites a file that
                          is already there, and it writes no rubric of its own
                          beyond those.
@@ -940,13 +971,15 @@ usage:
                          chain then resumes exactly as `resume` would, at the
                          stage it is at. Without --conductor the words are the
                          practitioner's and the ruling is settled; with it they
-                         are the conductor's, under the elevation he gave it,
-                         and the line and the record say so — provisional, and
-                         his to supersede. A question may be answered again by
-                         anyone: the latest line stands and the record names
-                         what it superseded. Refused (exit 2, nothing written)
-                         only when the record carries no open question by that
-                         number.
+                         are the conductor's, under the standing elevation at
+                         .remit/elevation.md, and the line and the record say
+                         so — provisional, and theirs to supersede. Refused
+                         (exit 2, nothing written) when the record carries no
+                         open question by that number; and --conductor is
+                         refused with no elevation written, as the third
+                         conductor ruling on the item since the practitioner's
+                         last, and on a question the conductor already ruled on
+                         — THE OUTER LOOP in this script's header.
   remit version          `remit <version>`, from .remit/.install/manifest — the
                          one place the installer wrote it. A copy nobody
                          installed says so and exits 2. `--version` is the same.
@@ -1060,7 +1093,7 @@ resume)
 	;;
 answer)
 	# `answer <slug> <n> "<words>" [--conductor]`: the number is the record's, the
-	# words are filed verbatim. Without the flag the ruling is his and settled; with
+	# words are filed verbatim. Without the flag the ruling is theirs and settled; with
 	# it, the conductor's and provisional. `record_answer` checks both against the
 	# record before anything is written.
 	[ $# -ge 3 ] || usage
@@ -1079,7 +1112,7 @@ answer)
 	case "$answer_n" in
 	'' | *[!0-9]* | 0*) die "the question is named by its number on the record — not '$answer_n'" ;;
 	esac
-	[ -n "$(printf '%s' "$answer_text" | tr -d '[:space:]')" ] || die "an answer is his words, and there are none here"
+	[ -n "$(printf '%s' "$answer_text" | tr -d '[:space:]')" ] || die "an answer is their words, and there are none here"
 	;;
 park | stop | close)
 	[ $# -eq 1 ] || usage
@@ -1310,7 +1343,7 @@ local_record_setting() { # $1 key -> its string value, or nothing
 		sed -n 1p
 }
 
-# ONE PATH NAMESPACE between what git STORED and what he TYPED: a remote that is a
+# ONE PATH NAMESPACE between what git STORED and what they TYPED: a remote that is a
 # directory here is compared as a directory, every real URL as the string it is.
 same_remote() { # $1 $2 -> 0 when both name the same repository
 	[ "$1" = "$2" ] && return 0
@@ -1394,6 +1427,10 @@ ITEMARCH="$ITEMS/.archive"
 REPORTS="$RECDIR/field-reports"
 REPORTARCH="$REPORTS/.archive"
 RUBRICS="$REMITDIR/rules"
+# THE STANDING ELEVATION: the practitioner's words on what the conductor may
+# rule on their behalf. Written by them, never by anything here; read only for
+# being there. THE OUTER LOOP in this script's header is the law.
+ELEVATION="$REMITDIR/elevation.md"
 SETTINGS_REL=".remit/settings.json"
 SETTINGSFILE="$root/$SETTINGS_REL"
 # RETIRED into the registry. Nothing writes it; `setup` and `migrate` read it
@@ -1665,7 +1702,7 @@ lock_drop() {
 # the next commit any run makes.
 #
 # Not `git commit -- <paths>`, which would re-commit a marker that is live on
-# disk; not `git rm --cached` and a plain commit, which would publish whatever he
+# disk; not `git rm --cached` and a plain commit, which would publish whatever they
 # has staged. The removal is built in an index of its own — HEAD's tree with the
 # marker paths taken out — committed by an ordinary `git commit` against that
 # index, so hooks and signing apply; the real index is then brought into line.
@@ -1966,7 +2003,7 @@ rubric_ids() { # $1 refined|accepted|closed  $2 promote|hold|fix|accept
 # how far the practitioner's own word reaches
 # ==============================================================================
 #
-# This is HIS word and nothing else — the `until` he gave, or the stage a parked
+# This is THEIR word and nothing else — the `until` they gave, or the stage a parked
 # item rests at. No rule raises it and no rule lowers it here: a `promote` and a
 # `hold` are citations a gate's evaluator makes about ONE gate, and they are
 # applied at that gate, in `resume`, where the citation is read. Sets LIM.
@@ -2085,7 +2122,7 @@ authority_file() {
 # ==============================================================================
 #
 # The digest is of the PRACTITIONER'S WORDS ALONE: the script-owned header lines
-# are cut out, so a stage this script wrote is not a change he made. `git
+# are cut out, so a stage this script wrote is not a change they made. `git
 # hash-object`, because git is already required and answers the same on both
 # shells; CRs stripped as every other read here does.
 hash_of() { # $1 file -> a digest of its content, or empty when it is not there
@@ -2280,7 +2317,7 @@ crashed_note() { # $1 marker file
 #
 # IT IS CALLED LAST AMONG A VERB'S PRECONDITIONS, because it WRITES: a verb wipes
 # the marker AS PART OF DOING ITS OWN JOB, and one that wiped it and then refused
-# would take the crash off his board while doing nothing. Every check that can
+# would take the crash off their board while doing nothing. Every check that can
 # refuse runs BEFORE this; the one refusal here wipes nothing.
 CRASH_NOTE=''
 crash_take() { # 0 nothing is running here; 1 a chain is
@@ -2296,7 +2333,7 @@ crash_take() { # 0 nothing is running here; 1 a chain is
 # ending what a chain raised
 # ==============================================================================
 #
-# A raise is a PROCESS, and his word that a chain is over has to reach it, or it
+# A raise is a PROCESS, and their word that a chain is over has to reach it, or it
 # goes on writing into the worktree `stop` is about to discard.
 #
 # `ps -ef` finds it: both required shells answer it, and its second and third
@@ -2372,9 +2409,9 @@ end_raised() { # $1 the pid the marker names as the raise in flight
 #
 # A queued phase is a FILE and nothing else: `phase-<n>.md` in the item folder at
 # a number above the one the pointer names — no line in the brief, which is what
-# lets one be written while the brief is locked. The `## Phases` section is his
+# lets one be written while the brief is locked. The `## Phases` section is theirs
 # PROSE; the reader takes the POINTER out of it and nothing else, the FILES decide
-# the queue, and the writer APPENDS to his section.
+# the queue, and the writer APPENDS to their section.
 
 # Every `**Current phase:**` pointer, read only as far as the file name; a
 # pointer that names no file is not returned as one.
@@ -2410,11 +2447,11 @@ queued_phase() {
 }
 
 # Names the phase in the brief's `## Phases` section and moves the pointer to it.
-# THIS IS THE ONLY THING THIS SCRIPT WRITES INSIDE A BRIEF'S BODY. His words are
+# THIS IS THE ONLY THING THIS SCRIPT WRITES INSIDE A BRIEF'S BODY. Their words are
 # carried through untouched and in place: one line is appended naming the phase,
 # the pointer goes at the end, and the only thing taken out is the pointer being
 # replaced — the whole line where it stood alone, the pointer only where it
-# ended a sentence of his. A brief with no such section gets one, at the end.
+# ended a sentence of theirs. A brief with no such section gets one, at the end.
 phase_adopt() { # $1 the phase file name
 	_new=$1
 	: >"$WORK/ph.pre"
@@ -2580,7 +2617,7 @@ resume_point() { # $1 the gate the item's stage will run
 }
 
 # What the resume point amounts to, for the practitioner to read. Composed here
-# so the line he sees and the line the record carries are the same line.
+# so the line they see and the line the record carries are the same line.
 resume_point_note() {
 	[ -n "$AT_GATE" ] || return 0
 	if [ "$AT_AWAITING" = yes ]; then
@@ -2624,8 +2661,8 @@ pr_to_draft() {
 # ==============================================================================
 #
 # Asked before every raise and before every commit a running chain makes. Either
-# he ENDED this chain — `stop` took the marker and recorded it, so this exits and
-# records nothing — or he CHANGED THE AUTHORITY under it, which returns 1 and the
+# they ENDED this chain — `stop` took the marker and recorded it, so this exits and
+# records nothing — or they CHANGED THE AUTHORITY under it, which returns 1 and the
 # caller escalates at the stage it could not leave.
 
 # The one way a chain leaves when the lock has been taken from it; two accounts
@@ -2758,7 +2795,7 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 		printf '%s: could not open the kept-output home at %s — this raise is told it has nowhere to keep what it runs.\n' \
 			"$ME" "$(runs_home "$_wt")" >&2
 	fi
-	# The clock is read immediately before and after the raise: the wall clock he
+	# The clock is read immediately before and after the raise: the wall clock they
 	# waited through.
 	_t0=$(secs)
 	REMIT_ITEM="$item" \
@@ -2789,7 +2826,7 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	# raise passes through: nothing seeded is on disk when the next `git add -A`
 	# runs.
 	item_unseed "$_wt"
-	# A raise ENDED by his `stop` is not a raise that FAILED: `stop` removes the
+	# A raise ENDED by their `stop` is not a raise that FAILED: `stop` removes the
 	# marker BEFORE it signals, so this tells them apart without a signal number.
 	marker_is_ours || chain_ended
 	mark_raise ''
@@ -2884,7 +2921,7 @@ escalate() { # $1 reason
 	[ "$_runlen" -gt 1 ] &&
 		_repeat="this is the $(ordinal "$_runlen") consecutive escalation on this reason"
 	# NOTHING IS RAISED HERE. The verdicts above this entry ARE the analysis; what
-	# the brief needs is his, from the record, and the entry carries the reason, the
+	# the brief needs is theirs, from the record, and the entry carries the reason, the
 	# round, whether this road has been walked before, and the authority the run
 	# raised from.
 	{
@@ -2907,7 +2944,7 @@ escalate() { # $1 reason
 		authority_lines
 		printf '\n'
 		printf 'The brief is untouched, and what it needs is the practitioner'\''s: the verdicts\n'
-		printf 'above are the record he rules from.\n'
+		printf 'above are the record they rule from.\n'
 	} | log_append "escalated — $_reason — $(now)"
 	put_header "$brief" escalated "$(hdr "$brief" Stage)" "$(hdr "$brief" Until)" KEEP
 	commit_step "remit: $slug escalated — $_reason" ".remit/work-items/$slug"
@@ -3493,8 +3530,8 @@ depends_on_names() { # $1 the file to read the line from
 		return 0
 	fi
 
-	# HIS PROSE COMES LAST and starts at the first ` — `; everything after it is
-	# his and is not resolved, so a comma inside a sentence he wrote is a comma.
+	# THEIR PROSE COMES LAST and starts at the first ` — `; everything after it is
+	# theirs and is not resolved, so a comma inside a sentence they wrote is a comma.
 	_val=$(hdr "$1" 'Depends on')
 	_emdash=' — '
 	case "$_val" in
@@ -3510,8 +3547,8 @@ depends_on_names() { # $1 the file to read the line from
 		set +f
 		_w=$(printf '%s\n' "$_field" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
 		if [ -n "$_w" ]; then
-			# HIS PUNCTUATION IS NOT PART OF THE NAME — a bracket he put round
-			# it, a backtick he set it in, a bold marker, the full stop he ended
+			# THEIR PUNCTUATION IS NOT PART OF THE NAME — a bracket they put round
+			# it, a backtick they set it in, a bold marker, the full stop they ended
 			# the line with. A slug is word characters and hyphens throughout, so
 			# nothing a name can legitimately carry is stripped.
 			_w=$(printf '%s\n' "$_w" | sed 's/^[`*_([{"]*//; s/[].,;:!?)}`*_"]*$//')
@@ -3544,7 +3581,7 @@ depends_on_names() { # $1 the file to read the line from
 
 	# `none` and `nothing` are the same answer as an absent line, and they are
 	# the WHOLE answer: beside another name they contradict it, and nothing here
-	# decides which half he meant. The probe carries a newline at BOTH ends of
+	# decides which half they meant. The probe carries a newline at BOTH ends of
 	# every name, so a slug that merely ends in `none` is not one.
 	_probe="
 $_names"
@@ -3696,7 +3733,7 @@ back in."
 }
 
 # NOTHING HERE WRITES A BRIEF'S BODY. The header block is this script's
-# (`put_header`); every word below it is his.
+# (`put_header`); every word below it is theirs.
 
 # ==============================================================================
 # the loop
@@ -3713,10 +3750,10 @@ back in."
 # before the first evaluate: yes at the gate that produces a delivery, no at the
 # closing gate's first round, yes on every later round.
 #
-# `none` IS GATE 1 WITH NOTHING BUT A BRIEF: only he changes a brief, so a
+# `none` IS GATE 1 WITH NOTHING BUT A BRIEF: only they change a brief, so a
 # must-fix there has no author. This returns 2 for that — distinct from the 1
 # that means escalate — with LOOP_STOP the reason, and the caller stops the item
-# where it is, for him. `research` IS GATE 1 WITH RESEARCH BESIDE THE BRIEF: the
+# where it is, for them. `research` IS GATE 1 WITH RESEARCH BESIDE THE BRIEF: the
 # author writes `research.md` and never the brief, and a must-fix comes back to
 # it only on a `Back to: research` line; the rest of the round is what a build
 # gets, because it is the same loop.
@@ -4077,7 +4114,7 @@ nothing escalated: what to do with it is the practitioner's."
 			sed 's/[^A-Za-z-].*//' | tr 'A-Z' 'a-z')
 
 		# GATE 1 WITH NOBODY TO SEND IT TO: the must-fix goes on the record and the item
-		# waits for him at the stage it is in. No round two, no escalation. An item with
+		# waits for them at the stage it is in. No round two, no escalation. An item with
 		# research reaches this same stop whenever the verdict did not send the must-fix
 		# back to it.
 		if [ "$_author" = none ] ||
@@ -4090,7 +4127,7 @@ nothing escalated: what to do with it is the practitioner's."
 			fi
 			[ "$_author" = research ] && LOOP_STOP_NOTE="The gate into \`$GATE\` returned a must-fix: $LOOP_STOP
 The verdict did not carry \`Back to: research\`, so this is not a must-fix a fresh
-research raise may discharge — and a brief is the practitioner's, his alone. The
+research raise may discharge — and a brief is the practitioner's, theirs alone. The
 item waits at \`new\` with the must-fix on the record above, \`research.md\` was not
 re-run, and no second round was run."
 			return 2
@@ -4114,7 +4151,7 @@ re-run, and no second round was run."
 		fi
 		# THE RECORD ARGUING WITH ITSELF: a must-fix that RETURNS after being displaced
 		# — A, B, A — is not a builder's to discharge; the two verdicts want opposite
-		# things. The loop stops for him at the round the return shows, both must-fixes
+		# things. The loop stops for them at the round the return shows, both must-fixes
 		# named. `same must-fix twice` is the consecutive case and escalates; this is a
 		# stop.
 		case "$_seen_mf" in
@@ -4379,8 +4416,8 @@ review_attest() { # reads $WORK/standing; returns what the commit returned
 	commit_and_push "remit: review — $_ra_count standing finding(s) attested at $_ra_head" $_ra_paths
 }
 
-# The one line the closing verb says about the seal, so that closing on his word
-# is informed by a number he can read rather than a scroll he cannot.
+# The one line the closing verb says about the seal, so that closing on their word
+# is informed by a number they can read rather than a scroll they cannot.
 SEALED=0
 seal_line() {
 	if [ "$SEALED" = 0 ]; then
@@ -4464,7 +4501,7 @@ do_close() { # $1 authority for this closure, in words  $2 delivery text  $3 `cl
 # on), mapping incompleteness is a `Finding:` and not a must-fix, and a claim the
 # research MARKS unestablished is a `Finding:` too. THE BOUND IS IN THE RUBRIC'S
 # OWN TEXT, not in this script's parser: what counts as a must-fix is a judgement
-# standard, and those are his, in gate files a retro rewrites. a4 and a5 are what
+# standard, and those are theirs, in gate files a retro rewrites. a4 and a5 are what
 # a delivery owes its own proof: what one of remit's own scripts decides is
 # asserted, and what a third party decides is asserted against that third party.
 rubrics_shipped() {
@@ -4483,11 +4520,11 @@ rubrics_seed() {
 		[ -e "$_p" ] && continue
 		{
 			printf '# What it takes to become `%s`\n\n' "$_g"
-			printf 'The practitioner'"'"'s rubrics for this gate, in his words, each under the ruling\n'
+			printf 'The practitioner'"'"'s rubrics for this gate, in their words, each under the ruling\n'
 			printf 'it came from and its date. `bin/remit` hands THIS FILE, and no other, to the\n'
 			printf 'fresh context that evaluates at this gate, and acts only on the citations that\n'
 			printf 'context returns. What each section does, and the shape of a line, are in\n'
-			printf '`bin/remit`'"'"'s header. Only a retro he calls writes here.\n\n'
+			printf '`bin/remit`'"'"'s header. Only a retro they call writes here.\n\n'
 			for _s in promote hold fix accept; do
 				printf '## %s\n' "$_s"
 				_lines=$(rubrics_shipped |
@@ -4680,13 +4717,13 @@ LOOP_STOP_NOTE=''
 # ==============================================================================
 
 # ==============================================================================
-# `new`: admit the item, and then run the chain when his word says to
+# `new`: admit the item, and then run the chain when their word says to
 # ==============================================================================
 #
-# `new` is the same chain `resume` is, decided once from what he said and what
+# `new` is the same chain `resume` is, decided once from what they said and what
 # `refined.md` carries:
 #
-#   --park, nothing else    it sits: he named no stop to go to.
+#   --park, nothing else    it sits: they named no stop to go to.
 #   --until X               the chain runs NOW, in this command, and prints the
 #                           row where it stopped. A `--park` beside it is the
 #                           ceiling on the promotes and the rest at X —
@@ -4713,11 +4750,11 @@ create_item() {
 	'# '*) ;;
 	*) rm -rf "$item"; die "the brief must begin with a '# Title' heading" ;;
 	esac
-	# WHAT IT DEPENDS ON is his and OPTIONAL — omitted is `none`. A line that is
+	# WHAT IT DEPENDS ON is theirs and OPTIONAL — omitted is `none`. A line that is
 	# THERE and cannot be read whole is refused. Nothing here writes the line.
 	if ! depends_on_names "$brief"; then
 		rm -rf "$item"
-		die "the brief's '**Depends on:**' line cannot be read whole — $DEPENDS_ON_BAD. That line names work items by slug, comma-separated, or the word 'none'; omitting it altogether means none. Ask him; nothing here may answer it for him."
+		die "the brief's '**Depends on:**' line cannot be read whole — $DEPENDS_ON_BAD. That line names work items by slug, comma-separated, or the word 'none'; omitting it altogether means none. Ask the practitioner; nothing here may answer it for them."
 	fi
 	# `--park` with no `--until` files the item without running it. `--park` beside
 	# an `--until` is one ruling with it: the item is born ACTIVE and runs —
@@ -4736,7 +4773,7 @@ create_item() {
 	recorded_until=$(until_value "$want_until" "$want_park")
 	put_header "$brief" "$att" new "$recorded_until" ''
 	log_ensure
-	# AFTER the header is written, because the digest is of his words and the
+	# AFTER the header is written, because the digest is of their words and the
 	# header lines are cut out of it either way — but the file has to be the one
 	# every later read sees.
 	resolve_authority
@@ -4771,7 +4808,7 @@ create_item() {
 # just written, the ruling is already on its header, and there is exactly one
 # implementation of a gate in this script. The `--until` is not passed on — it
 # was recorded at admission, and recording it twice would put two rulings in the
-# record for one word of his.
+# record for one word of theirs.
 if [ "$cmd" = new ]; then
 	create_item
 	_nrc=$?
@@ -4786,7 +4823,7 @@ if [ "$cmd" = new ]; then
 fi
 
 # ==============================================================================
-# answer — his words filed as a ruling, then the road resume takes
+# answer — their words filed as a ruling, then the road resume takes
 # ==============================================================================
 #
 # The law is AN EVALUATOR MAY ASK under THE THREE GATES; this is only its verb.
@@ -4800,7 +4837,7 @@ record_answer() {
 	[ "$(hdr "$brief" Stage)" = closed ] && die "'$slug' is closed. Closed work has left every view; nothing answers it."
 	[ -f "$log" ] || die "'$slug' has no record, so it carries no question to answer"
 	# The LAST `asked:` stop, and the questions it numbered. Read from the record
-	# and never from memory: the number he gives is the number the entry gave.
+	# and never from memory: the number they give is the number the entry gave.
 	_ans_block=$(nocr "$log" | awk '
 		/^## stopped — asked: / { inblock = 1; block = ""; next }
 		/^## / { inblock = 0; next }
@@ -4824,6 +4861,24 @@ record_answer() {
 	_ans_head="ruling — Q$answer_n answered"
 	_ans_mark=''
 	if [ "$answer_by" = conductor ]; then
+		# THE OUTER LOOP's three refusals — this script's header is the law.
+		[ -s "$ELEVATION" ] ||
+			die "nothing rules on the practitioner's behalf without a standing elevation in their words — none is at .remit/elevation.md"
+		_ans_run=$(nocr "$log" | awk '
+			/^## ruling — / { if (index($0, "by the conductor") > 0) n++; else n = 0 }
+			END { print n + 0 }')
+		[ "$_ans_run" -lt 2 ] ||
+			die "two rulings on '$slug' have been made on the practitioner's behalf since their last word on it — the third is theirs: $ME answer $slug $answer_n \"<their words>\""
+		if nocr "$log" | Q="$_ans_q" awk '
+			/^## ruling — / { inc = (index($0, "by the conductor") > 0); next }
+			/^## / { inc = 0; next }
+			inc && index($0, "- question ") == 1 {
+				sub(/^- question [0-9]+: /, "")
+				if ($0 == ENVIRON["Q"]) found = 1
+			}
+			END { exit found ? 0 : 1 }'; then
+			die "question $answer_n is one the conductor has already ruled on — a question that returns is the practitioner's"
+		fi
 		_ans_head="$_ans_head by the conductor, provisionally"
 		_ans_mark=' by the conductor, provisionally'
 	fi
@@ -4839,7 +4894,7 @@ record_answer() {
 	[ -f "$AUTHORITY" ] || die "'$slug' has no authority file to carry a ruling"
 	# THE ONE WRITE. A `## Rulings` heading once, at the end; then one line per
 	# answer — the date, the question it answers (the evaluator's words, marked
-	# as asked), whose the ruling is where it is not his, and the words as
+	# as asked), whose the ruling is where it is not theirs, and the words as
 	# given. A later answer to the same question is one more line below it: the
 	# latest stands, and nothing above it is edited. Nothing else in the file
 	# is touched.
@@ -4852,7 +4907,7 @@ record_answer() {
 		printf -- '- question %s: %s\n' "$answer_n" "$_ans_q"
 		printf -- '- ruled%s: %s\n' "$_ans_mark" "$answer_text"
 		[ "$answer_by" = conductor ] &&
-			printf -- '- by: the conductor, under the standing elevation the practitioner gave it — provisional until he reviews it, and his to supersede\n'
+			printf -- '- by: the conductor, under the standing elevation the practitioner gave it — provisional until they review it, and theirs to supersede\n'
 		[ -n "$_ans_prior" ] &&
 			printf -- '- supersedes: the %s'\''s ruling on this question above; the latest stands\n' "$_ans_prior"
 		printf -- '- filed under `## Rulings` in `%s`, verbatim; the stage is unchanged and the chain resumes where it is\n' "$AUTHORITY_REL"
@@ -4925,7 +4980,7 @@ park)
 	;;
 
 stop)
-	# His word that the in-flight work is gone: ends the chain running on the item,
+	# Their word that the in-flight work is gone: ends the chain running on the item,
 	# refuses only with no marker at all, leaves the header alone. IT DISPOSES ITS
 	# OWN MARKER, always and first, which is what makes the crashed class mean one
 	# thing; a marker whose chain is already gone is a CRASH, and this verb ends it
@@ -4947,7 +5002,7 @@ stop)
 	stop_step=$(marker_field step)
 	[ -n "$stop_step" ] || stop_step='a step it did not record'
 	# The pair the RUN was holding, so that anything the practitioner wrote while
-	# it ran is still a change at his next resume.
+	# it ran is still a change at their next resume.
 	AUTHORITY_REL=$(marker_field authority)
 	AUTHORITY_HASH=$(marker_field hash)
 
@@ -4965,7 +5020,7 @@ stop)
 	# THE LOCK GOES FIRST, before anything is signalled. A chain whose raise dies
 	# under it cannot tell that from a raise that failed by any other means, and
 	# would escalate naming the seam — so the marker it re-reads is taken away
-	# first, and the chain reads its absence as his word rather than as a fault.
+	# first, and the chain reads its absence as their word rather than as a fault.
 	rm -f "$marker"
 	if [ "$stop_crashed" = yes ]; then
 		say "this chain had already $stop_was; \`stop\` ends it and disposes its marker."
@@ -5053,7 +5108,7 @@ close)
 		[ -n "$CRASH_NOTE" ] &&
 			printf '\n- a crashed chain'"'"'s marker was wiped by this closure: %s\n' "$CRASH_NOTE"
 	} | log_append "ruling — close — $(now)"
-	# NO STAMP. His word ends the work; it does not take it through the gate.
+	# NO STAMP. Their word ends the work; it does not take it through the gate.
 	closing_stage=$(hdr "$brief" Stage)
 	do_close "the practitioner's word" "$delivery" ''
 	[ -n "$CRASH_NOTE" ] && say "crashed: $CRASH_NOTE. The marker is gone — archiving wiped it."
@@ -5118,8 +5173,8 @@ report)
 	;;
 
 setup)
-	# PROPOSES. Bare, it writes, commits and pushes nothing: the registry is his
-	# file. `--write` is his save going through this script rather than a
+	# PROPOSES. Bare, it writes, commits and pushes nothing: the registry is their
+	# file. `--write` is their save going through this script rather than a
 	# redirection, which would empty the file this reads before it opens it: one
 	# save, after every read, atomic, committing nothing.
 	command -v jq >/dev/null 2>&1 ||
@@ -5395,7 +5450,7 @@ setup)
 		exit 0
 	fi
 
-	# --- the save, on his word, and atomic -----------------------------------
+	# --- the save, on their word, and atomic -----------------------------------
 	#
 	# tmp + rename in the SAME directory, so the registry is either the file that
 	# was there or the whole of the new one, and never a truncated half of either
@@ -5406,7 +5461,7 @@ setup)
 	cat "$proposal" >"$SAVETMP" || die "could not write beside $SETTINGS_REL — nothing was changed"
 	mv -f "$SAVETMP" "$SETTINGSFILE" || die "could not put $SETTINGS_REL in place — nothing was changed"
 	SAVETMP=''
-	# A rewritten registry is his word that the seats are as he means them; any
+	# A rewritten registry is their word that the seats are as they mean them; any
 	# refusal mark on this host is stale by that word. A REFUSED SEAT, below.
 	rm -f "$common_dir/remit-refused" 2>/dev/null
 
@@ -5460,7 +5515,7 @@ rules)
 	fi
 	say "laid down .remit/rules/ —$SEEDED"
 	say "what ships: $(rubrics_shipped | awk -F"$TAB" '{ printf "%s%s under %s.md'"'"'s `%s`", (NR > 1 ? ", " : ""), $3, $1, $2 }')."
-	say "Every other section is empty, and an empty section changes nothing: every gate waits for the practitioner until he writes one, in a retro he calls."
+	say "Every other section is empty, and an empty section changes nothing: every gate waits for the practitioner until they write one, in a retro they call."
 	# THE PROJECT's, not the record's — see `commit_project_and_push`.
 	commit_project_and_push "remit: lay down .remit/rules/" ".remit/rules"
 	exit $?
@@ -5593,7 +5648,7 @@ migrate)
 	[ -n "$SEEDED" ] && say "laid down .remit/rules/ —$SEEDED"
 
 	# `roles.md` retired into `.remit/settings.json`. A repository old enough to
-	# migrate may still carry one; its lines are his own and are CARRIED into a
+	# migrate may still carry one; its lines are their own and are CARRIED into a
 	# registry here — every id registered for the harness it named — and the file
 	# goes. Every other model that harness may use is `remit setup`'s to read.
 	if [ -f "$ROLESFILE" ] && [ ! -e "$SETTINGSFILE" ]; then
@@ -5698,7 +5753,7 @@ resume)
 	# --- did the authority change since this item last came to rest? -----------
 	#
 	# NOTICED HERE, from the digest on the record: the stage goes back to `new`, so
-	# gate 1 judges what he now wrote. Which KIND of change it was is not asked. An
+	# gate 1 judges what they now wrote. Which KIND of change it was is not asked. An
 	# unchanged digest moves nothing.
 	was_auth=$(last_authority "$item")
 	was_hash=$(last_authority_hash "$item")
@@ -5764,7 +5819,7 @@ resume)
 
 		# A phase waiting at the `accepted` stop — whether the item was resting
 		# there when this resume began or has just arrived. The chain stops here
-		# and the hand-off happens below: nothing is closed out from under work he
+		# and the hand-off happens below: nothing is closed out from under work they
 		# has queued, and nothing of that phase is built in this run.
 		if [ "$st" = accepted ]; then
 			PHASE_QUEUED=$(queued_phase)
@@ -5789,8 +5844,8 @@ resume)
 		CARRY=until
 		if [ "$nr" -gt "$LIM" ]; then
 			CARRY=promote
-			# THE CEILING: a recorded `, then park` is his word that no promote gets past
-			# the stop he named, on this run and every later one — `**Until:**` in this
+			# THE CEILING: a recorded `, then park` is their word that no promote gets past
+			# the stop they named, on this run and every later one — `**Until:**` in this
 			# script's header.
 			if [ "$UNTIL_PARK" = yes ] && [ "$r" -ge "$(rank "$UNTIL_STOP")" ]; then
 				STOP=$LIM_REASON
@@ -5817,7 +5872,7 @@ resume)
 				break
 			fi
 			# WHO AUTHORS AT THIS GATE: research only where the brief carries a
-			# `**Research:**` line in his words. It authors `research.md` and never the
+			# `**Research:**` line in their words. It authors `research.md` and never the
 			# brief, and runs the loop gates 2 and 3 run — THE THREE GATES' exception.
 			_g1author=none
 			_g1now=no
@@ -5837,7 +5892,7 @@ resume)
 				STOP_NOTE=$LOOP_STOP_NOTE
 				[ -n "$STOP_NOTE" ] || STOP_NOTE="The gate into \`refined\` returned a must-fix: $LOOP_STOP
 Nothing in this mechanism may change a brief — that is the practitioner's, and
-his alone — so the item waits at \`new\` with the must-fix on the record above,
+theirs alone — so the item waits at \`new\` with the must-fix on the record above,
 and no second round was run."
 				break
 			fi
@@ -5923,8 +5978,8 @@ in the stage it is in, for the practitioner, whatever else was cited there."
 			# things can license one and they are not the same fact. Either the
 			# practitioner's own `until` reached `closed`, or the closing gate's
 			# evaluator cited a `promote` rubric that carried the item past what
-			# he said. A record that says the first when the second happened
-			# credits him with a decision a rubric made.
+			# they said. A record that says the first when the second happened
+			# credits them with a decision a rubric made.
 			if [ "$CARRY" = promote ] && [ -n "$GATE_PROMOTE" ]; then
 				_lic="promote: $GATE_PROMOTE — the closing gate's evaluator cited that rubric, and it carried this item past what the practitioner said"
 				_licshort="promote: $GATE_PROMOTE"
@@ -5961,7 +6016,7 @@ in the stage it is in, for the practitioner, whatever else was cited there."
 	# The one thing this script writes inside a brief's body, and it happens with
 	# nothing in flight: the phase is named in `## Phases`, the pointer moves
 	# to it, the stage goes back to `new` and the pull request goes back to draft.
-	# The run ENDS here — his next resume is what evaluates the phase.
+	# The run ENDS here — their next resume is what evaluates the phase.
 	if [ -n "$PHASE_QUEUED" ]; then
 		phase_adopt "$PHASE_QUEUED"
 		put_header "$brief" active new "$(hdr "$brief" Until)" KEEP
@@ -5990,7 +6045,7 @@ Nothing of this phase was built in this run."
 	elif [ -n "$STOP_NOTE" ]; then
 		{ printf '%s\n\n' "$STOP_NOTE"; authority_lines; } | log_append "stopped — $STOP — $(now)"
 	else
-		# A promote carried it past what he said; where it came to rest, that is
+		# A promote carried it past what they said; where it came to rest, that is
 		# why it is here, and that is what the row says.
 		if [ -n "$MOVED_BY" ] && [ "$STOP" = 'until ran out' ]; then
 			STOP=$MOVED_BY

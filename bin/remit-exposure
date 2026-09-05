@@ -10,17 +10,17 @@
 #
 # Two channels, and they are NEVER added together:
 #
-#   said   the words the practitioner typed. Only his keystrokes: on Claude Code,
+#   said   the words the practitioner typed. Only their keystrokes: on Claude Code,
 #          a transcript `user` entry whose `promptSource` is `typed`. Text that
 #          was queued, injected by the system, or accepted from a suggestion is
-#          not his and is never counted as his. What plays that part on each of
+#          not theirs and is never counted as theirs. What plays that part on each of
 #          the other four harnesses, and where it cannot, is the table below.
-#   told   the words written back at him IN THE CONVERSATION — the assistant's
+#   told   the words written back at them IN THE CONVERSATION — the assistant's
 #          own chat text, and nothing else. NOT a sub-agent's words (a Claude
 #          Code sidechain entry is excluded by name), not thinking, not tool
 #          calls or their results, not a line of code, not a document written to
-#          disk. What a sub-agent said to its coordinator never reached him; what
-#          the coordinator then said to him did, and that is what is counted.
+#          disk. What a sub-agent said to its coordinator never reached them; what
+#          the coordinator then said to them did, and that is what is counted.
 #          This is the whole reason the status line labels the channel `Agents`
 #          rather than anything wider, and it is stated here and nowhere else.
 #
@@ -68,8 +68,8 @@
 # SIX tab-separated fields, per line:
 #
 #   <iso-local-time>  when the line was appended, `%Y-%m-%dT%H:%M:%S%z`, LOCAL
-#   <said>            words typed by him in this delta
-#   <told>            words written at him in this delta
+#   <said>            words typed by them in this delta
+#   <told>            words written at them in this delta
 #   <cursor-after>    how far into the harness's own record this line read. A
 #                     BYTE OFFSET wherever that record is one appended file —
 #                     Claude Code, codex, copilot and pi. Devin's record is a
@@ -111,7 +111,7 @@
 # how many items are in flight from the exposure lines, from the branches on
 # them, or from anything else it holds — the list is the work surface's own
 # projection of the practitioner's attention, and a second opinion computed out
-# of a measurement OF him would be a different number wearing the same name.
+# of a measurement OF them would be a different number wearing the same name.
 # Whatever the list declines to list, for whatever reason it gives on its own
 # stderr, is not counted here either: this is the list's count, not a count of
 # its own.
@@ -212,13 +212,13 @@
 #     there.
 #
 # ==============================================================================
-# WIRING — the lines the practitioner may add to his Claude Code settings
+# WIRING — the lines the practitioner may add to their Claude Code settings
 # ==============================================================================
 #
 # Nothing here writes them. `install.sh` prints exactly the block below and no
-# document restates it; adding any of them is his act. `install.sh` DOES offer
+# document restates it; adding any of them is their act. `install.sh` DOES offer
 # one write of its own — `.remit/exposure/` into the target's `.gitignore` — and
-# that offer, and what it does when he has changed his mind, is stated in
+# that offer, and what it does when they have changed their mind, is stated in
 # `install.sh` and not restated here.
 #
 # wiring:begin
@@ -275,7 +275,7 @@
 #   `t/integration/remit-exposure-claude.sh`, which is why no count of
 #   transcripts is written down here to go stale. Copilot and devin have no
 #   such field, which is exactly the limit stated against each of them below.
-#   AND A SESSION HE WAS NEVER IN RECORDS NOTHING AT ALL: `entrypoint` on the
+#   AND A SESSION THEY WERE NEVER IN RECORDS NOTHING AT ALL: `entrypoint` on the
 #   transcript entries separates a session someone sat at (`cli`) from one a
 #   program raised (`sdk-cli`), and `stop` refuses the second outright. Why —
 #   and what it costs when it does not — is at the check itself in `cmd_stop`,
@@ -293,14 +293,14 @@
 #   its prompts in that file, and every rollout whose originator is
 #   `codex_exec` — the shape of every context remit itself raises — has put
 #   nothing into it at all. A prompt piped into `codex exec` is therefore never
-#   counted as his. That contrast is re-counted on the day it runs by
+#   counted as theirs. That contrast is re-counted on the day it runs by
 #   `t/integration/remit-exposure-codex.sh`, which is why no count of rollouts
 #   is written down here to go stale.
 #   `told`: the rollout's `response_item/message` entries with
 #   `role: "assistant"`, `output_text` blocks. NOT `developer` and NOT `user` —
 #   codex delivers `<environment_context>`, `<user_instructions>`, AGENTS.md
 #   and the plugin list as `role: "user"`, so counting that role would count
-#   the harness's own furniture as his words.
+#   the harness's own furniture as their words.
 #   cwd and branch: `session_meta.cwd` and `session_meta.git.branch`.
 #   Cursor: the rollout's byte size.
 #
@@ -310,7 +310,7 @@
 #   `bin/remit-invoke` raises every pi context with `--no-session`, so a
 #   context remit raised writes no session file at all, and every file under
 #   `~/.pi/agent/sessions/` is an interactive one. That is mechanical, and it
-#   is the reason this counts a plain `role: user` and calls it his. Someone
+#   is the reason this counts a plain `role: user` and calls it theirs. Someone
 #   who raises pi WITHOUT `--no-session` breaks it, and no field on the entry
 #   would catch them at it; that is the honest limit and it is not dressed up.
 #   `told`: `role: "assistant"`, `text` blocks — not `thinking`, not `toolCall`.
@@ -326,7 +326,7 @@
 #   injected — the survey's own counts are not written down here, for the same
 #   reason codex's are not.
 #   The presence of the key is therefore the discriminator, and it is used as a
-#   whitelist of the shape that IS his rather than as a blacklist of source
+#   whitelist of the shape that IS theirs rather than as a blacklist of source
 #   names, which would rot the first time a new one appeared.
 #   AND THIS IS STILL THE ONE PLACE THE MEASURE CANNOT KEEP ITS OWN PROMISE.
 #   Excluding injected messages is not the same as separating a message typed
@@ -358,7 +358,7 @@
 #   place: a scan must not lock or disturb the store the CLI is using.
 #   The same limit as copilot's applies to `said`: devin's `prompt_history`
 #   holds a `-p` prompt exactly as it holds a typed one, so a devin context
-#   remit raised has its brief counted as his. Said on stderr, every run.
+#   remit raised has its brief counted as theirs. Said on stderr, every run.
 #
 # WHICH SESSIONS A SCAN READS. Only those whose recorded cwd still resolves to
 # THIS repository — the same `--git-common-dir` the record itself lives at, so
@@ -667,16 +667,16 @@ cmd_stop() {
 
 	_tpn=$(native_path "$_tp")
 
-	# A SESSION HE WAS NEVER IN records nothing at all. Claude Code stamps every
+	# A SESSION THEY WERE NEVER IN records nothing at all. Claude Code stamps every
 	# transcript entry with `entrypoint`: `cli` for a session someone sat at,
 	# and something else — `sdk-cli` on this host — for one a program raised,
 	# which is what every context `bin/remit-invoke` raises is. `said` is
 	# already safe there, because such a session's prompt arrives as
 	# `promptSource: "sdk"` and is not `typed`; `told` is NOT, and without this
-	# a worker's whole output would be counted as words written AT HIM when it
+	# a worker's whole output would be counted as words written AT THEM when it
 	# was written at remit. Found live, on this host, by running `stop` against
 	# a real worker transcript: `My words: 0 · Agents: 336`, and not one of
-	# those 336 words ever reached him.
+	# those 336 words ever reached them.
 	# Absence is not evidence: a transcript whose first entry carries no
 	# `entrypoint` at all is recorded as before, rather than being refused on a
 	# field that may simply have gone.
@@ -684,7 +684,7 @@ cmd_stop() {
 		# The FIRST entry that carries the field, not the first entry: a
 		# transcript can open with `queue-operation` entries that have no
 		# `entrypoint` at all, and reading only line 1 would find nothing and
-		# record a worker session as his. A couple of hundred lines is far more
+		# record a worker session as theirs. A couple of hundred lines is far more
 		# than any observed preamble and costs one `head`.
 		_entry=$(head -n 200 "$_tpn" 2>/dev/null |
 			jq -R -r 'fromjson? // empty | select(type=="object") | .entrypoint // empty' 2>/dev/null |
@@ -772,16 +772,16 @@ cmd_stop() {
 #
 # TWO FORMS, one arithmetic. The default is remit's own wording, for a bar
 # remit owns outright. `--segment` is the practitioner's wording, for the bar
-# he already owns: it carries its own leading separator so it can be APPENDED
-# to a line another script built, and its labels are his — `My words` for what
-# he typed, `Agents` for what the assistant said back to him in the chat. Why
+# they already own: it carries its own leading separator so it can be APPENDED
+# to a line another script built, and its labels are theirs — `My words` for what
+# they typed, `Agents` for what the assistant said back to them in the chat. Why
 # `Agents` and not something wider is stated once at the top of this file.
 #
 # The forms differ in ONE more way, deliberately. With no record at all for
 # this session — no hook wired, or no turn finished yet — the default prints
 # `said 0 · told 0` (a bar that is entirely remit's should still say something)
-# and `--segment` prints NOTHING (a bar that is his should not gain a segment
-# claiming he has said nothing, when the truth is that nothing is being
+# and `--segment` prints NOTHING (a bar that is theirs should not gain a segment
+# claiming they have said nothing, when the truth is that nothing is being
 # recorded). Both exit 0: a status line is not the place to fail.
 cmd_status() {
 	_seg=no
@@ -829,7 +829,7 @@ cmd_status() {
 		exit 0
 	fi
 	if [ "$_seg" = yes ]; then
-		# His format, verbatim: two spaces, a pipe, two spaces, then the pair.
+		# Their format, verbatim: two spaces, a pipe, two spaces, then the pair.
 		printf '  |  My words: %s (+%s) · Agents: %s (+%s)\n' \
 			"$(abbrev "$_said")" "$_dsaid" "$(abbrev "$_told")" "$_dtold"
 	else
@@ -854,7 +854,7 @@ scan_cleanup() { [ -n "$SCAN_TMP" ] && rm -rf "$SCAN_TMP"; }
 
 # The directory the harnesses keep their state under. `--home` overrides it, and
 # that override is the seam every per-harness test uses, so that no test reads
-# the practitioner's own sessions and no test needs his machine to run.
+# the practitioner's own sessions and no test needs their machine to run.
 SCAN_HOME=''
 
 # The repository this record belongs to, as its git common dir. A session is
@@ -1344,7 +1344,7 @@ cmd_scan() {
 	copilot | devin)
 		printf '  NOTE: %s records a prompt delivered by -p exactly as it records one typed at\n' "$_harness"
 		printf '  a prompt, and carries no field that tells them apart. Any said above that came\n'
-		printf '  from a context remit raised is a BRIEF, not his words. Read it that way.\n'
+		printf '  from a context remit raised is a BRIEF, not their words. Read it that way.\n'
 		;;
 	esac
 	scan_cleanup
@@ -1453,7 +1453,7 @@ cmd_today() {
 		# from an item's numbers today: they cannot appear in an item's numbers
 		# EVER. The sentence above tells a reader that some lines went
 		# elsewhere; it does not tell them that three of the five harnesses are
-		# structurally invisible here, and a reader not told that reads their
+		# structurally invisible here, and a reader not told that reads theirs
 		# zero as silence. Everywhere else this script refuses to let a number
 		# be read as clean, so it refuses here too, and counts what it dropped.
 		printf '  AND pi, copilot and devin can never be attributed at all: those three record\n'
@@ -1491,9 +1491,9 @@ cmd_session() {
 	[ $# -ge 1 ] || die "session needs a session id"
 	_sid=$1
 	_dir=$(exposure_dir .) || die "not inside a Git repository — there is no exposure record to read" 4
-	# EVERY record carries its harness in front, claude's included. He names a
+	# EVERY record carries its harness in front, claude's included. They name a
 	# session, not a filename, so each recognised prefix is tried and the
-	# harness is reported back rather than demanded of him.
+	# harness is reported back rather than demanded of them.
 	_file=''
 	_from=''
 	for _h in $HARNESS_NAMES; do

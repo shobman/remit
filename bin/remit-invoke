@@ -929,7 +929,7 @@ fi
 # ==============================================================================
 #
 # A separate question from registration, with a separate answer, because
-# "the practitioner never registered this" and "he registered it and it is not
+# "the practitioner never registered this" and "they registered it and it is not
 # here" are different problems, and only one of them is a registry to edit.
 
 absent() { # $1 why, in words
@@ -1489,9 +1489,9 @@ research_author_section() {
 	printf 'That line is what routes the must-fix. Write it when what you require can be\n'
 	printf 'satisfied by rewriting `research.md`, and only then.\n\n'
 	printf 'THE BRIEF IS NOT YOURS, AND IT IS NOBODY'\''S HERE. Nothing in this mechanism\n'
-	printf 'edits `brief.md`: the practitioner writes it and he alone changes it. A\n'
+	printf 'edits `brief.md`: the practitioner writes it and they alone change it. A\n'
 	printf 'must-fix that can only be satisfied by changing the brief carries NO `Back to:`\n'
-	printf 'line — the item stops and it goes to him, which is the design working rather\n'
+	printf 'line — the item stops and it goes to them, which is the design working rather\n'
 	printf 'than a gap for you to close.\n'
 	return 0
 } # end research_author_section
@@ -1524,15 +1524,15 @@ role_returns() {
 		printf 'one way to raise one, not the only way. A FAIL that carries no must-fix\n'
 		printf 'sends nobody anything: the item stops for the practitioner with your\n'
 		printf 'findings, and no author is raised on it.\n\n'
-		printf 'ASK ONLY FOR A DECISION THAT IS HIS. Where the work cannot proceed because\n'
+		printf 'ASK ONLY FOR A DECISION THAT IS THEIRS. Where the work cannot proceed because\n'
 		printf 'the authority is silent on something no source can settle — which of two\n'
 		printf 'shapes, which resource, whether a thing is in scope — write ONE `Ask:` line\n'
 		printf 'directly under the Finding: or Must-fix: it descends from, naming the\n'
 		printf 'decision it unblocks. An `Ask:` that follows no finding is prose. Any\n'
 		printf 'question stops the item for the practitioner at once, whatever else this\n'
-		printf 'verdict carries, and his answer is filed under `## Rulings` in the\n'
+		printf 'verdict carries, and their answer is filed under `## Rulings` in the\n'
 		printf 'authority. A question the record could answer, or one the research could\n'
-		printf 'establish, is not his and is not asked; four is the most one verdict\n'
+		printf 'establish, is not theirs and is not asked; four is the most one verdict\n'
 		printf 'carries.\n'
 		;;
 	esac
@@ -1566,12 +1566,12 @@ role_returns() {
 		printf 'one question carries more than one line, the LAST line stands. A line that\n'
 		printf 'says `ruled:` is the practitioner'\''s word: cite it as you would a source —\n'
 		printf '"ruled <date>" — build on it, and never re-open, re-derive or second-guess\n'
-		printf 'it; a ruling that is wrong is his to change, not yours to find. A line that\n'
-		printf 'says `ruled by the conductor, provisionally:` was decided on his behalf under\n'
-		printf 'an elevation he gave, and he has not yet reviewed it: build on it exactly\n'
+		printf 'it; a ruling that is wrong is theirs to change, not yours to find. A line that\n'
+		printf 'says `ruled by the conductor, provisionally:` was decided on their behalf under\n'
+		printf 'an elevation they gave, and they have not yet reviewed it: build on it exactly\n'
 		printf 'the same — it is the decision in force — but where your own evidence shows\n'
 		printf 'it wrong, say so as a `Finding:` naming the ruling, and do not act against\n'
-		printf 'it. It is his to supersede, or the conductor'\''s; never yours.\n\n'
+		printf 'it. It is theirs to supersede, or the conductor'\''s; never yours.\n\n'
 		tr -d '\015' <"$AUTHORITY"
 	fi
 	if [ -n "$MUSTFIX" ] && [ -f "$MUSTFIX" ] && [ -s "$MUSTFIX" ]; then
