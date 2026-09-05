@@ -1,17 +1,17 @@
 remit dist manifest v1
-version 0.3.13
+version 0.3.14
 100644 dba65a5df3bb3f082561af32324cc03b4d0126d5 CONTRIBUTING.md
 100644 c23c1d1c810eea733d6b21adda0c00ccffc41684 LICENSE
 100644 afd061a39ee0052f85ee91c58dee153a569e076b MANIFESTO.md
-100644 28a65884f2b6e274bda6967e221f64062538038b README.md
-100644 e4737652ca5ab419d259eb9d857a978ef18d0758 VERSION
-100755 196eafe92ecd36cd65b4244b17803cf602dbb488 bin/remit
+100644 f4b674994eb836081fc1491a7aaf6e2057b2a9b3 README.md
+100644 0b69c00c5f5a0e553ff0bab7ae97f473d9facfe0 VERSION
+100755 68af710161ca3ab4804d14d5554a0939e98df725 bin/remit
 100644 a4101e47f94e7da421961177b2c201c6175dbd5b bin/remit-exposure
-100755 d72ed79ececd3f4efd4e6fec01894a39918542a9 bin/remit-invoke
-100644 f7c7446e1eaf992fed30e0261e5a4fac1ee9700d docs/index.html
-100755 2da29d9be88c7a493640c496d46bf113d7609ea3 get-remit.sh
-100755 8d40df8261b3df497362378fc670a5a42ba456dd install.sh
-100644 65be5c943d3fe62caf609425bcb214e61abca1d3 install/AGENTS-remit.md
+100755 01d6acc4d24eca4b6c3746679836f8cc8c0de15f bin/remit-invoke
+100644 f59106c00358cdc7bf34e0225a195793aa4e348c docs/index.html
+100755 fec7fea54434a8dee697d672bb401f87b25e8252 get-remit.sh
+100755 d58719c41e57ba0f62a33b00f23eb132a119001f install.sh
+100644 ec33c2acdd7e4b3643ba93487c065efb04d3199f install/AGENTS-remit.md
 100644 a221767792212f2b7851b62032823a0b10bb077e install/hooks/claude-settings.json
 100644 36cea88b10ec46a8553e40718cb7e5fb24525a3a install/hooks/copilot-no-agent-tool.json
 100644 38c52e0c5bdcd6bc8053122a2a56ecb97996d766 install/hooks/no-agent-tool.sh
@@ -21,4 +21,5 @@ version 0.3.13
 100644 7e2d3c288ef3cd45bed4cfe5d95175b1d8f297f8 install/skills/remit-new/SKILL.md
 100644 205bd9f217a7629a91fce36a5867a02cc3a80070 install/skills/remit-resume/SKILL.md
 100644 555ee702efd0761e78278e12e6fa5a0a24dfdc04 install/skills/remit-retro/SKILL.md
+100644 8f67f0aaffdf79e96c13024312e60d51da5053ea install/skills/remit-review/SKILL.md
 100644 523eeebea0e6a38ad3b526776fc5b4741015c287 install/skills/remit-status/SKILL.md

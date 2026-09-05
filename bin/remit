@@ -126,6 +126,11 @@
 #                                AT THE STAGE IT HAD REACHED — the verb stamps
 #                                no stage (see WHAT A BRIEF DEPENDS ON)
 #   remit list [--parked]        the projection (below)
+#   remit review [today | yesterday | week | since <date> | <slug>...] [--attest]
+#                                the standing findings of every item at any
+#                                stage, open or archived — THE REVIEW PROJECTION
+#                                below. `--attest` raises ONE context to say of
+#                                each whether it stands, is fixed, or is moot
 #   remit report new <name>      file a field report from stdin
 #   remit report close <name>    archive it to `field-reports/.archive/`
 #   remit rules init             lay down `.remit/rules/` — the three gate files
@@ -240,6 +245,55 @@
 # was last written, which is the second the chain last did anything. `stop` reads
 # all seven; `list` reads `pid`, `host`, `step` and `at`; the chain re-reads its
 # own to know it is still the one running.
+#
+# ==============================================================================
+# THE REVIEW PROJECTION
+# ==============================================================================
+#
+#   remit review [today | yesterday | week | since <date> | <slug>...] [--attest]
+#
+# Per item at ANY stage — open or archived — its STANDING findings: the findings
+# the last verdict at each gate still carried with no disposition, READ FROM THE
+# VERDICTS and never from the seal. The seal `close` writes is what a closure
+# did, and an archive sealed before 0.3.12 sealed every undisposed finding;
+# reading the verdicts is what makes that archive read right. `standing_findings`
+# below is the ONE reader, and `close` seals from it too.
+#
+# One row per finding, seven tab-separated columns: item, stage, gate, verdict
+# date, finding number, the finding's first line, and the delivery it stood
+# against — what the last `## delivery` entry before that verdict names, a pull
+# request or a commit; `-` at the gate into `refined`, which judges a brief. No
+# ranking, no triage, no proposal: it is the projection the mukfork conductor
+# derived by hand on 2026-09-04 — 140 sealed, 29 standing — made a verb.
+#
+# THE WINDOW is the item's last verdict date, or its closure where it is closed.
+# `today`, `yesterday` and `week` — the last seven days — are read against this
+# host's date; `since <date>` takes YYYY-MM-DD; one or more slugs name items
+# outright, open or archived, and one that is nowhere is refused. Nothing said
+# is every item.
+#
+# `--attest` raises ONE `evaluate` context — the registry's evaluate seat — in
+# the PRIMARY worktree at HEAD, one raise per review and never one per item,
+# briefed with the standing set and nothing else: no gate's rubric file and no
+# delivery, because it judges no gate. For each finding it returns one line
+#
+#   Attest: <item> <n>: stands | fixed | moot — <evidence from the tree>
+#
+# three words and no fourth, parsed as the verdict lines are, the prose after
+# the dash carried verbatim. `stands` is still true in the code now, naming
+# where; `fixed` names the commit or file that closed it, a fix made outside the
+# loop included; `moot` says the code it was about no longer exists and what
+# replaced it. The mechanism appends `## reviewed — <date>` to EVERY reviewed
+# item's `log.md` — archived items included, because the archive is history and
+# a review is an event in it — carrying the tree's HEAD, the raise, and one line
+# per standing finding: its attestation, or `not attested` where the context
+# named none. A line naming a finding that is not standing reaches no record.
+# Then the count per category is printed and the records are committed.
+#
+# A FINDING ATTESTED `fixed` IS NOT RE-JUDGED: it leaves the standing set, for
+# this projection and for the seal alike. `stands` and `moot` stay standing, and
+# what becomes of them is his — admit one as an item, or leave it. Nothing here
+# rules on a finding: an attestation is evidence about the tree, recorded.
 #
 # ==============================================================================
 # WHAT A BRIEF DEPENDS ON
@@ -634,6 +688,7 @@
 #   ## stopped — <reason> — <date>
 #   ## escalated — <reason> — <date>
 #   ## closed — <date>
+#   ## reviewed — <date>          (a `review --attest`; the archive included)
 #   ## migrated — evaluation.md — <date>
 #
 # Every entry where the item COMES TO REST — the stops, the escalations, the
@@ -731,13 +786,20 @@
 #   - rubric hold: <id>: <evidence>
 #   - rubric fix: <id>: <evidence>
 #
+# and what a review attested of a standing finding, with the tree it read:
+#
+#   - tree: <commit> — the primary worktree at HEAD
+#   - finding <n> attested: stands | fixed | moot — <the context's evidence>
+#   - finding <n>: not attested
+#
 # `close` seals every STANDING `- finding <n>:` that has no `- finding <n>
 # disposition:` as `pre-authorised` — standing meaning the last verdict at its
-# gate still carried it. A finding an earlier round raised and the gate's last
-# verdict does not carry was cleared by that round, and is not sealed (ruled
-# 2026-09-04, after a closure sealed 140 findings where 29 stood). That is what
-# the closure did — never a ruling the practitioner made on each one — and the
-# verb says the number.
+# gate still carried it, and no review attested it fixed. A finding an earlier
+# round raised and the gate's last verdict does not carry was cleared by that
+# round, and is not sealed (ruled 2026-09-04, after a closure sealed 140 findings
+# where 29 stood). That is what the closure did — never a ruling the practitioner
+# made on each one — and the verb says the number. THE REVIEW PROJECTION above
+# is the same set, projected; `standing_findings` is the one reader of it.
 #
 # ==============================================================================
 # THE DELIVERY SEAM
@@ -1225,6 +1287,21 @@ usage:
                          marker names no chain this machine can see running: it
                          says the step it died at, the dead pid and how stale,
                          and only `resume` continues it.
+  remit review [today | yesterday | week | since <date> | <slug>...] [--attest]
+                         the standing findings — per item at ANY stage, open or
+                         archived: what the last verdict at each gate still
+                         carried with no disposition, read from the verdicts and
+                         never from the seal. One row per finding: item, stage,
+                         gate, verdict date, number, first line, and the
+                         delivery it stood against. The window is the item's
+                         last verdict date, or its closure; nothing said is every
+                         item. --attest raises ONE context, in the primary
+                         worktree at HEAD, to say of each finding whether it
+                         stands, is fixed, or is moot — recorded on every item's
+                         log.md as `## reviewed`, the archive included, and
+                         committed. A finding attested fixed is not re-judged.
+                         THE REVIEW PROJECTION in this script's header is the
+                         one statement of it.
   remit report new <name>    file .remit/field-reports/<name>.md from stdin
   remit report close <name>  archive it to field-reports/.archive/
   remit rules init       lay down .remit/rules/ — refined.md, accepted.md,
@@ -1285,7 +1362,8 @@ usage:
 Only the practitioner decides an item is closed, or how far it may go without
 them. This script records and applies that; it decides nothing.
 
-list, and setup without --write, only read. `setup --write` writes the one file
+list, review without --attest, and setup without --write, only read. `setup
+--write` writes the one file
 it was asked to and commits nothing. Every other change is committed, and pushed
 when a remote is configured.
 
@@ -1451,6 +1529,41 @@ list)
 	--parked) listing=parked ;;
 	*) usage ;;
 	esac
+	;;
+review)
+	# A window OR a list of items, never both, and `--attest` beside either.
+	review_window=all
+	review_since=''
+	review_slugs=''
+	want_attest=no
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		today | yesterday | week)
+			[ "$review_window" = all ] && [ -z "$review_slugs" ] || usage
+			review_window=$1
+			shift
+			;;
+		since)
+			[ $# -ge 2 ] || usage
+			[ "$review_window" = all ] && [ -z "$review_slugs" ] || usage
+			case "$2" in
+			[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+			*) die "since takes a date as YYYY-MM-DD — not '$2'" ;;
+			esac
+			review_window=since
+			review_since=$2
+			shift 2
+			;;
+		--attest) want_attest=yes; shift ;;
+		-*) usage ;;
+		*)
+			[ "$review_window" = all ] || usage
+			check_slug "$1"
+			review_slugs="$review_slugs $1"
+			shift
+			;;
+		esac
+	done
 	;;
 report)
 	[ $# -eq 2 ] || usage
@@ -4923,6 +5036,242 @@ ${_mf_key}"
 # that item is NOT let through by its archiving. Only work that went through the
 # gate reads `closed`.
 #
+# ==============================================================================
+# the standing set — read once, for the seal and for the review
+# ==============================================================================
+#
+# THE STANDING SET, not every round's. A judge restates a standing finding each
+# round under a new number, and a finding a later round cleared is still on the
+# record under its old one — so sealing every undisposed line sealed 140
+# findings on mukfork, 2026-09-04, where the final verdicts held 29. What stands
+# is what the LAST verdict at each gate still carried, with no disposition made
+# inside a verdict, and no review since attesting it fixed. A `pre-authorised`
+# disposition is the SEAL — what a closure did — and is not read here, which is
+# what lets an archive sealed before 0.3.12 read right. A finding outside any
+# verdict entry stands as written. THE REVIEW PROJECTION in this script's header
+# is the law; this is its one reader.
+standing_findings() { # $1 a record file -> one standing finding a line, tab-separated:
+	# number, gate, verdict date, the delivery it stood against, the finding's text
+	[ -f "$1" ] || return 0
+	nocr "$1" | awk '
+		/^## delivery — / { split($0, f, " — "); delivery = f[2]; gate = ""; next }
+		/^## verdict — evaluate — into / {
+			k = split($0, f, " — ")
+			g = f[3]
+			sub(/^into /, "", g)
+			gate = g
+			vdate = f[k]
+			for (n in seen) if (gateof[n] == g) delete seen[n]
+			next
+		}
+		/^## / { gate = ""; next }
+		/^- finding [0-9]+: / {
+			n = $3
+			sub(/:$/, "", n)
+			text[n] = substr($0, index($0, ": ") + 2)
+			gateof[n] = gate
+			dateof[n] = (gate == "" ? "-" : vdate)
+			delof[n] = (gate == "" || gate == "refined" || delivery == "" ? "-" : delivery)
+			seen[n] = 1
+			if (!(n in known)) { order[++c] = n; known[n] = 1 }
+			next
+		}
+		/^- finding [0-9]+ disposition: pre-authorised/ { next }
+		/^- finding [0-9]+ disposition: / { d[$3] = 1; next }
+		/^- finding [0-9]+ attested: fixed/ { fixed[$3] = 1; next }
+		END {
+			for (i = 1; i <= c; i++) {
+				n = order[i]
+				if ((n in seen) && !(n in d) && !(n in fixed))
+					print n "\t" (gateof[n] == "" ? "-" : gateof[n]) "\t" dateof[n] "\t" delof[n] "\t" text[n]
+			}
+		}
+	'
+}
+
+# ==============================================================================
+# `review`: the standing findings, and one context's word on the tree
+# ==============================================================================
+#
+# THE REVIEW PROJECTION in this script's header is the whole of what these do;
+# nothing below restates it. `review_collect` writes `$WORK/standing` — the rows
+# with the item folder in an eighth column — and `review_attest` reads it. The
+# window and the slugs are what the argument parse above set; nothing here
+# resets them.
+
+day_before() { # $1 days ago -> that date, or nothing where this host cannot say
+	date -d "$1 days ago" +%Y-%m-%d 2>/dev/null && return 0
+	date -v-"$1"d +%Y-%m-%d 2>/dev/null && return 0
+	return 1
+}
+
+review_window_of() { # $1 a record file -> the item's closure date, else its last verdict's, else nothing
+	[ -f "$1" ] || return 0
+	nocr "$1" | awk '
+		/^## verdict — evaluate — into / { k = split($0, f, " — "); v = f[k] }
+		/^## closed — / { k = split($0, f, " — "); c = f[k] }
+		END { if (c != "") print c; else if (v != "") print v }
+	'
+}
+
+review_in_window() { # $1 an item's window date -> 0 it is in this review
+	case "$review_window" in
+	all) return 0 ;;
+	today) [ "$1" = "$review_today" ] ;;
+	yesterday) [ "$1" = "$review_from" ] ;;
+	week | since)
+		# Fixed-width dates compare as numbers once the dashes are gone.
+		[ -n "$1" ] || return 1
+		[ "$(printf '%s' "$1" | tr -d -)" -ge "$(printf '%s' "$review_from" | tr -d -)" ] 2>/dev/null
+		;;
+	esac
+}
+
+review_dirs() { # -> the item folders this review reads, one a line
+	if [ -n "$review_slugs" ]; then
+		for _rd in $review_slugs; do
+			if [ -f "$ITEMS/$_rd/brief.md" ]; then
+				printf '%s\n' "$ITEMS/$_rd"
+			else
+				printf '%s\n' "$ITEMARCH/$_rd"
+			fi
+		done
+		return 0
+	fi
+	for _rd in "$ITEMS"/*/ "$ITEMARCH"/*/; do
+		[ -f "${_rd}brief.md" ] || continue
+		printf '%s\n' "${_rd%/}"
+	done
+}
+
+review_collect() { # -> $WORK/standing: item, stage, gate, date, n, text, delivery, folder
+	review_dirs | while IFS= read -r _rc_d; do
+		_rc_s=${_rc_d##*/}
+		review_in_window "$(review_window_of "$_rc_d/log.md")" || continue
+		_rc_st=$(hdr "$_rc_d/brief.md" Stage)
+		[ -n "$_rc_st" ] || _rc_st='-'
+		standing_findings "$_rc_d/log.md" | while IFS="$TAB" read -r _rc_n _rc_g _rc_dt _rc_dl _rc_tx; do
+			printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+				"$_rc_s" "$_rc_st" "$_rc_g" "$_rc_dt" "$_rc_n" "$_rc_tx" "$_rc_dl" "$_rc_d"
+		done
+	done | sort -t "$TAB" -k1,1 -k5,5n >"$WORK/standing"
+}
+
+# ONE raise, and not the chain's `invoke`: that one is bound to an item — its
+# marker, its runs home, its seeded artefacts — and a review has no item. What
+# the two share is the seam's contract and the `- raise:` line, and both are
+# reached the same way.
+review_raise() { # $1 the briefing  $2 where the seam's text lands -> the seam's exit
+	: >"$WORK/prov"
+	_rr_t0=$(secs)
+	REMIT_ITEM='' \
+		REMIT_RUNS='' \
+		REMIT_RUNS_NAMING='' \
+		REMIT_AUTHORITY="$1" \
+		REMIT_RUBRICS='' \
+		REMIT_STANDARDS='' \
+		REMIT_SETTINGS="$SETTINGSFILE" \
+		REMIT_PROVENANCE="$WORK/prov" \
+		REMIT_ROUND=1 \
+		REMIT_DELIVERY='' \
+		REMIT_RESEARCH_AUTHOR='' \
+		REMIT_MUSTFIX='' \
+		REMIT_REVIEW=yes \
+		sh "$INVOKE" evaluate review "$root" >"$2" 2>"$WORK/invoke.err" </dev/null &
+	RAISE_PID=$!
+	wait "$RAISE_PID"
+	_rr_rc=$?
+	_rr_t1=$(secs)
+	RAISE_PID=''
+	[ "$_rr_rc" = 0 ] && raise_line evaluate "$_rr_t0" "$_rr_t1"
+	if [ "$_rr_rc" != 0 ]; then
+		printf '%s: the seam refused the review raise (exit %s):\n' "$ME" "$_rr_rc" >&2
+		sed 's/^/    /' "$WORK/invoke.err" >&2
+	fi
+	return $_rr_rc
+}
+
+review_attest() { # reads $WORK/standing; returns what the commit returned
+	# `grep -c` prints its 0 AND exits 1 on nothing, so the fallback is not `||`.
+	_ra_count=$(grep -c . "$WORK/standing" 2>/dev/null)
+	[ -n "$_ra_count" ] || _ra_count=0
+	if [ "$_ra_count" = 0 ]; then
+		say "nothing standing in this window — nothing raised, nothing recorded."
+		return 0
+	fi
+	_ra_head=$(git -C "$root" rev-parse --short HEAD 2>/dev/null) || _ra_head='an unreadable HEAD'
+	{
+		printf '# A review of the standing findings\n\n'
+		printf 'These are the findings the last verdict at each gate of a work item still\n'
+		printf 'carried with no disposition — %s of them, across the items named below. Each\n' "$_ra_count"
+		printf 'was made against a delivery at the time; you are standing in the primary\n'
+		printf 'worktree at HEAD, `%s`, and the question is what is true of THE TREE NOW.\n\n' "$_ra_head"
+		printf 'For EACH finding return exactly one line, in this shape and no other:\n\n'
+		printf '  Attest: <item> <n>: stands | fixed | moot — <evidence from the tree, never the record>\n\n'
+		printf '  stands  the finding is still true in the code now — name where.\n'
+		printf '  fixed   name the commit or file that closed it. A fix made outside the loop —\n'
+		printf '          by hand, by another item, by a refactor — counts exactly the same.\n'
+		printf '  moot    the code it was about no longer exists — name what replaced it.\n\n'
+		printf 'Three words, and no fourth. The prose after the dash is carried into the record\n'
+		printf 'verbatim, so make it the evidence: a path, a line, a commit. A finding you\n'
+		printf 'cannot attest is left out and is recorded as not attested; never guess one.\n'
+		printf 'You are attesting the tree, not re-judging the work: no verdict, no must-fix,\n'
+		printf 'and no finding of your own.\n\n'
+		printf '## The standing findings\n\n'
+		awk -F'\t' '{ printf "- %s %s — at the gate into %s, %s, against %s:\n  %s\n", $1, $5, $3, $4, $7, $6 }' "$WORK/standing"
+	} >"$WORK/review.md"
+	review_raise "$WORK/review.md" "$WORK/attest" ||
+		die "the seam refused the review raise — nothing was recorded"
+	# The three words, parsed as the verdict lines are: emphasis stripped, the
+	# first line for a finding wins, the prose after the dash carried whole.
+	nocr "$WORK/attest" | sed \
+		-e 's/^[*_`]\{1,3\}Attest:[*_`]\{0,3\} */Attest: /' \
+		-e '/^Attest: /s/[*_`]\{1,3\}$//' |
+		sed -n "s/^Attest: *\([a-z0-9-][a-z0-9-]*\) *\([0-9][0-9]*\): *\(stands\|fixed\|moot\)\( *\(—\|--\|-\) *\(.*\)\)\{0,1\}\$/\1$TAB\2$TAB\3$TAB\6/p" \
+		>"$WORK/attested"
+	# One result a standing finding: folder, number, word, evidence.
+	: >"$WORK/results"
+	while IFS="$TAB" read -r _ra_s _ra_st _ra_g _ra_dt _ra_n _ra_tx _ra_dl _ra_d; do
+		_ra_a=$(awk -F'\t' -v s="$_ra_s" -v n="$_ra_n" '$1 == s && $2 == n { print $3 "\t" $4; exit }' "$WORK/attested")
+		[ -n "$_ra_a" ] || _ra_a="not attested$TAB"
+		printf '%s\t%s\t%s\t%s\n' "$_ra_d" "$_ra_n" "${_ra_a%%"$TAB"*}" "${_ra_a#*"$TAB"}" >>"$WORK/results"
+	done <"$WORK/standing"
+	# The raise line goes into EVERY entry this review writes, so it is taken
+	# out of the queue `log_append` would otherwise hand to the first alone.
+	_ra_rl=''
+	[ -s "$RAISES" ] && _ra_rl=$(cat "$RAISES")
+	: >"$RAISES"
+	_ra_paths=''
+	cut -f1 "$WORK/results" | sort -u >"$WORK/dirs"
+	while IFS= read -r _ra_d; do
+		_ra_s=${_ra_d##*/}
+		case "$_ra_d" in
+		"$ITEMARCH"/*) _ra_rel=".remit/work-items/.archive/$_ra_s" ;;
+		*) _ra_rel=".remit/work-items/$_ra_s" ;;
+		esac
+		log="$_ra_d/log.md"
+		{
+			[ -n "$_ra_rl" ] && printf '%s\n\n' "$_ra_rl"
+			printf -- '- tree: %s — the primary worktree at HEAD\n' "$_ra_head"
+			awk -F'\t' -v d="$_ra_d" '$1 == d {
+				if ($3 == "not attested") print "- finding " $2 ": not attested"
+				else if ($4 == "") print "- finding " $2 " attested: " $3
+				else print "- finding " $2 " attested: " $3 " — " $4
+			}' "$WORK/results"
+		} | log_append "reviewed — $(now)"
+		_ra_paths="$_ra_paths $_ra_rel"
+	done <"$WORK/dirs"
+	_ra_n_stands=$(awk -F'\t' '$3 == "stands" { c++ } END { print c + 0 }' "$WORK/results")
+	_ra_n_fixed=$(awk -F'\t' '$3 == "fixed" { c++ } END { print c + 0 }' "$WORK/results")
+	_ra_n_moot=$(awk -F'\t' '$3 == "moot" { c++ } END { print c + 0 }' "$WORK/results")
+	_ra_n_none=$(awk -F'\t' '$3 == "not attested" { c++ } END { print c + 0 }' "$WORK/results")
+	say ""
+	say "attested $_ra_count standing finding(s): $_ra_n_stands stands, $_ra_n_fixed fixed, $_ra_n_moot moot, $_ra_n_none not attested"
+	say "recorded as ## reviewed on $(grep -c . "$WORK/dirs") item(s), at tree $_ra_head."
+	# shellcheck disable=SC2086
+	commit_and_push "remit: review — $_ra_count standing finding(s) attested at $_ra_head" $_ra_paths
+}
+
 # The one line the closing verb says about the seal, so that closing on his word
 # is informed by a number he can read rather than a scroll he cannot.
 SEALED=0
@@ -4942,38 +5291,12 @@ do_close() { # $1 authority for this closure, in words  $2 delivery text  $3 `cl
 	# leaves is what the move carries into the archive, and what it says is part
 	# of the entry composed below.
 	runs_sweep
-	# THE STANDING SET, not every round's. A judge restates a standing finding
-	# each round under a new number, and a finding a later round cleared is
-	# still on the record under its old one — so sealing every undisposed line
-	# sealed 140 findings on mukfork, 2026-09-04, where the final verdicts held
-	# 29. What stands is what the LAST verdict at each gate still carried: a
-	# finding an earlier round raised and that verdict does not carry was
-	# cleared, and is not his to have pre-authorised. A finding outside any
-	# verdict entry stands as written.
-	nocr "$log" | awk '
-		/^## verdict — evaluate — into / {
-			split($0, f, " — "); g = f[3]; sub(/^into /, "", g)
-			gate = g
-			for (k in seen) if (gateof[k] == g) delete seen[k]
-			next
-		}
-		/^## / { gate = ""; next }
-		/^- finding [0-9]+: / {
-			n = $3
-			sub(/:$/, "", n)
-			text[n] = substr($0, index($0, ": ") + 2)
-			gateof[n] = gate
-			seen[n] = 1
-			if (!(n in known)) { order[++c] = n; known[n] = 1 }
-		}
-		/^- finding [0-9]+ disposition: / { d[$3] = 1 }
-		END {
-			for (i = 1; i <= c; i++)
-				if ((order[i] in seen) && !(order[i] in d))
-					print "- finding " order[i] " disposition: pre-authorised — " text[order[i]]
-		}
-	' >"$WORK/seals"
-	SEALED=$(grep -c '^- finding ' "$WORK/seals" 2>/dev/null || printf 0)
+	# THE STANDING SET, not every round's — `standing_findings` above is the one
+	# reader of it, and the seal is that set written as dispositions.
+	standing_findings "$log" |
+		awk -F'\t' '{ print "- finding " $1 " disposition: pre-authorised — " $5 }' >"$WORK/seals"
+	SEALED=$(grep -c '^- finding ' "$WORK/seals" 2>/dev/null)
+	[ -n "$SEALED" ] || SEALED=0
 	{
 		printf -- '- authority: %s\n\n' "$_auth"
 		if [ -n "$_delivery" ]; then
@@ -5742,6 +6065,27 @@ close)
 list)
 	list_items "$listing"
 	exit 0
+	;;
+
+review)
+	# THE REVIEW PROJECTION in this script's header is the law of this verb.
+	[ -d "$ITEMS" ] || die "no work items: $ITEMS does not exist."
+	[ "$want_attest" = yes ] && registry_check
+	review_today=$(now)
+	case "$review_window" in
+	yesterday) review_from=$(day_before 1) || die "this host cannot name yesterday — \`since <date>\` names the day outright" ;;
+	week) review_from=$(day_before 6) || die "this host cannot name a week ago — \`since <date>\` names the day outright" ;;
+	since) review_from=$review_since ;;
+	esac
+	for _s in $review_slugs; do
+		[ -f "$ITEMS/$_s/brief.md" ] || [ -f "$ITEMARCH/$_s/brief.md" ] ||
+			die "no work item '$_s' — open or archived, there is none"
+	done
+	review_collect
+	cut -f1-7 "$WORK/standing"
+	[ "$want_attest" = yes ] || exit 0
+	review_attest
+	exit $?
 	;;
 
 report)

@@ -5,11 +5,11 @@ judges it, and when it leaves your attention.
 
 AI can produce work faster than you can judge it. remit makes restraint part of the work: every
 admitted outcome gets a durable place, its boundary travels between sessions, and the decisions
-stay with the person who owns their consequences. It is three POSIX scripts and six conventions —
+stay with the person who owns their consequences. It is three POSIX scripts and seven conventions —
 no service, no database, no daemon. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.3.13. Early, and in use.**
+**Version 0.3.14. Early, and in use.**
 
 ## One piece of work, start to finish
 
@@ -141,11 +141,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.3.13` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.3.14` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.13 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.14 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:
@@ -176,7 +176,7 @@ The installer adds:
 | `bin/remit` | Lists items and performs state changes. |
 | `bin/remit-invoke` | The seam: raises a fresh context in a registered seat and returns its text. The only thing in remit that raises one. |
 | `bin/remit-exposure` | Counts the words you typed and the words said back, so attention can be read as a number. |
-| `.claude/skills/`, `.agents/skills/`, `.pi/skills/` | The six conventions — admit, resume, close, status, retro, exposure — in the discovery path each harness reads; see [Use your harness](#use-your-harness). |
+| `.claude/skills/`, `.agents/skills/`, `.pi/skills/` | The seven conventions — admit, resume, close, status, retro, exposure, review — in the discovery path each harness reads; see [Use your harness](#use-your-harness). |
 | `AGENTS.md` | One marker-delimited, shared section, without replacing existing content. |
 | `CONTRIBUTING.md` | How this repository takes a contribution — the file states that, and nothing here repeats it. The one file remit manages: a local edit to it is restored on the next upgrade, while a `CONTRIBUTING.md` the repository already had is not remit's and is kept. |
 | `<git>/hooks/pre-push` | The guard, when no hook exists; on re-run remit's own hook is updated or reported unchanged, and any other hook or custom hooks path is kept and reported. |
@@ -195,7 +195,7 @@ one it reads, to carry your seats forward and report drift against them.
 
 ## Use your harness
 
-remit is built for five harnesses, one to each heading below. The installer places the six
+remit is built for five harnesses, one to each heading below. The installer places the seven
 conventions in the discovery path each one reads, and `bin/remit-invoke` raises a context on
 any of the five. Change the harness without changing the item's identity, boundary,
 decisions, state or history; where one lacks an isolation or pull-request capability, the agent

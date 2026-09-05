@@ -911,6 +911,12 @@ DELIVERY=${REMIT_DELIVERY:-}
 # reach with a must-fix, and nothing else: THE THREE GATES' one exception in
 # `bin/remit`'s header is the law of it and this script states none of that law.
 RESEARCH_AUTHOR=${REMIT_RESEARCH_AUTHOR:-}
+# A REVIEW RAISE — `remit review --attest`: `yes` from that verb, empty
+# everywhere else. It is the `evaluate` seat asked a different question — not a
+# verdict on a gate but one line per standing finding on what the tree holds
+# now. THE REVIEW PROJECTION in `bin/remit`'s header is the law; this script
+# only words what the context is asked to return.
+REVIEW=${REMIT_REVIEW:-}
 PROVFILE=${REMIT_PROVENANCE:-}
 RUNS=${REMIT_RUNS:-}
 RUNS_NAMING=${REMIT_RUNS_NAMING:-}
@@ -1856,6 +1862,15 @@ role_returns() {
 	build) printf 'Your final message. It is recorded as the delivery'\''s returned text, quoted\nand not endorsed. The tree you authored is the delivery; the message says what\nyou did, what you could not do, and what you left undone.\n' ;;
 	research) printf 'Your findings as free text. They are written to `research.md` beside the brief\nexactly as returned, REPLACING what is there — on a round after the first, what\nyou return is the whole of the research this item carries.\n' ;;
 	evaluate)
+		if [ "$REVIEW" = yes ]; then
+			printf 'ONE line per standing finding named in your authority below, in this shape\n'
+			printf 'and no other. It is the only text the mechanism parses; every other line is\n'
+			printf 'kept with the run and reaches no record.\n\n'
+			printf '  Attest: <item> <n>: stands | fixed | moot — <evidence from the tree, never the record>\n\n'
+			printf 'No verdict, no must-fix, no finding of your own: you are attesting what the\n'
+			printf 'tree in front of you holds now, and the authority says what each word means.\n'
+			return 0
+		fi
 		printf 'ONE verdict, in these line shapes. They are the only text the mechanism\n'
 		printf 'parses; every other line is carried into the record verbatim.\n\n'
 		printf '  Verdict: PASS | PASS WITH FINDINGS | FAIL     (required; the first wins)\n'
@@ -1886,7 +1901,12 @@ role_returns() {
 
 {
 	printf '# A fresh context, raised by remit for the `%s` role\n\n' "$ROLE"
-	printf 'You were raised by `%s` for work item `%s`, round %s. Your worktree is\n' "$ME" "$SLUG" "$ROUND"
+	if [ "$REVIEW" = yes ]; then
+		printf 'You were raised by `%s` for a REVIEW of the standing findings across this\n' "$ME"
+		printf 'repository'\''s work items — not for one item, and not at a gate. Your worktree is\n'
+	else
+		printf 'You were raised by `%s` for work item `%s`, round %s. Your worktree is\n' "$ME" "$SLUG" "$ROUND"
+	fi
 	printf '`%s`. You are not in a conversation with anybody: what you return as your\n' "$WT"
 	printf 'final message is the whole of what comes back, and it goes into a record\n'
 	printf 'people read.\n\n'
@@ -1935,7 +1955,8 @@ role_returns() {
 		tr -d '\015' <"$STANDARDS"
 		printf '\n'
 	fi
-	if [ "$ROLE" = evaluate ]; then
+	# A review judges no gate, so it is handed no rubric and told of none.
+	if [ "$ROLE" = evaluate ] && [ "$REVIEW" != yes ]; then
 		printf '\n## The rubrics for THIS gate\n\n'
 		if [ -n "$RUBRICS" ] && [ -f "$RUBRICS" ]; then
 			printf 'These are the practitioner'\''s own standards for the gate this item is at,\n'

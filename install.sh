@@ -17,14 +17,14 @@
 #                                  header states what it writes; the two settings
 #                                  lines it can be wired into are OFFERED at the
 #                                  end of this install and written by nobody here
-#   .claude/skills/<name>/         the six conventions, where Claude Code
+#   .claude/skills/<name>/         the seven conventions, where Claude Code
 #                                  discovers project skills
-#   .agents/skills/<name>/         the same six files, where Codex, Devin and
+#   .agents/skills/<name>/         the same seven files, where Codex, Devin and
 #                                  Copilot CLI discover project skills — the last
 #                                  two need no path of their own, which is why
 #                                  there are three of these for five harnesses
 #                                  ($REPO_ROOT/.agents/skills)
-#   .pi/skills/<name>/             the same six files, where Pi discovers
+#   .pi/skills/<name>/             the same seven files, where Pi discovers
 #                                  project skills
 #   AGENTS.md                      a marker-delimited remit section — Codex, Pi,
 #                                  Devin and Copilot CLI all read the repo-root
@@ -448,7 +448,7 @@ set -- "$TARGET"
 SRC=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 VERSION=$(cat "$SRC/VERSION" 2>/dev/null) || die "no VERSION file at $SRC — is this a complete remit checkout?"
 
-SKILLS="remit-new remit-resume remit-close remit-status remit-retro remit-exposure"
+SKILLS="remit-new remit-resume remit-close remit-status remit-retro remit-exposure remit-review"
 
 # What remit used to ship and does not any more. Named here because the only way
 # to retire an installed file honestly is to know it was ours.
@@ -722,7 +722,7 @@ retire_file() { # $1 dst-rel  $2 what replaced it, in words
 	TOUCHED="$TOUCHED $dst"
 }
 
-# --- the mechanics and the six conventions, where each harness looks ----------
+# --- the mechanics and the seven conventions, where each harness looks --------
 # Three copies, five harnesses: Devin and Copilot CLI both discover project
 # skills at .agents/skills too, so neither needs a copy of its own. Copilot CLI's
 # own discovery set — probed, not assumed — is .github/skills/, .agents/skills/

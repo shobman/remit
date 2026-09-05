@@ -40,7 +40,7 @@ false on its own — a count, a version, a date, a status — belongs in no inst
 
 ```sh
 sh "$(git rev-parse --show-toplevel)/bin/remit" \
-   new|resume|answer|park|stop|close|list|report|rules|setup|migrate|version ...
+   new|resume|answer|park|stop|close|list|review|report|rules|setup|migrate|version ...
 ```
 
 Run through a POSIX shell — on Windows, Git Bash's `sh` — from the primary worktree only.
@@ -146,6 +146,7 @@ the record, the options from the verbs.
 | the state of play, parked work, or an item rehydrated | `.claude/skills/remit-status/SKILL.md` |
 | rulings he made turned into rules | `.claude/skills/remit-retro/SKILL.md` |
 | what he said and was told — today, one item, or the trend | `.claude/skills/remit-exposure/SKILL.md` |
+| what is still standing against the work, or whether a finding is fixed | `.claude/skills/remit-review/SKILL.md` |
 
 Installed identically at `.claude/skills/`, `.agents/skills/` and `.pi/skills/`; edit none of
 them by hand. Follow the matched file before answering, and end where it ends — that restraint
