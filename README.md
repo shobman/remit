@@ -9,7 +9,7 @@ stay with the person who owns their consequences. It is three POSIX scripts and 
 no service, no database, no daemon. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.3.14. Early, and in use.**
+**Version 0.3.15. Early, and in use.**
 
 ## One piece of work, start to finish
 
@@ -141,11 +141,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.3.14` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.3.15` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.14 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.15 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:
@@ -168,6 +168,13 @@ worktree that builds a listener will trip Windows Defender Firewall's prompt onc
 `Set-NetFirewallProfile -All -NotifyOnListen False` in an elevated PowerShell ends that. Running
 remit from WSL on a clone kept on the Linux filesystem avoids both, and runs the test suite in
 minutes rather than most of an hour.
+
+On Linux, two more: a raised context's `HOME` is scratch, so `ssh` inside a raise has none of your
+keys, known hosts or config — a rig a build or a proof must reach gets a `Host` stanza in
+`/etc/ssh/ssh_config` naming `IdentityFile` and `UserKnownHostsFile` under your real home, which
+is the one route a raise can use. And the `gh` Ubuntu 24.04 ships (2.45) cannot `gh pr edit` at
+all since GitHub retired classic projects; remit writes a pull request body over REST when that
+call fails, and a current `gh` from GitHub's own package repository ends it.
 
 The installer adds:
 

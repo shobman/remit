@@ -289,6 +289,14 @@
 #     `--no-skills`, which is all-or-nothing and would take remit's own skills
 #     with them — the same refusal as Copilot's `--no-custom-instructions` below.
 #     So it is disclosed rather than implied away.
+#   * A RAISE HAS NO `~/.ssh`. HOME is scratch, so `ssh` inside a context has
+#     no identity, no known hosts and no user config, whatever the practitioner
+#     installed — by design, and nothing here hands one in. A host a build or a
+#     proof must reach is reached through the SYSTEM ssh configuration, which
+#     `env -i` does not touch: a `Host` stanza in `/etc/ssh/ssh_config` naming
+#     `IdentityFile` and `UserKnownHostsFile` under the real home. Four rounds
+#     on miq re-measured a rig as unreachable that no raise could ever reach
+#     (2026-09-05); the record now says why rather than the rig's state.
 #   * It says nothing about what a process can READ from the filesystem. That is
 #     the boundary line above, and on this host only codex has one.
 #   * The PLATFORM adds names remit neither passes nor can prevent: on Git Bash,

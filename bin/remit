@@ -820,10 +820,14 @@
 # `t/unit/repro-pr-body-second-delivery.sh` is the reproduction that drove this
 # behaviour and it asserts it against this script.
 #
-# The build worktree is `<git-common-dir>/remit-worktrees/<slug>` on branch
-# `work/<slug>`, branched from the primary worktree's current branch. It sits
-# inside the git directory so that it is never part of any working tree and can
-# never be committed by accident. `REMIT_WORKTREE_DIR` overrides the parent.
+# The build worktree is `<repo>-remit-worktrees/<slug>` — a SIBLING of the
+# primary worktree — on branch `work/<slug>`, branched from the base branch. It
+# sits outside every working tree, so it is never committed by accident, and
+# outside `.git/`, so a seat can write it: Claude Code's sensitive-path guard
+# refuses every write under a git directory, and the old home there cost a
+# build for an empty tree (miq, 2026-09-05). `REMIT_WORKTREE_DIR` overrides the
+# parent. A `work/<slug>` that is already checked out anywhere — the old home, a
+# hand-placed one — is USED where it is, never refused and never duplicated.
 #
 # DELIVERY ENDS AT THE PULL REQUEST, and the LAST thing this script does to one
 # is flip it out of draft. Ruled by the practitioner, 2026-08-30: "CI/CD is not
@@ -842,6 +846,16 @@
 #   * `gh pr ready` STAYS, at the gate into `accepted` and nowhere else: a
 #     recorded passing verdict is what takes a delivery out of draft, and the
 #     flip is that verdict's visible signal rather than a reading of anything.
+#     A DELIVERY THAT PUSHED IS ON THE RECORD, whatever became of its pull
+#     request afterwards: the `## delivery` entry is written for the commit on
+#     the branch, carrying `pull request: NOT updated — <why>` where the body
+#     could not be written, and the item then escalates on that reason. The
+#     next `resume` reads a delivery with no verdict on it and EVALUATES that
+#     round; it never builds it again (miq, 2026-09-05: three builds for one
+#     round, because the unrecorded delivery was invisible to `resume_point`).
+#     Where `gh pr edit` fails, the body is written over REST first —
+#     `gh api -X PATCH repos/{owner}/{repo}/pulls/<n>` — because the `gh`
+#     Ubuntu 24.04 ships cannot edit a pull request at all.
 #     If `gh` is absent, that is recorded as `cannot act: gh` and the item
 #     escalates. Nothing is pretended.
 #
@@ -3702,13 +3716,17 @@ KEPT_NOTE=''
 keep_pr_body() {
 	KEPT_BODY="${TMPDIR:-/tmp}/remit-$slug-pr-body-$SHA.md"
 	if cp "$WORK/pr-body" "$KEPT_BODY" 2>/dev/null; then
-		KEPT_NOTE="The body it should carry — this delivery on top, every earlier one kept beneath — is composed at $KEPT_BODY: apply it with: gh pr edit $PR_NUM --body-file $KEPT_BODY"
+		KEPT_NOTE="The body it should carry — this delivery on top, every earlier one kept beneath — is composed at $KEPT_BODY: apply it with: gh pr edit $PR_NUM --body-file $KEPT_BODY — or, where gh pr edit fails on this host, with: gh api -X PATCH repos/{owner}/{repo}/pulls/$PR_NUM -F body=@$KEPT_BODY"
 	else
 		KEPT_BODY=''
 		KEPT_NOTE="The body it should carry was composed and could NOT be kept anywhere a later command could read it, so there is no file to point you at"
 	fi
 }
 
+# Returns 0 delivered and the pull request carries it; 1 NOT delivered, DELIVER_ERR
+# says why and nothing is on the branch that the record should name; 2 delivered,
+# no `gh` on this host; 3 DELIVERED — committed and pushed — and the pull request
+# step failed, DELIVER_ERR saying how. The caller records 2 and 3 as deliveries.
 deliver() { # $1 worktree  $2 file holding the builder's returned text
 	_wt=$1 _final=$2
 	_branch="work/$slug"
@@ -3814,23 +3832,35 @@ deliver() { # $1 worktree  $2 file holding the builder's returned text
 		say "pull request: #$PR_NUM already exists for $_branch — this delivery goes on top of its body, and the record already there is kept beneath it. $_dstate"
 		if ! (cd "$_wt" && gh pr view "$PR_NUM" --json body --jq .body) >"$WORK/pr-body-existing" 2>"$WORK/pr-body-existing.err"; then
 			DELIVER_ERR="the existing pull request body could not be read back, and a body this script never read is never replaced — that would delete the earlier delivery's record: $(tr '\n' ' ' <"$WORK/pr-body-existing.err")"
-			return 1
+			return 3
 		fi
 		{
 			delivery_section update
 			printf '\n---\n\n'
 			cat "$WORK/pr-body-existing"
 		} >"$WORK/pr-body"
-		if ! out=$(cd "$_wt" && gh pr edit "$PR_NUM" --body-file "$WORK/pr-body" 2>&1); then
-			keep_pr_body
-			DELIVER_ERR="gh pr edit failed — the delivery IS on the branch, and the body of #$PR_NUM still describes an EARLIER delivery. $KEPT_NOTE — $(printf '%s' "$out" | tr '\n' ' ')"
-			return 1
+		# TWO ROADS TO THE BODY. `gh pr edit` first; where it refuses, the same
+		# body over REST, which does not depend on the GraphQL schema the gh
+		# binary was built against.
+		_edited=''
+		if out=$(cd "$_wt" && gh pr edit "$PR_NUM" --body-file "$WORK/pr-body" 2>&1); then
+			_edited='gh pr edit'
+		else
+			_edit_err=$(printf '%s' "$out" | tr '\n' ' ')
+			if out=$(cd "$_wt" && gh api -X PATCH "repos/{owner}/{repo}/pulls/$PR_NUM" -F "body=@$WORK/pr-body" 2>&1); then
+				_edited='REST'
+				say "pull request: gh pr edit refused ($_edit_err) — the body of #$PR_NUM was written over REST instead."
+			else
+				keep_pr_body
+				DELIVER_ERR="gh pr edit failed, and so did the REST route — the delivery IS on the branch, and the body of #$PR_NUM still describes an EARLIER delivery. $KEPT_NOTE — gh pr edit: $_edit_err — gh api: $(printf '%s' "$out" | tr '\n' ' ')"
+				return 3
+			fi
 		fi
 		if verify=$( (cd "$_wt" && gh pr view "$PR_NUM" --json body --jq .body) 2>/dev/null ); then
 			if ! printf '%s\n' "$verify" | grep -qF -- "- Commit: $SHA"; then
 				keep_pr_body
-				DELIVER_ERR="gh pr edit reported success, but the body read back afterwards does not record commit $SHA. $KEPT_NOTE"
-				return 1
+				DELIVER_ERR="$_edited reported success, but the body read back afterwards does not record commit $SHA. $KEPT_NOTE"
+				return 3
 			fi
 			say "pull request: #$PR_NUM updated, and read back — its body now records commit $SHA."
 		else
@@ -3844,7 +3874,7 @@ deliver() { # $1 worktree  $2 file holding the builder's returned text
 		if ! out=$(cd "$_wt" && gh pr create --draft --base "$BASE" --head "$_branch" \
 			--title "$(pr_title)" --body-file "$WORK/pr-body" 2>&1); then
 			DELIVER_ERR="gh pr create failed — committed as $SHA and pushed, but no pull request was opened: $(printf '%s' "$out" | tr '\n' ' ')"
-			return 1
+			return 3
 		fi
 		PR_URL=$(printf '%s\n' "$out" | sed -n 's|.*\(https://[^ ]*\).*|\1|p' | sed -n 1p)
 		PR_NUM=$(printf '%s\n' "$PR_URL" | sed -n 's|.*/\([0-9][0-9]*\)$|\1|p')
@@ -3903,7 +3933,17 @@ delivery_section() { # $1 create|update
 # the conversion is doing its work on the override — a `REMIT_WORKTREE_DIR` the
 # practitioner or a fixture typed in the shell's own namespace, which would
 # otherwise reach a raise as the one name the raise cannot open.
-worktree_path() { one_namespace "${REMIT_WORKTREE_DIR:-$common_dir/remit-worktrees}/$slug"; }
+worktree_path() {
+	# A checkout of `work/<slug>` that already exists is the worktree, wherever
+	# it is: git is asked, not the default.
+	_wpx=$(git -C "$root" worktree list --porcelain 2>/dev/null |
+		awk -v b="branch refs/heads/work/$slug" '/^worktree / { p = substr($0, 10) } $0 == b { print p; exit }')
+	if [ -n "$_wpx" ]; then
+		one_namespace "$_wpx"
+		return 0
+	fi
+	one_namespace "${REMIT_WORKTREE_DIR:-$root-remit-worktrees}/$slug"
+}
 
 build_worktree() {
 	WT=$(worktree_path)
@@ -4688,10 +4728,15 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 			{
 				printf 'Commit `%s` on `work/%s`%s\n\n' "$SHA" "$slug" "${PR_URL:+, pull request $PR_URL}"
 				printf -- '- delivery size: %s file(s) added, %s MB staged\n' "${DELIVERY_FILES:-?}" "${DELIVERY_MB:-?}"
+				[ "$_drc" = 3 ] && printf -- '- pull request: NOT updated — %s\n' "$DELIVER_ERR"
 			} | log_append "delivery — ${PR_URL:-$SHA} — $(now)"
 			commit_step "remit: $slug record delivery $SHA" ".remit/work-items/$slug"
 			if [ "$_drc" = 2 ]; then
 				LOOP_STOP="cannot act: gh"
+				return 1
+			fi
+			if [ "$_drc" = 3 ]; then
+				LOOP_STOP="cannot act: $DELIVER_ERR"
 				return 1
 			fi
 		fi
