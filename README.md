@@ -3,154 +3,209 @@
 Keep practitioner-directed AI work in Git. You decide what starts, what stops, who builds it, who
 judges it, and when it leaves your attention.
 
-AI can produce work faster than you can judge it. remit makes restraint part of the work: every
-admitted outcome gets a durable place, its boundary travels between sessions, and the decisions
-stay with the person who owns their consequences. It is three POSIX scripts and seven conventions —
-no service, no database, no daemon. Why it exists, in the practitioner's own words:
+AI can produce work faster than you can judge it. remit records every piece of work you admit, in
+your words, with the boundary you gave it, and lets it continue or wait without you. A separate
+context judges the result before you read it. remit asks for your judgement only where it is
+genuinely yours, and it does not nag you for it. It is three POSIX scripts and seven conventions;
+there is no service to operate. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.3.18. Early, and in use.**
+**Version 0.3.19.**
 
-## One piece of work, start to finish
+## Start by talking to your agent
 
-A true story from remit's own development, condensed. During an evaluation of an unrelated
-delivery, a reviewer noted in passing that the dispatch script parsed under `sh` but failed under
-`bash`. Real, small, and nobody's job that day. It was recorded with the item it surfaced in, and
-nothing nagged about it afterwards.
+You do not learn a command set. You say what you want in your own words to the agent you already
+use, and the installed conventions do the rest: each one recognises a kind of request, runs the
+command, reports what it printed, and stops. It does not rank, propose, elaborate, or raise
+anything later unasked.
 
-Days later the practitioner wanted a small, real task to prove a newly added harness. They said: fix
-it. One builder got one brief — the defect, the boundary, the proof required — and found five
-broken sites where the note recorded one. It fixed all five and stopped, running no Git commands;
-builders never do. `bin/remit` committed its tree, named the authoring model in the
-commit itself, pushed a branch and opened a draft pull request. An evaluator that had not written
-the fix reproduced the failure, verified the repair under three shells, and recorded a passing
-verdict; only then did the draft become ready.
+| You say something like | The convention | What it does |
+|---|---|---|
+| "file it", "park this", "create a brief for X", "take it to refined" | admit | settles a short brief with you and records it |
+| "pick up X", "take it to accepted", "stop it" | resume | moves an item as far as you said, or ends a running chain |
+| "where are we", "catch me up on X" | status | the board, or one item read from its record and the code |
+| "close it", "we're not doing this" | close | archives the item on your word |
+| "what's standing", "did we fix X", "attest" | review | the findings still standing, and one context's word on the code now |
+| "let's do a retro" | retro | turns rulings you made into rubrics |
+| "how much have I said today" | exposure | the words you typed and the words said back |
 
-Merging was the practitioner's decision, and so was closing the item; nothing in the chain accepted
-anything on their behalf. That is the whole shape of remit: an observation became a record, the
-record waited without urgency, work began on the owner's word, one bounded builder built it, a
-fresh context judged it, and the owner decided the ending.
+## Your first work item
 
-## What it asks of you, and what it never does
+Tell your agent: "Create a work item for retrying failed uploads and take it to refined." It
+follows the admit convention: reads the bar for `refined` in your repository's own rules, asks you
+once for anything the brief is missing, and runs
 
-It asks for a word at three moments. One to start: the brief, in your words, and how far the work
-may go without you. One at each stop that is genuinely yours: a question only you can answer, a
-rule you wrote that said hold, a run that failed four times. One to end: closing is yours alone.
-Everything between those is housekeeping, and it happens without you.
-
-It never starts work, merges a pull request, reads a check, edits your brief, or closes an item on
-your behalf. It never raises a context on a seat you did not register, and it never falls back to
-another when that seat refuses. It never runs a builder through a harness's own sub-agent tool.
-And it never pushes anything at you: work waits on the record until you ask where things stand.
-
-## How an item moves
-
-You say: **"I have an idea I want to add to our backlog."** The admission convention settles a
-short brief with you — a title, the outcome, the boundary, what would count as proof — and
-`bin/remit new` files it under `.remit/work-items/<slug>/` exactly as you said it, commits that
-change, and pushes when a remote is configured. A work item is an ordinary folder:
-
-```text
-.remit/work-items/<slug>/
-|-- brief.md        # your words, under a script-owned header: stage, attention, until
-|-- log.md          # append-only: every verdict, delivery, stop, escalation and ruling
-|-- research.md     # when the brief asked for research; machine-authored, judged like a build
-`-- runs/           # kept output — test runs, fetch manifests, the proof a reader needs
+```sh
+sh bin/remit new retry-failed-upload --until refined
 ```
 
-Git records every change to it. Sessions can end and models can change without becoming the
-memory for the work; closed items are archived whole to `.remit/work-items/.archive/`, out of
-every current view. Weeks later, in a new session, in the harness of your choice, ask for the
-state of play: active work is listed without ranking, and rehydrating an item reads its files and
-the current code, never a previous conversation.
+That records your brief under `.remit/work-items/retry-failed-upload/`, commits it, runs the chain
+in the background as far as `refined`, and reports where it stopped. If you only wanted it written
+down, say "park it": the brief is filed and nothing runs.
 
-An item is born active at **`new`**. `bin/remit resume <slug> --until <stage>` runs the chain —
-research if the brief asked for it, then evaluate, build, deliver, evaluate, close — as far as the
-stage you named and no further. Each step is a fresh context raised through `bin/remit-invoke`,
-briefed with the item's authority and nothing else, on a harness and model your registry seats
-it on.
+Later, say "Catch me up on retry-failed-upload." The status convention reads the item, its record
+and the current code, and moves nothing. Then say "Take it to accepted." The resume convention
+runs
 
-| Into | What the gate judges | Who authors the fix |
+```sh
+sh bin/remit resume retry-failed-upload --until accepted
+```
+
+A builder authors the change in its own worktree, the mechanism turns that into a draft pull
+request, and an evaluator that did not write it judges the delivery. If the evaluator asks you a
+question, the item stops and waits. Answer in the conversation; your agent records your exact
+words and resumes:
+
+```sh
+sh bin/remit answer retry-failed-upload 1 "Show the second failure to the user."
+```
+
+Your words go verbatim under `## Rulings` in the brief, beside the question, and the chain resumes
+at the stage it is at. A ruling is not an amendment: editing the brief by hand puts the stage back
+to `new` so the first gate judges it again; an answer adds the decision the brief was missing and
+costs nothing else. Every later context is told the rulings are settled ground. The agent driving
+remit for you is the conductor, and it may answer some questions itself, under a file you write;
+a section below says when.
+
+Merging the pull request is yours. When you decide the work is over, say "close it." The close
+convention shows you every finding still standing, asks which links shipped the work, and runs
+`sh bin/remit close retry-failed-upload`. The item leaves the board and its folder moves to the
+archive. From then on remit treats the code, not the brief, as the law: the brief was a means to
+that end, and it does not return as context in a future session unless you ask for the history.
+
+## How far to take it
+
+An item has four stages and three approval gates. One word on the brief, `until`, says how far it
+may travel without you; the chain stops at that stage, or earlier where it needs your judgement.
+
+| You said | What happens |
+|---|---|
+| "park it" | the brief is filed; nothing runs until you resume it |
+| nothing about how far | it runs only if a rubric of yours can carry it past the first gate |
+| "take it to refined" | the brief is judged, and the research if it asked for one |
+| "take it to accepted" | a delivery is built, judged, and its pull request taken out of draft |
+| "take it all the way" | the closing gate judges the record; if it passes, the item closes |
+| "... and rest there" | it runs to that stop and parks; no rubric carries it further |
+
+`remit close` is different: it is your word that the item is over, at whatever stage it reached. It
+does not take the item through the closing gate.
+
+| Into | What the gate judges | Who fixes what it finds |
 |---|---|---|
-| `refined` | the brief — and the research, when there is one | the brief: you. The research: a fresh researcher |
-| `accepted` | a delivery: a builder's tree, turned into a draft pull request by the mechanism | a fresh builder, four rounds at most |
-| `closed` | the record — every verdict and note on it | a fresh builder, if anything |
+| `refined` | the brief, and the research when there is one | the brief: you. The research: a fresh researcher |
+| `accepted` | a delivery: a builder's tree, as a draft pull request | a fresh builder, four rounds at most |
+| `closed` | the record, every verdict and note on it | a fresh builder, if anything |
 
-A gate is a fresh context that did not author the work, judging it against the item's own brief
-and against **rubrics you wrote** in `.remit/rules/<gate>.md`: a rubric can carry the item past
-the gate whatever `until` said, hold it for your eyes, name the standard a delivery missed, or
-dispose of a finding. Seat the judge on a different model family from the builder — a model
-favours its own output, and a judge from another family decorrelates that bias
-([Panickssery et al., 2024](https://arxiv.org/abs/2404.13076)). Agreement is never verification,
-so the proof a builder ran is kept in `runs/` where the next gate can read it.
+A gate is a fresh context that did not author the work, judging it against your brief and the
+rubrics in `.remit/rules/<gate>.md`. Put the evaluator on a different model family from the builder:
+a model favours its own output ([Panickssery et al., 2024](https://arxiv.org/abs/2404.13076)), and
+a judge from another family does not share that bias. Agreement is never verification,
+so the proof a builder ran is kept in the item's `runs/` folder where the next gate can read it.
 
-The loop has stops, and every stop is a line on the record: four failed rounds, the same must-fix
-twice, a must-fix that returns after being displaced, a verdict with nothing a builder can act on,
-or a question only you can answer. An escalation raises nothing and proposes nothing — the
-verdicts above it are the analysis, and what the brief needs is worked out by you from the record.
+The loop is bounded. A builder gets four rounds at a gate. The same must-fix twice stops it. A
+must-fix that comes back after being displaced stops it, because the brief is arguing with itself.
+A delivery past 2,000 files or 100 MB is not committed at all. Every stop is one entry on the
+record, and an escalation raises nothing and proposes nothing: the verdicts above it are the
+analysis, and what the brief needs is yours to work out.
 
-When an evaluator's judgement is that a decision is yours, it asks, and the item stops with the
-questions numbered on the record. `bin/remit answer <slug> <n> "<your words>"` files your answer
-verbatim under `## Rulings` in the brief and resumes the chain where it stopped. A conductor may
-answer on your behalf only under `.remit/elevation.md` — your words on what it may decide, and
-nothing rules for you until you have written it — and the mechanism bounds it without reading the
-question: two such rulings per item since your last word, then the third is yours, and a question
-the conductor already ruled on is yours when it returns. Its rulings are filed as provisional and
-yours to supersede.
+## What reaches you, and when
 
-A builder authors files in its own worktree — `<repo>-remit-worktrees/<slug>`, a sibling of your
-repository — and runs no Git commands; `bin/remit` turns the tree it leaves into a draft pull
-request, naming in the commit the model that actually served the run. A delivery that pushed is on
-the record whatever became of its pull request, so a resume evaluates it rather than building the
-round again. A delivery past 2,000 files or 100 MB is not committed at all.
+Almost nothing. A chain runs as a backgrounded task and its end is its only event; nothing watches
+the record while it runs. Ordinary completions wait in your transcript. One stop reaches you where
+you are: when an evaluator asks a question only you can answer, your agent sends one line by
+whatever its harness has for that, naming the item and the first question. Everything else waits
+on the record until you ask where things stand:
 
-Findings outlive the item. `bin/remit review` projects what the last verdict at each gate left
-standing, across every item, open or archived, with no ranking and no proposal. `--attest` raises
-one fresh context at HEAD to say of each whether it still stands, is fixed — naming the commit or
-file, a fix made outside the loop included — or is moot, and records that on every item. A finding
-attested fixed is not judged again; the rest are yours to admit as an item or leave. Where the
-standing count is high, the cause is usually a gate file whose `accept` section is empty: no
-evaluator can dispose of a finding it has no rubric to cite.
+```sh
+sh bin/remit list            # the board: attention, stage, why it stopped, item, title
+sh bin/remit list --parked   # the parked work
+```
 
-## The boundary, before you install
+When a turn does need your word, your agent gives it to you in one fixed shape: what happened,
+what was expected, what actually happened, your options from the verbs, and one recommendation.
+Where the record and the verbs offer nothing, the options are simply absent.
 
-**What a raised context inherits.** Every context starts with an emptied environment and an
-allow-list: your `PATH`, a scratch `HOME` that is removed after the run, a scratch temp inside its
-own worktree, and the one configuration directory its CLI needs to log in as you. No API key, no
-token and no `~/.ssh` crosses. A context never runs `git` or `gh`; the mechanism does, as you.
+## When your agent may answer for you
 
-**What holds it there, per harness.** Codex is the one seat with an enforced sandbox: its own
-workspace and nothing else, read back from the run's own header after every run and refused on a
-downgrade. Claude Code, Pi, Devin and Copilot CLI have no enforced read boundary: a context there
-runs on your machine under your own login and can read what you can. What each of them gets
-instead is a per-run containment the mechanism writes and removes: Claude Code's sub-agent tool
-denied by flag and by hook; Pi's built-in tools only, with extensions off; Devin's allow list,
-which ends the run on anything outside it; Copilot's hook against `git` and `gh` in any wrapping,
-tested by a throwaway run before the real one. Every pull request records which applied.
+The agent driving remit for you is the conductor. It may answer a question for you only when
+`.remit/elevation.md`, a file you write in your own words, allows it; without that file it rules
+nothing. The file is for answers the record or the code already determines, and rulings that change
+neither the item's outcome nor its boundary.
 
-**What it costs.** Each gate is one judging context, and each round after a failure is one
-authoring context and one judging context, four rounds at most per gate. Every raise is recorded
-on the item with its harness, its model and, where the harness reports one, its cost. Your own
-attention has a number too: `bin/remit-exposure` counts the words you typed and the words said
-back to you, per session and per item, and never adds them into a score.
+The mechanism bounds the conductor without reading the question: two conductor rulings on an item
+since your last word, and the third is refused as yours; a question it already ruled on is refused
+to it when it returns. Every conductor ruling is recorded as provisional and remains yours to
+supersede.
 
-**How you stop it.** `bin/remit stop <slug>` ends the chain and every context it raised, discards
-the worktree's in-flight changes, records one line, and leaves the item at the stage it last
-stopped at. A chain that crashes leaves a marker the board shows first; only your `resume`
-continues it.
+## What a verdict leaves behind
 
-**What a failure leaves.** The record, with the reason as its last entry. The item's worktree
-beside your repository. The branch `work/<slug>` and its draft pull request, if a delivery got that
-far. Nothing is merged and nothing is deleted; `resume` reads the record and continues from the
-step it stopped at.
+A verdict passes, passes with findings, or fails with a must-fix. A must-fix goes back to a fresh
+author with the finding and nothing else. Within a gate, a finding is disposed of only by a rubric
+the evaluator cites: one in the gate file's `accept` section accepts it, one in `fix` makes it the
+must-fix. A finding no rubric disposes of stands. Closing an item seals every finding its last verdict at each
+gate still carried as pre-authorised, and says how many: that is what the closure did, never a
+ruling you made on each one.
 
-**What install changes.** Three scripts under `bin/`, the conventions in three discovery paths, one
-marker-delimited section of `AGENTS.md`, a `.remit/` folder, a pre-push guard where no hook exists,
-and the hook registrations listed in the reference below; every file is recorded in
-`.remit/.install/manifest`. An upgrade touches only what still matches that manifest. There is no
-uninstaller yet: removing remit is removing what the manifest names.
+## Review what passed, then improve the rules
 
-## Install remit
+remit can take work all the way to closed when it passes your rubrics, so some of it passes
+without your attention. remit is fix-forward: work that passed can be corrected later, and that is
+fine. `review` is how you see what passed you by.
+
+```sh
+sh bin/remit review                       # every standing finding, every item, open or archived
+sh bin/remit review today
+sh bin/remit review week
+sh bin/remit review since 2026-09-01
+sh bin/remit review <slug> ...
+```
+
+One row per finding: item, stage, gate, verdict date, number, first line, and the delivery it stood
+against. No ranking and no proposal. Add `--attest` and one fresh context is raised in your
+repository at HEAD to say of each finding whether it still stands, is fixed, naming the commit or
+file, or is moot because the code it was about is gone. The attestations are written to every
+item's record, the archive included, and the counts printed. A finding attested fixed leaves the
+set; the rest are yours to admit as an item or leave.
+
+Then rule on what you saw, in the conversation: what should not have passed, what should have
+continued without you. Those rulings, and the ones you made where work held your attention, are
+what a retro gathers. It proposes what they would add to `.remit/rules/` and what they would
+prune, because a rubric that has stopped matching how you rule is worth removing. It writes only what you rule, commits the folder alone, and stops. No
+convention proposes a rubric anywhere else, not at a verdict and not at a closure.
+
+A rubric is one line under one of four headings in a gate file: `promote` carries an item past the
+gate whatever `until` said; `hold` stops it for your eyes whatever else was cited; `fix` names the
+standard a delivery missed; `accept` disposes of a finding. An evaluator cites a rubric by its id
+and the evidence; a citation of a rubric the file does not carry changes nothing.
+
+Try one session in this order: review what shipped without you, make your rulings, then call a
+retro and let your conductor advise you on the rubrics.
+
+## The boundary
+
+remit never starts work, merges a pull request, decides on your CI's result, rewrites your brief,
+or declares work over for you. It never raises a context on a seat you did not register, never
+falls back to another when that seat refuses, and never lets a builder raise sub-agents of its own.
+
+It runs fresh agent contexts on your repository using the agent accounts already logged in on
+your machine. It passes through none of your API keys, tokens or SSH material, and gives each
+context a scratch home; a scratch home is not isolation. Only Codex supplies an enforced
+filesystem sandbox; Claude Code, Devin, Copilot CLI and Pi run as your user and can read what you
+can read. remit applies the containment each agent exposes and
+records on every pull request which applied; a sandbox for every agent is the direction, and the
+reference below says exactly what holds today.
+
+`sh bin/remit stop <slug>` ends a running chain and every context it raised, discards the
+worktree's in-flight changes, and leaves the item at the stage it last stopped at. A failure leaves
+the record with the reason as its last entry, the item's worktree beside your repository, and the
+branch and draft pull request if a delivery got that far; nothing is merged, and only your own
+`stop` discards anything.
+
+**What remit records.** Every raised context, with its agent, its model and its cost where the
+agent reports one. And the cost of holding your attention: `sh bin/remit-exposure today` reports
+the words you said and the words you were told, kept separate and never turned into a score.
+
+## Install and upgrade
 
 Fetch the published installer without cloning remit:
 
@@ -165,11 +220,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.3.18` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.3.19` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.18 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.19 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:
@@ -178,57 +233,92 @@ If you already have a remit clone, run its installer directly:
 sh /path/to/remit/install.sh /path/to/your-repository
 ```
 
-The target argument must point inside your repository's primary worktree; the installer refuses a
-linked worktree. Do not hand-install remit: the installer is the fixed, inspectable operation, and
-it requires only Git and a POSIX shell. On Windows, use Git Bash's `sh`, not PowerShell. Re-run
-`install.sh` to upgrade — it updates content that still matches the prior install, preserves local
-edits save in the one file it manages, reports each result, commits touched paths in the target
-repository, and never pushes them.
+The target must be inside your repository's primary worktree; a linked worktree is refused. The
+installer needs only Git and a POSIX shell; on Windows, use Git Bash's `sh`. Run every remit
+command through `sh` the same way.
 
-It does not install `.remit/elevation.md`, your words on what a conductor may rule on your
-behalf; without it nothing rules for you. Nor `.remit/settings.json`, the registry of which
-harnesses and models a repository may raise a context on: `sh bin/remit setup` reads the host and
-proposes one on stdout for you to accept or edit, and `sh bin/remit setup --write` saves that
-proposal itself. Never redirect `setup` over the registry — that file is the one it reads.
+Then seat your agents. `sh bin/remit setup` reads the host and proposes `.remit/settings.json`,
+the registry of which agents and models each role may use, for you to accept or edit;
+`sh bin/remit setup --write` saves it. Never redirect `setup` over the registry; it reads that
+file first. Write `.remit/elevation.md` yourself if you want the conductor to rule for you;
+nothing installs it.
 
-## Use your harness
-
-remit is built for five harnesses. The installer places the same seven conventions in the discovery
-path each one reads, and `bin/remit-invoke` raises a context on any of the five, so you use the
-agents you already pay for without moving the item or reconstructing its history. Which harness and
-which model a role sits on is your registry's: nothing is raised on a seat you did not register,
-nothing falls back, and every refusal happens before anything is billed. A seat that refuses —
-out of credits, a quota, not authenticated — marks the host for thirty minutes, and no chain
-raises into it while the mark is fresh.
-
-| Harness | Conventions land at | What it does with a model id it does not know |
-|---|---|---|
-| Claude Code | `.claude/skills/` | no catalogue to check; the run's own report names what served it |
-| Codex | `.agents/skills/` | no catalogue; the run header names what served it |
-| Pi | `.pi/skills/` | refused unless `pi --list-models` carries the exact id |
-| Devin | reads `AGENTS.md` and `.agents/skills/` natively | rejected before the run starts |
-| GitHub Copilot CLI | reads `AGENTS.md` and `.agents/skills/` natively | refused before the run starts, and so is a reasoning effort the model does not offer |
+Re-run the installer to upgrade. It replaces content that still matches what it installed, keeps
+your local edits, and reports each result. Two files have their own rule: `CONTRIBUTING.md` is
+the one file remit manages, so a local edit to it is restored, while a `CONTRIBUTING.md` the
+repository already had is kept; and the shipped rubrics are migrated one rubric at a time, adding,
+changing and removing only remit's own and keeping every rubric you wrote. Every installed file is
+listed in `.remit/.install/manifest`. There is no uninstaller: removing remit is removing what the
+manifest names.
 
 ## Reference
 
-Everything below is detail a first read can skip.
+### Commands and exit codes
+
+You do not run these yourself: the installed skills choose and run them from your words, then
+relay what happened. remit is mechanical where it can be, with skills that use the mechanics. It
+is not vibes, it is discipline.
+
+```text
+sh bin/remit new <slug> [--until refined|accepted|closed] [--park]   admit, from the brief on stdin
+sh bin/remit resume <slug> [--until <stage> [--park]]                 run the chain as far as you said
+sh bin/remit answer <slug> <n> "<words>" [--conductor]               rule on question <n>, then resume
+sh bin/remit park <slug> | stop <slug> | close <slug>                 rest it; end its chain; archive it
+sh bin/remit list [--parked]                                          the board
+sh bin/remit review [today|yesterday|week|since <date>|<slug>...] [--attest]
+sh bin/remit report new|close <name>                                  a field report, in or out
+sh bin/remit rules init                                               the gate files remit ships
+sh bin/remit setup [--write]                                          propose or save the registry
+sh bin/remit migrate | version                                        move a pre-work-items layout; the installed version
+sh bin/remit-exposure today | session <id> | trend | scan <agent>     the words said and told
+```
+
+Exit 0: done, committed, and pushed where a remote exists; a chain that stopped where it was told
+to is 0. Exit 2: usage or precondition error, nothing changed. Exit 3: committed locally, push
+failed. Exit 4: escalated; the stage is unchanged and the record says why. Exit 130: a running
+chain was ended.
 
 ### What the installer places
 
 | Path | Purpose |
 |---|---|
 | `bin/remit` | Lists items and performs state changes. |
-| `bin/remit-invoke` | The seam: raises a fresh context in a registered seat and returns its text. The only thing in remit that raises one. |
-| `bin/remit-exposure` | Counts the words you typed and the words said back, so attention can be read as a number. |
-| `.claude/skills/`, `.agents/skills/`, `.pi/skills/` | The seven conventions — admit, resume, close, status, retro, exposure, review — in the discovery path each harness reads. |
-| `AGENTS.md` | One marker-delimited, shared section, without replacing existing content. |
-| `CONTRIBUTING.md` | How this repository takes a contribution. The one file remit manages: a local edit to it is restored on the next upgrade, while a `CONTRIBUTING.md` the repository already had is kept. |
-| `<git>/hooks/pre-push` | The guard, when no hook exists; on re-run remit's own hook is updated or reported unchanged, and any other hook or custom hooks path is kept and reported. |
-| `.remit/hooks/no-agent-tool.sh` | The agent-tool guard: one script, registered by every harness here that has a pre-tool hook. |
-| `.github/hooks/remit-no-agent-tool.json` | Copilot CLI's registration of that guard. |
-| `.claude/settings.json` | Claude Code's registration of it, **offered**: created when absent; when the file is yours it is kept and the block to merge is printed. |
-| `.remit/` | The work location, with no work item in it: `work-items/`, `field-reports/`, and `rules/` holding the rubrics remit ships. An upgrade migrates those rubric by rubric: it adds, changes and removes only its own, keeps every rubric you wrote or edited, and reports what it did to each. |
-| `.remit/.install/manifest` | A record of the installed content and version. |
+| `bin/remit-invoke` | Raises a fresh context in a registered seat and returns its text. The only thing in remit that raises one. |
+| `bin/remit-exposure` | Counts the words you typed and the words said back. |
+| `.claude/skills/`, `.agents/skills/`, `.pi/skills/` | The seven conventions, in the discovery path each agent reads. |
+| `AGENTS.md` | One marker-delimited section, without replacing existing content. |
+| `CONTRIBUTING.md` | How this repository takes a contribution. |
+| `<git>/hooks/pre-push` | The guard, when no hook exists; any other hook is kept and reported. |
+| `.remit/hooks/no-agent-tool.sh`, `.github/hooks/remit-no-agent-tool.json`, `.claude/settings.json` | The sub-agent guard and its registrations; the Claude Code one is offered, never overwritten. |
+| `.remit/` | `work-items/`, `field-reports/`, and `rules/` with the rubrics remit ships. |
+| `.remit/.install/manifest` | What was installed, at what version. |
+
+### The five agents remit runs on
+
+| Agent | Conventions land at | An unknown model id |
+|---|---|---|
+| Claude Code | `.claude/skills/` | no catalogue to check; the run's own report names what served it |
+| Codex | `.agents/skills/` | no catalogue; the run header names what served it |
+| Devin | reads `AGENTS.md` and `.agents/skills/` natively | rejected before the run starts |
+| GitHub Copilot CLI | reads `AGENTS.md` and `.agents/skills/` natively | refused before the run, as is a reasoning effort the model lacks |
+| Pi | `.pi/skills/` | refused unless `pi --list-models` carries it; runs local models too |
+
+Model lists are perishable, so none is printed here. Codex caches its visible ids in
+`~/.codex/models_cache.json`; Pi answers `pi --list-models`; Devin answers `devin models list`;
+Copilot CLI lists the ids it accepts under `copilot help config`; Claude Code exposes no
+catalogue. A seat that refuses, out of credits or not authenticated, marks the host for thirty
+minutes and no chain raises into it while the mark is fresh.
+
+### Agent containment, as it holds today
+
+Codex: an enforced sandbox, its own files and nothing else, read back from the run's own header
+after every run and refused on a downgrade. Claude Code: its sub-agent tool denied by flag and by a
+hook written for the run. Devin: an allow list written for the run, which ends the run on anything
+outside it. Copilot CLI: a hook against `git` and `gh` in any wrapping, tested by a throwaway run
+before the real one. Pi: built-in tools only, extensions off. Every context starts with an emptied
+environment and an allow-list: your `PATH`, a scratch `HOME` removed after the run, a scratch temp
+inside its own worktree, and the one configuration directory its CLI needs to log in as you. A
+context never runs `git` or `gh`; the mechanism does, as you.
 
 ### Host notes
 
@@ -236,28 +326,16 @@ Everything below is detail a first read can skip.
   scratch, so a tool that installs itself lands there and goes with the run. A worktree that opens a
   listener trips Windows Defender Firewall's prompt once per path; `Set-NetFirewallProfile -All
   -NotifyOnListen False` in an elevated PowerShell ends that. WSL on a clone kept on the Linux
-  filesystem avoids both and runs the test suite in minutes.
+  filesystem avoids both.
 - **Linux.** `ssh` inside a raise has none of your keys, known hosts or config; a host a build must
   reach gets a `Host` stanza in `/etc/ssh/ssh_config` naming `IdentityFile` and
   `UserKnownHostsFile` under your real home. Ubuntu 24.04's `gh` (2.45) cannot `gh pr edit`;
   remit writes the pull request body over REST when that call fails.
 
-### Where each CLI lists its models
-
-Model lists are perishable and depend on your subscription, so none is printed here. Ask the CLI:
-Claude Code exposes no catalogue and the run's own report names what served it; Codex has no
-`models` subcommand and caches its visible ids in `~/.codex/models_cache.json`; Pi answers
-`pi --list-models` from the providers configured on the machine; Devin answers
-`devin models list`; Copilot CLI lists the ids its configuration accepts under `copilot help
-config`. The pull request records which model actually served each run.
-
-### Contributions, positioning, licence
+### Contributions and licence
 
 A repository running remit takes contributions the way remit does: the installed
-[`CONTRIBUTING.md`](CONTRIBUTING.md) states the route, not this page. remit is not a project
-management system: it ensures no scope, timeline or deliverable and decides nothing about whether
-a result is good; it makes each state change and authority decision a Git record with a named
-decision-maker. [AIDOS](https://github.com/shobman/aidos) is a separate, complementary system for
-teams establishing that work is warranted before development starts; remit sits on the
-engineering side, bounded by it or adjacent to it. remit is MIT licensed: see
-[`LICENSE`](LICENSE).
+[`CONTRIBUTING.md`](CONTRIBUTING.md) states the route. remit is not a project management system:
+it ensures no scope, timeline or deliverable and decides nothing about whether a result is good;
+it makes each state change and authority decision a Git record with a named decision-maker. remit
+is MIT licensed: see [`LICENSE`](LICENSE).
