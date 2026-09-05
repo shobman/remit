@@ -15,8 +15,8 @@
 #
 # ==============================================================================
 # THE CONTRACT — the seam's other end is `bin/remit`'s header, which states the
-# environment it hands in and the text it reads back. It is stated there and NOT
-# restated here; what follows is what THIS end owes.
+# environment it hands in and the text it reads back. What follows is what THIS
+# end owes.
 # ==============================================================================
 #
 #   stdout      the context's final text, and NOTHING else. Every word this
@@ -28,39 +28,26 @@
 #               `REMIT_PROVENANCE`. The keys are below.
 #   progress    the run directory's path, written to the file named by
 #               `REMIT_PROGRESS` the moment that directory exists and before
-#               anything is raised, so a watcher can find it in time to tail
+#               anything is raised, so a watcher can tail
 #               `<run directory>/progress` — where the heartbeat also lands.
 #               `REMIT_HEARTBEAT=<n>` is its interval in seconds; default 30,
 #               `0` silences it. Neither channel changes what stdout carries.
 #
-# THE IDLE BOUND — `REMIT_QUIET`, and why a wall clock was not enough.
+# THE IDLE BOUND — `REMIT_QUIET`. The bounded wait each harness gets is WALL
+# CLOCK, and the heartbeat is this script's own clock and says nothing about
+# the CLI. So there is a SECOND bound, on the run's own output: if neither the
+# CLI's stdout nor its stderr has grown for `REMIT_QUIET` seconds, the CLI is
+# ended and this script exits 8. WHAT IS WATCHED is `<run dir>/stdout` and
+# `<run dir>/stderr`, never the progress log the heartbeat writes to. THE
+# DEFAULT IS PER HARNESS: `devin` narrates its tool calls to stdout as it goes,
+# so silence there is a stall and its default is 600s; every other seat is
+# invoked in a mode whose ONLY write is the final envelope, is silent by
+# construction, and defaults to `0` — off. `REMIT_QUIET` set explicitly applies
+# to any harness, and `0` turns it off everywhere. THE KILL IS BEST-EFFORT:
+# this script signals the process it started and, where `pkill` exists, its
+# children; the wall bound is not removed. Exit 8 attests that the SEAM stopped
+# waiting and said why — never that the process is gone.
 #
-# The bounded wait each harness gets is WALL CLOCK. On 2026-09-01, in Zenith.Core,
-# a devin process stopped emitting at 90 seconds and held the whole 3600s bound;
-# the heartbeat pulsed the entire time, because the heartbeat is this script's own
-# clock and says nothing about the CLI. So there is a SECOND bound, on the run's
-# own output: if neither the CLI's stdout nor its stderr has grown for
-# `REMIT_QUIET` seconds, the CLI is ended and this script exits 8.
-#
-# WHAT IS WATCHED is the two files the CLI actually writes — `<run dir>/stdout`
-# and `<run dir>/stderr` — and NOT the progress log, which the heartbeat writes
-# to on its own and which would therefore never look idle.
-#
-# THE DEFAULT IS PER HARNESS, because "silent" does not mean the same thing on
-# each. `devin` narrates its tool calls to stdout as it goes, so silence there is
-# a stall: its default is 600s — an order of magnitude longer than any gap a
-# working run has shown, and a sixth of the wall bound, so a stall is reported in
-# ten minutes rather than an hour. Every other seat here is invoked in a mode
-# whose ONLY write is the final envelope (`claude -p --output-format json`, and
-# codex and pi the same way): such a run is silent by construction, an idle bound
-# on it would kill work that is going fine, and its default is therefore `0` —
-# off. `REMIT_QUIET` set explicitly applies to any harness, and `0` turns it off
-# everywhere.
-#
-# THE KILL IS BEST-EFFORT and says so: this script signals the process it started
-# and, where `pkill` exists, that process's children. A CLI that ignores both is
-# still held by its own wall bound, which is not removed. What exit 8 attests is
-# that the SEAM stopped waiting and said why — never that the process is gone.
 #   exit 0      the context ran. Exit is COMPLETION, not success.
 #   exit 2      usage; a registry that is absent, malformed, or does not carry
 #               the seat asked for; a registered seat that is not available on
@@ -71,10 +58,9 @@
 #               containment asked for (codex's sandbox, devin's permission mode).
 #   exit 7      the containment canary failed: copilot's containment did not
 #               demonstrably hold, so no context was raised.
-#   exit 8      THE RUN WENT SILENT and was ended for it — the idle bound below.
-#               A context was raised and IS billed; what it had said by then is
-#               in the run directory, and the provenance carries a `note:`
-#               naming the stall.
+#   exit 8      THE RUN WENT SILENT and was ended for it. A context was raised
+#               and IS billed; what it had said by then is in the run directory,
+#               and the provenance carries a `note:` naming the stall.
 #
 # THE PROVENANCE KEYS. `bin/remit` reads `session:`, `model:` and `harness:`;
 # the rest are for the record, and an unknown key is ignored, never an error.
@@ -85,53 +71,28 @@
 #   registry:      the digest of the registry AS READ, with its algorithm
 #   model:         THE MODEL THAT AUTHORED, as served, where the run reports it;
 #                  otherwise the id ASKED FOR with ` (asked)` on the end and a
-#                  `model-note:` naming the channel that carried nothing. Never a
-#                  guess.
-#                  WHERE A RUN REPORTS MORE THAN ONE MODEL — claude's envelope
-#                  carries a `modelUsage` MAP, and a Claude Code run bills an
-#                  internal ancillary model beside the one that wrote the
-#                  deliverable — THE AUTHOR IS CHOSEN, never taken by position.
-#                  THE RULE, and it is two clauses in this order:
-#                    1. the REGISTERED SEAT'S id, when that id is one of the
-#                       keys. The registry decided who was raised; a run that
-#                       reports it served that seat settles authorship.
-#                    2. failing that, the key with the LARGEST OUTPUT TOKEN
-#                       COUNT. What a model WROTE is the only proxy for
-#                       authorship the envelope carries; input tokens are not
-#                       (an ancillary model summarising a long context reads far
-#                       more than the author writes, which is exactly the shape
-#                       that produced the wrong record).
-#                  Ties on output go to the last key in sorted order, so the
-#                  choice is deterministic rather than dependent on the order a
-#                  JSON reader happened to hand the keys back. Taking `keys[0]`
-#                  is what the field failure of 2026-09-01 was: `modelUsage`
-#                  carried `claude-sonnet-5` at out=30249, the author, and
-#                  `claude-haiku-4-5-20251001` at out=3385, the ancillary, and
-#                  alphabetical order named the ancillary in the record.
+#                  `model-note:` naming the channel that carried nothing. Never
+#                  a guess. WHERE A RUN REPORTS MORE THAN ONE MODEL — claude's
+#                  envelope carries a `modelUsage` MAP, and a Claude Code run
+#                  bills an internal ancillary model beside the author — THE
+#                  AUTHOR IS CHOSEN, never taken by position: 1. the REGISTERED
+#                  SEAT'S id, when that id is one of the keys; 2. failing that,
+#                  the key with the LARGEST OUTPUT TOKEN COUNT (what a model
+#                  WROTE is the only proxy for authorship; input tokens are not).
+#                  Ties on output go to the last key in sorted order.
 #   models:        EVERY model the run reports, with `in=`, `out=` and `cost=`
-#                  where the envelope carries them, semicolon-separated. Written
-#                  only where a run reports more than nothing here. It exists so
-#                  the ancillary model is VISIBLE — a reader can see what else
-#                  was billed — and can never again be mistaken for the author,
-#                  because the author is on its own line above.
+#                  where the envelope carries them, semicolon-separated. It
+#                  exists so the ancillary model is VISIBLE and is never
+#                  mistaken for the author.
 #   consulted:     `server-side web_search=<n> web_fetch=<m>`, FOLLOWED BY THE
-#                  SCOPE OF THOSE TWO NUMBERS in the line itself. Written ONLY
-#                  when the run reports them and absent, never zeroed, when it
-#                  does not. It is EVIDENCE FOR A READER OR A RUBRIC TO CITE, and
-#                  this seam draws NO conclusion from it: it does not gate, warn,
-#                  fail or grade on the number.
-#                  THE SCOPE TRAVELS WITH THE NUMBERS AND IS NOT DECORATION. The
-#                  count is the API's own SERVER-SIDE tool counter and covers
-#                  nothing else — a CLI's CLIENT-SIDE fetches are invisible to it
-#                  — so a bare `web_fetch=0` beside a research pass that fetched
-#                  twenty-seven pages through its own tooling reads as a fact
-#                  about the run when it is only a fact about one channel. That
-#                  is the field failure of 2026-09-02, where a gate cited a
-#                  rubric against honest research on the strength of that zero,
-#                  four rounds to an escalation. The scope clause is its repair.
-#                  WHICH SEATS CAN ANSWER IT AT ALL, and what the envelope was
-#                  searched for before this was settled, is at THE ENVIRONMENT
-#                  below.
+#                  SCOPE OF THOSE NUMBERS in the line itself. Written ONLY when
+#                  the run reports them and absent, never zeroed, when it does
+#                  not. EVIDENCE FOR A READER OR A RUBRIC TO CITE: this seam
+#                  draws NO conclusion from it. The count is the API's own
+#                  SERVER-SIDE tool counter and covers nothing else — a CLI's
+#                  CLIENT-SIDE fetches are invisible to it — so the scope
+#                  travels with the numbers. Which seats can answer it is at
+#                  THE ENVIRONMENT below.
 #   model-check:   how the id was verified before the run, or why it was not
 #   boundary:      `<user|container|none> — attested by <header|export|disclosed>`:
 #                  codex is `user` by its run header, every other seat `none`.
@@ -147,10 +108,8 @@
 # THE REGISTRY — `.remit/settings.json`, AND WHAT IT DECIDES
 # ==============================================================================
 #
-# Every seat comes from a registry the practitioner wrote. Ruled 2026-08-23:
-# "the specific sub-agents being reached for must match what are registered and
-# available … if codex is uninstalled and my default evaluator is codex, the
-# bin/sh should fail — end of story." No standing default, and no fallback.
+# Every seat comes from a registry the practitioner wrote. No standing default,
+# and no fallback: if the seat is not there, the raise does not happen.
 #
 # THE FILE is `REMIT_SETTINGS`, or `<repo root of the current directory>/.remit/
 # settings.json`. Absent, unreadable or empty REFUSES every raise (exit 2). It
@@ -171,14 +130,14 @@
 #     }
 #   }
 #
-# Nothing else is allowed at either level: an unknown key, a key that is not one
-# of the three roles, and a harness or model the registry does not carry are each
-# refused BY NAME — with ONE tolerated exception: `defaults.repair-brief`. That
-# role was retired on 2026-09-03 and every registry installed before that day
-# seats it; refusing the key would break every install on upgrade over a role
-# that raises nothing, so it is accepted, ignored, and dropped by `setup --write`. THE SHAPE IS CHECKED ON READ, and a malformed file refuses
-# EVERYTHING rather than half-applying — a syntax error reported with `jq`'s own
-# message, which names the line, and a shape error naming the key.
+# Nothing else is allowed at either level: an unknown key, a key that is not
+# one of the three roles, and a harness or model the registry does not carry
+# are each refused BY NAME — with ONE tolerated exception, `defaults.repair-
+# brief`, a retired role that registries seat: it is accepted, ignored, and
+# dropped by `setup --write`. THE SHAPE IS CHECKED ON READ, and a malformed
+# file refuses EVERYTHING rather than half-applying — a syntax error reported
+# with `jq`'s own message, which names the line, and a shape error naming the
+# key.
 #
 # RESOLUTION, STRICT. Flags override the defaults, and an override is checked
 # against the registry exactly as a default is:
@@ -205,9 +164,9 @@
 # means the evaluation does not run at all.
 #
 # `--harness native` resolves no seat because it raises nothing: it records a
-# context the CALLING harness already had, whose text is on disk and whose model
-# the caller names. It still needs a registry it can read, and its seat is
-# `override`.
+# context the CALLING harness already had, whose text is on disk and whose
+# model the caller names. It still needs a registry it can read, and its seat
+# is `override`.
 #
 # MODEL VERIFICATION goes through the channel each CLI actually has: pi's
 # catalogue here, devin's and copilot's own pre-flight refusal, and — for codex
@@ -219,9 +178,9 @@
 # THE ENVIRONMENT — WHAT IS SCRUBBED, WHAT IS PASSED, AND WHAT THAT CANNOT DO
 # ==============================================================================
 #
-# Every context, for every role, on every harness, is started with `env -i` and
-# an ALLOW-LIST. Nothing else crosses. This holds even where the boundary is
-# `none`, because it is remit's own process doing the launch.
+# Every context, for every role, on every harness, is started with `env -i`
+# and an ALLOW-LIST. Nothing else crosses. This holds even where the boundary
+# is `none`, because it is remit's own process doing the launch.
 #
 #   PATH                     a context needs its tools; the coordinator's.
 #   HOME                     a SCRATCH directory made for this raise and removed
@@ -231,21 +190,15 @@
 #                            every sandbox we raise into can write, since a
 #                            sandboxed seat runs as another account and is
 #                            refused under the coordinator's own profile. All
-#                            three names carry the same directory, so a POSIX
-#                            tool, a Windows one and `mktemp` all land in it.
+#                            three names carry the same directory.
 #   LANG, LC_ALL, LC_CTYPE   locale, where the coordinator has them.
-#   SYSTEMROOT, COMSPEC,     Windows needs these to start a process at all.
-#   PATHEXT, SYSTEMDRIVE     SYSTEMDRIVE earns its place by incident: without it
-#                            a raised Windows CLI created a literal, unexpanded
-#                            `%SystemDrive%/ProgramData/...` tree in the
-#                            worktree, which the delivery seam then committed.
+#   SYSTEMROOT, COMSPEC,     Windows needs these to start a process at all;
+#   PATHEXT, SYSTEMDRIVE     without SYSTEMDRIVE a Windows CLI writes a literal
+#                            `%SystemDrive%/...` tree into the worktree.
 #   USERPROFILE, APPDATA,    Windows only, POINTED AT THIS RAISE'S SCRATCH — the
-#   LOCALAPPDATA             three roots a program writes its profile under.
-#                            Without them (miq, 2026-09-04) Windows' Python
-#                            install manager wrote 167 MB into the worktree and
-#                            two deliveries carried it; NuGet threw before any
-#                            `dotnet` restore. An install now lands in the
-#                            scratch and goes with the run.
+#   LOCALAPPDATA             three roots a program writes its profile under, so
+#                            a tool that installs itself lands in the scratch
+#                            and goes with the run rather than into the tree.
 #   PROGRAMDATA, ProgramFiles, Windows only, passed through as the machine's:
 #   ProgramFiles(x86)        roots a program reads and never writes.
 #   the harness's own        so a CLI whose credentials live in the real home
@@ -268,405 +221,182 @@
 # credential. A context never runs git or gh — the delivery seam does that, as
 # the coordinator — so no token belongs in a context's environment at all.
 #
-# WHAT THE SCRUB CANNOT DO, said rather than implied away:
+# WHAT THE SCRUB CANNOT DO:
 #
 #   * It cannot stop a CLI reading the practitioner's own configuration.
-#     Pointing a harness's config variable at the real home is exactly what lets
-#     it authenticate, and a context raised there can read whatever those files
-#     say. The scrub bounds the ENVIRONMENT; it is not a read boundary, and no
-#     line here should be read as one.
+#     Pointing a harness's config variable at the real home is exactly what
+#     lets it authenticate. The scrub bounds the ENVIRONMENT; it is not a read
+#     boundary.
 #   * pi takes its provider credentials from environment variables
 #     (`ANTHROPIC_API_KEY`, `AWS_*`, `PI_KEY` and the rest). Those are tokens
 #     and are NOT passed, so a pi seat whose credentials live only in an
 #     exported variable will find none. That is the rule doing its job.
 #   * A PI PACKAGE'S SKILLS ARE NOT EXTENSION CODE, and `--no-extensions` does
-#     not remove them. Rendered with discovery off, the practitioner's three
-#     installed packages still put `council-mode`, `pi-subagents` and
-#     `mcp-scripting` into the prompt's skill list. What is left is prose, not a
-#     tool and not a hook: a skill can only tell the model to reach for
-#     something, and after the tool allowlist the things these name no longer
-#     exist in a contained context. The flag that WOULD remove them is
-#     `--no-skills`, which is all-or-nothing and would take remit's own skills
-#     with them — the same refusal as Copilot's `--no-custom-instructions` below.
-#     So it is disclosed rather than implied away.
+#     not remove them: an installed package's skills are still in the prompt's
+#     skill list. What is left is prose, not a tool and not a hook. The flag
+#     that WOULD remove them is `--no-skills`, which is all-or-nothing and
+#     would take remit's own skills with them. Disclosed rather than implied
+#     away.
 #   * A RAISE HAS NO `~/.ssh`. HOME is scratch, so `ssh` inside a context has
 #     no identity, no known hosts and no user config, whatever the practitioner
 #     installed — by design, and nothing here hands one in. A host a build or a
 #     proof must reach is reached through the SYSTEM ssh configuration, which
 #     `env -i` does not touch: a `Host` stanza in `/etc/ssh/ssh_config` naming
-#     `IdentityFile` and `UserKnownHostsFile` under the real home. Four rounds
-#     on miq re-measured a rig as unreachable that no raise could ever reach
-#     (2026-09-05); the record now says why rather than the rig's state.
-#   * It says nothing about what a process can READ from the filesystem. That is
-#     the boundary line above, and on this host only codex has one.
-#   * The PLATFORM adds names remit neither passes nor can prevent: on Git Bash,
-#     `env -i /bin/sh -c env` still prints `MSYSTEM`, `WINDIR` and `SYSTEMROOT`.
-#     They are paths and a platform name, never a credential, and they are named
-#     here so that reading the allow-list against a real raise is not read as a
-#     leak.
+#     `IdentityFile` and `UserKnownHostsFile` under the real home.
+#   * It says nothing about what a process can READ from the filesystem. That
+#     is the boundary line above, and only codex has one.
+#   * The PLATFORM adds names remit neither passes nor can prevent: on Git
+#     Bash, `env -i /bin/sh -c env` still prints `MSYSTEM`, `WINDIR` and
+#     `SYSTEMROOT`. Paths and a platform name, never a credential.
 #
 # THE PRACTITIONER'S CONFIGURATION IS IMPORTED BY SOME OF THESE CLIs, and that
 # is a different hole from the environment. It is closed where a documented
 # opt-out exists in a file remit already writes, and RECORDED where none does.
 #
-#   devin — CLOSED for skills, commands and MCP servers, by `read_config_from` in
-#     the `.devin/config.json` this script writes per raise; the switch, the key
-#     set and what it was measured to do are at `devin_write_containment` below,
-#     which is the one place any of it is stated.
-#     THE RESIDUAL, measured and not assumed: `devin rules list` still reports
-#     the practitioner's `~/.claude/CLAUDE.md` as an always-on rule with every
-#     importer false, and still reports it under `env -i` with a scratch `HOME`.
-#     Devin's own global rules — `%APPDATA%\devin\AGENTS.md`, `~/.devin/rules/`
-#     — and the user `config.json`'s own `permissions` are NATIVE, not imports,
-#     and `read_config_from` does not reach them at all; remit passes `APPDATA`
-#     because devin needs it to authenticate, so they are readable by a raise.
-#   copilot — NOT CLOSED. NO OPT-OUT EXISTS, and that is now a SEARCHED negative
-#     rather than an undocumented assertion. Copilot reads
-#     `$COPILOT_HOME/copilot-instructions.md` and
-#     `$COPILOT_HOME/instructions/*.instructions.md` as user-level instruction
-#     sources, and `.claude/skills/**` as project skills. remit points
-#     `COPILOT_HOME` at the practitioner's real `~/.copilot` so the seat can
-#     authenticate, which is what makes the first two reachable; the third is
-#     reachable because the tree may carry a `.claude/` of its own.
-#     HOW THE NEGATIVE WAS ESTABLISHED, on copilot 1.0.80, through the free
-#     channels only — `copilot --help`, every subcommand's help, the CLI's own
-#     `copilot help config` and `copilot help environment` topics,
-#     `copilot skill list --json`, and the bundle's own
-#     `repoDiscoverInstructionSources` called standalone under node out of
-#     `$LOCALAPPDATA/copilot/pkg/<ver>/prebuilds/<plat>/runtime.node`, which
-#     renders the model-visible instruction sources exactly as a session
-#     assembles them, with no session, no auth and no token spent. A fixture
-#     carried a distinct marker in each candidate file. Every lever found, and
-#     what the render said of it:
-#       * `--no-custom-instructions` EXISTS and is ALL-OR-NOTHING: its help is
-#         "Disable loading of custom instructions from AGENTS.md and related
-#         files", and it is one boolean (`skipCustomInstructions`) fed to the
-#         prompt builder. The render settles that it cannot be scoped: ONE
-#         discovery call returns the user sources and the repository's own
-#         `AGENTS.md`, `.github/copilot-instructions.md` and
-#         `.github/instructions/*.instructions.md` in a single list. There is no
-#         seam in it, so this flag would strip the project's instructions — the
-#         ones a context is raised to work from — to strip the practitioner's.
-#         It is not taken, and the raise below says so at its own call site.
-#       * `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` ADDS, it does not replace. Its own
-#         help says "additional directories to search for custom instructions
-#         files (in addition to git root and current working directory)", and the
-#         render agrees: with it set, both user-level markers were still in the
-#         list and the new one was appended. It cannot narrow anything.
-#       * `disabledInstructionSources` is REAL and PER-SOURCE — the render's
-#         every source carries an `id` and a `location` of `user`, `repository`
-#         or `working-directory`, so the wanted distinction exists inside the
-#         CLI — but it is SESSION-ONLY: no flag in any help output, no
-#         environment variable in `copilot help environment`, and no key in the
-#         config, which is the difference that decides it. In the shipped bundle
-#         `disabledSkills` is read out of the loaded config; the same read for
-#         `disabledInstructionSources` does not occur anywhere. It is reachable
-#         only from the interactive `/instructions` picker, and a raise is not
-#         interactive.
-#       * `disabledSkills` IS a config key and it DOES work — with it set, the
-#         render's `.claude/skills` marker and the user-level skill both came
-#         back `enabled=false`. It is still not an opt-out remit can take. It is
-#         keyed by skill NAME, which a raise cannot know in advance; and it lives
-#         ONLY in the user config. Four candidate project-level homes were each
-#         written and rendered alone — `.copilot/config.json`,
-#         `.copilot/settings.json`, `.github/settings.json`,
-#         `.github/copilot/config.json` — and every one was a no-op, while the
-#         same content in `$COPILOT_HOME/settings.json` took effect. So using it
-#         would mean remit WRITING INTO THE PRACTITIONER'S OWN configuration and
-#         changing every session they run for themselves. A raise does not edit
-#         the config it borrows to authenticate.
-#       * THERE IS NO "ignore user config" FLAG AND NO PROFILE MECHANISM. Neither
-#         appears in `copilot --help` or in any subcommand's help.
-#       * The mechanism that WOULD close it is a `configDir` the CLI never
-#         exposes: `repoDiscoverInstructionSources` takes one, and called with it
-#         unset the render returned the repository's three sources and NEITHER
-#         user-level source. Its only handle at the CLI surface is `COPILOT_HOME`
-#         — the same variable that carries authentication. Moving it suppresses
-#         the practitioner's instructions and the seat's login together.
-#     So it is DISCLOSED rather than implied away. (Devin's own `copilot`
-#     importer — `.github/skills/**` and `~/.copilot/skills/**` — IS closed, by
-#     the same switch as above.)
-#   codex — NOT CLOSED, and the same negative, searched the same way. Codex reads
-#     `$CODEX_HOME/AGENTS.md`, and remit points `CODEX_HOME` at the
-#     practitioner's real `~/.codex` so the seat can authenticate.
-#     HOW THE NEGATIVE WAS ESTABLISHED, on codex-cli 0.151.0, free throughout via
-#     `codex debug prompt-input`, which renders the model-visible prompt as JSON
-#     and — established rather than assumed — needs NO auth and runs under a
-#     scratch `CODEX_HOME` that has no `auth.json` at all. A fixture carried a
-#     distinct marker in `$CODEX_HOME/AGENTS.md`, the repository's `AGENTS.md`,
-#     `$CODEX_HOME/skills/` and `.agents/skills/`. What the render said:
-#       * THE TWO INSTRUCTION FILES ARE ONE BLOCK. The global and the project doc
-#         are concatenated into a single `<INSTRUCTIONS>` element separated by a
-#         literal `--- project-doc ---`, the global one FIRST. There is no
-#         config key addressing the first half.
-#       * `-c project_doc_max_bytes=0` cuts THE WRONG HALF: the project marker
-#         left the prompt and the practitioner's global marker stayed. It is a
-#         project-doc bound and nothing else.
-#       * `--ignore-user-config` LOOKS like the answer and is not. Its own help is
-#         "Do not load `$CODEX_HOME/config.toml`; auth still uses `CODEX_HOME`",
-#         which is the right shape — and the render proves it cannot reach this:
-#         with `config.toml` DELETED ENTIRELY from the scratch `CODEX_HOME`, the
-#         global `AGENTS.md` marker was still in the prompt. Not loading that
-#         file is exactly what the flag does, so the flag cannot drop this. The
-#         same proof disposes of `--profile`, which only layers a second
-#         `config.toml` on top of the first.
-#       * NO CONFIG KEY REACHES IT, and the key set was enumerated off the
-#         shipped binary rather than guessed. Every instruction-adjacent key was
-#         rendered: `instructions`, `developer_instructions`,
-#         `project_doc_fallback_filenames`, `project_root_markers`,
-#         `include_environment_context`, `compact_prompt` — none moved the global
-#         marker; `model_instructions_file` replaces the BASE instructions, is a
-#         different channel, and refuses an empty file. No `skills.*` key exists:
-#         six spellings were rendered and every one was inert.
-#       * NO ENVIRONMENT VARIABLE REACHES IT either — the binary's whole `CODEX_*`
-#         set carries no instruction or skills switch.
-#       * `$CODEX_HOME/AGENTS.override.md` IS read and DOES replace
-#         `$CODEX_HOME/AGENTS.md` — the override's marker reached the prompt and
-#         the global one did not, with the project doc untouched. It is a real
-#         lever and remit still does not take it: it is a write into the
-#         practitioner's own home that would silence their global instructions in
-#         every session they run for themselves, which is the same refusal as
-#         Copilot's `disabledSkills` above.
-#       * POINTING `CODEX_HOME` AT A SCRATCH DIRECTORY WOULD WORK AND IS REFUSED.
-#         It suppresses the file, but the seat then cannot authenticate unless
-#         `auth.json` is copied or linked into that directory — and `auth.json`
-#         IS THE CREDENTIAL. Remit never copies, moves or links a credential, so
-#         this is not done and no shipped code does it. The hole stays open
-#         rather than being closed by materialising a token at a second path.
-#       * WHAT CODEX DOES NOT DO, so that it is not carried as a worry: it does
-#         NOT read `.claude/skills`. The prompt's own skill-roots table listed
-#         `$CODEX_HOME/skills`, `$CODEX_HOME/skills/.system` and the
-#         repository's `.agents/skills` — and the `.claude/skills` marker in the
-#         same fixture never appeared, in any run.
-#     Codex is the one seat here with an enforced read boundary, so what it does
-#     with what it reads is bounded; what it READS is not.
+#   devin — CLOSED for skills, commands and MCP servers, by `read_config_from`
+#     in the `.devin/config.json` this script writes per raise;
+#     `devin_write_containment` below is the one place the switch, the key set
+#     and what it does are stated. THE RESIDUAL: `devin rules list` still
+#     reports the practitioner's `~/.claude/CLAUDE.md` as an always-on rule
+#     with every importer false, under `env -i` with a scratch `HOME` too.
+#     Devin's own global rules and the user `config.json`'s `permissions` are
+#     NATIVE, not imports, and `read_config_from` does not reach them; remit
+#     passes `APPDATA` because devin needs it to authenticate, so they are
+#     readable by a raise.
+#   copilot — NOT CLOSED, and NO OPT-OUT EXISTS. Copilot reads
+#     `$COPILOT_HOME/copilot-instructions.md`,
+#     `$COPILOT_HOME/instructions/*.instructions.md` and `.claude/skills/**`;
+#     remit points `COPILOT_HOME` at the real `~/.copilot` so the seat can
+#     authenticate. Every lever: `--no-custom-instructions` is ALL-OR-NOTHING —
+#     one discovery call returns the user sources and the repository's own
+#     `AGENTS.md` in a single list, so the flag would strip the project's
+#     instructions to strip the practitioner's, and it is not taken.
+#     `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` ADDS and cannot narrow.
+#     `disabledInstructionSources` is per-source but SESSION-ONLY, reachable
+#     from the interactive picker and nowhere else. `disabledSkills` works but
+#     is keyed by skill NAME and lives ONLY in the user config, so using it
+#     would mean remit writing into the practitioner's own configuration. There
+#     is no "ignore user config" flag and no profile mechanism. The `configDir`
+#     that would close it is exposed only as `COPILOT_HOME`, the variable that
+#     carries authentication. DISCLOSED rather than implied away.
+#   codex — NOT CLOSED, the same negative. Codex reads `$CODEX_HOME/AGENTS.md`,
+#     and remit points `CODEX_HOME` at the real `~/.codex` so the seat can
+#     authenticate. The global and project docs are ONE `<INSTRUCTIONS>` block,
+#     and no config key addresses the first half: `project_doc_max_bytes=0`
+#     cuts the project half; `--ignore-user-config` does not load `config.toml`
+#     and the global `AGENTS.md` is read regardless; no `CODEX_*` variable and
+#     no `skills.*` key reaches it. `$CODEX_HOME/AGENTS.override.md` DOES
+#     replace it and is not taken: a write into the practitioner's own home.
+#     Pointing `CODEX_HOME` at a scratch directory would work and is REFUSED:
+#     the seat then cannot authenticate unless `auth.json` is copied there, and
+#     `auth.json` IS THE CREDENTIAL — remit never copies, moves or links one.
+#     Codex does NOT read `.claude/skills`. Codex is the one seat here with an
+#     enforced read boundary, so what it does with what it reads is bounded;
+#     what it READS is not.
 #   pi — CLOSED for extension TOOLS and for extension CODE, by two flags every
-#     raise passes: `--tools` carrying pi's built-in set, and `--no-extensions`.
-#     remit points `PI_CODING_AGENT_DIR` at the practitioner's real `~/.pi/agent`
-#     so the seat can authenticate, and that directory's `settings.json` carries
-#     their installed packages — so without these flags a contained context is
-#     handed every tool those packages register. On this host, 2026-09-01, that
-#     was NINE beyond the built-ins: `subagent`, `subagent_wait`,
-#     `subagent_supervisor`, `mcpScript`, `mcp`, `web_search`, `source_check`,
-#     `fetch_content`, `get_search_content` — a builder able to spawn its own
-#     fleet and to reach the network through a plugin the containment never
-#     considered. Same class as devin's importer: no personal tool reaches a raise.
-#     THE RULE. Every pi raise passes `--tools read,bash,edit,write` — pi's
-#     built-in set, verified from the render below and not assumed — so no
-#     extension or custom tool exists in a contained context. A caller's
-#     `--allowed-tools` NARROWS WITHIN that set and can never widen it: the two
-#     lists are intersected, case-insensitively so that a claude-shaped
-#     `Bash,Edit` lands on pi's `bash,edit`, and a name that is not a built-in is
-#     dropped rather than forwarded. An intersection that comes out empty is
-#     `--no-tools`, said on stderr and in the provenance, never a silent
-#     widening back to the default. A caller's `--exclude-tools` is passed on top
-#     and still applies: pi's denylist runs after its allowlist, so it can only
-#     subtract — rendered, `--tools read,bash,edit,write --exclude-tools bash`
-#     left `read,edit,write`. The `tools:` provenance line is the record.
-#     THE RESIDUAL THE ALLOWLIST ALONE DOES NOT CLOSE, which is why
-#     `--no-extensions` is passed as well: `--tools` bounds the tools the MODEL
-#     sees, not the code the PROCESS runs. A pi extension is a module pi imports
-#     and calls at startup, and its `pi.on(...)` handlers fire whatever the tool
-#     list says. Measured: under `--tools read,bash,edit,write` the marker tool
-#     was gone from the prompt and the marker extension's module body, its setup
-#     function and its `session_start` handler had all still run. A hook that
-#     runs code you did not write is a hole even with its tool gone.
-#     `--no-extensions` closes it — its own help is "Disable extension discovery
-#     (explicit -e paths still work)" — and the same fixture under it logged
-#     NOTHING: no module body, no setup function, no handler, no tool. It costs
-#     no credential; the config directory still carries `auth.json` and the model
-#     catalogue, and every render below ran against the practitioner's own agent
-#     directory.
-#     HOW ALL OF THIS WAS ESTABLISHED, free of a model turn and free of money, on
-#     pi 0.84.4: pi's own `-e <file>` extension channel, the same shape the
-#     shadow-pi item used. A probe extension registers a `before_agent_start`
-#     handler — the event whose payload carries `systemPromptOptions`, with
-#     `.selectedTools`, `.toolSnippets`, `.skills` and `.contextFiles`, which IS
-#     the model-visible surface — writes them to a file and calls
-#     `process.exit(0)` BEFORE the agent loop. No prompt reaches a provider. `-e`
-#     paths load even under `--no-extensions`, which is what lets the probe
-#     report on a run with discovery off. The hook question was answered by a
-#     second extension placed in a scratch `PI_CODING_AGENT_DIR`'s `extensions/`,
-#     carrying a marker tool and marker handlers that logged on load and on fire.
-#     TRUST, AND WHAT A RAISE THEREFORE SEES. A raise passes NEITHER `--approve`
-#     NOR `--no-approve`, so pi's own rule decides and nothing here overrides the
-#     practitioner's own answer. `.pi/skills/`, `.agents/skills/` and
-#     `.pi/APPEND_SYSTEM.md` — the project resources `install.sh` writes for pi,
-#     which is where that list is stated and it is not restated here — load ONLY
-#     after the project is trusted, and a `-p` run never prompts. What applies is
-#     the closest saved decision in `~/.pi/agent/trust.json` on the worktree or a
-#     PARENT of it, and failing that `defaultProjectTrust`, whose default `ask`
-#     means "ignore" in `-p`. A raise's worktree is a fresh path, so unless a
-#     parent directory carries a saved yes, REMIT'S OWN SKILLS ARE NOT VISIBLE TO
-#     A PI RAISE. Rendered: untrusted, the fixture's `.pi/skills` and
-#     `.agents/skills` were both absent from `.skills` and its `.pi/extensions`
-#     module never ran; with `--approve` all three appeared. CONTEXT FILES ARE
-#     THE EXCEPTION and load either way — `AGENTS.md` was in `.contextFiles`
-#     plain, under `--no-approve` and under `--no-extensions` alike. And
-#     `--no-extensions` OUTRANKS TRUST: with `--approve` AND `--no-extensions`
-#     the project skills loaded and the project-local extension still did not.
-#   claude — the INSTRUCTION surface is not investigated, and nothing is claimed
-#     either way. What IS settled, and settled here rather than by the installer,
-#     is THE AGENT-TOOL GUARD.
-#     WHY THE SEAM WRITES IT AND NOT THE INSTALLER. `install.sh` registers
-#     `.remit/hooks/no-agent-tool.sh` as a `PreToolUse` hook in the repository's
-#     `.claude/settings.local.json`. Under a SHADOW install that file is
-#     shadow-excluded, so it does not exist in the `work/<slug>` worktree a raise
-#     actually runs in; and the global configuration the raise reads through
-#     `CLAUDE_CONFIG_DIR` carries no such hook. On 2026-09-01, in Zenith.Core,
-#     that left a claude raise with NOTHING banning its agent tool. An installed
-#     file cannot contain a raise that runs where the installed file is not, so
-#     the containment is written PER RAISE, by this script, into the argv and the
-#     worktree the raise is given. It travels with the raise by construction.
-#     THE MECHANISM, and it is the flag: every claude raise passes
-#     `--disallowedTools Agent,Task,AgentTool` alongside its `--allowedTools`.
-#     `Agent` is the tool's name since Claude Code 2.1.63 and `Task` its retained
-#     alias; `AgentTool` is carried for the same reason the hook carries it. A
-#     DENY OUTRANKS EVERY ALLOW — the documented order is deny, then ask, then
-#     allow, and no allow at any level reinstates a denied tool — so this holds
-#     against the raise's own `--allowedTools` and against the permissions in the
-#     practitioner's global settings, `defaultMode: auto` included. It needs no
-#     file to exist anywhere.
-#     THE SECOND LAYER, belt to that brace: this script also writes the
-#     containment INTO THE WORKTREE before the raise and removes it after —
-#     `claude_write_containment` below. Two files, and BOTH are written by this
-#     script at the raise so that nothing installed anywhere is depended on:
-#     `.claude/settings.local.json`, carrying the same deny rules and a
-#     `PreToolUse` registration, and `.claude/remit-no-agent-tool.sh` beside it,
-#     which is the guard itself — the same rule as the shipped
-#     `.remit/hooks/no-agent-tool.sh` and reachable when that file is not there.
-#     Copilot's containment is written the same way and for the same reason.
-#     WHY IT IS READ AT ALL, documented rather than assumed: Claude Code loads
-#     user, project and local settings from the working directory by default
-#     (`--setting-sources` defaults to all three); a `-p` session counts as
-#     accepted, so an UNTRACKED `.claude/settings.local.json` is applied with no
-#     trust step; and `PreToolUse` hooks fire in `-p` before any permission-mode
-#     check, in every mode.
-#     IT NEVER OVERWRITES. A `.claude/settings.local.json` already in the tree is
-#     left exactly as it is and NOT augmented — that file is the practitioner's
-#     or the installer's, and a raise does not edit configuration it found. Only
-#     what this script created is removed afterwards, so a `.claude/` the
-#     repository already had survives the raise untouched. When the file was
-#     already there the flag is the whole containment, and that is what the
-#     `containment:` provenance line then says. A copy of whatever was written
-#     goes into the run directory as the record.
-#     WHAT NEITHER LAYER DOES, said rather than implied away: both match NAMES. A
-#     claude build that renames its agent tool, or reaches a sub-agent through
-#     some other tool, walks past both — the same limit the shipped hook states
-#     about itself.
+#     raise passes: `--tools read,bash,edit,write` — pi's built-in set — and
+#     `--no-extensions`. remit points `PI_CODING_AGENT_DIR` at the real
+#     `~/.pi/agent` so the seat can authenticate, and that directory's
+#     `settings.json` carries the practitioner's installed packages, whose
+#     tools (sub-agents, MCP, web search, fetch) would otherwise reach a
+#     contained context. A caller's `--allowed-tools` NARROWS WITHIN the
+#     built-in set and never widens it: the two lists are intersected,
+#     case-insensitively, and a name that is not a built-in is dropped; an
+#     intersection that comes out empty is `--no-tools`, said on stderr and in
+#     the provenance. A caller's `--exclude-tools` is passed on top and can
+#     only subtract. `--tools` bounds what the MODEL sees, not the code the
+#     PROCESS runs: an extension's `pi.on(...)` handlers fire whatever the tool
+#     list says, and `--no-extensions` is what stops them; `-e` paths still
+#     load, which is how the offline probes render a run. TRUST: a raise passes
+#     NEITHER `--approve` NOR `--no-approve`. `.pi/skills/`, `.agents/skills/`
+#     and `.pi/APPEND_SYSTEM.md` load ONLY after the project is trusted, and a
+#     `-p` run never prompts: what applies is the closest saved decision in
+#     `~/.pi/agent/trust.json` on the worktree or a PARENT of it, else
+#     `defaultProjectTrust`, whose default `ask` means "ignore" in `-p`. So
+#     unless a parent directory carries a saved yes, REMIT'S OWN SKILLS ARE NOT
+#     VISIBLE TO A PI RAISE. Context files (`AGENTS.md`) load either way, and
+#     `--no-extensions` OUTRANKS TRUST.
+#   claude — the INSTRUCTION surface is not investigated, and nothing is
+#     claimed either way. What IS settled here is THE AGENT-TOOL GUARD, written
+#     PER RAISE by this script and not by the installer: under a SHADOW install
+#     the installed hook registration does not exist in the `work/<slug>`
+#     worktree a raise runs in, and the global configuration carries no such
+#     hook. THE MECHANISM IS THE FLAG: every claude raise passes
+#     `--disallowedTools Agent,Task,AgentTool` alongside its `--allowedTools`
+#     (`Agent` is the tool's name, `Task` its retained alias, `AgentTool`
+#     carried as the shipped hook carries it). A DENY OUTRANKS EVERY ALLOW — the
+#     documented order is deny, ask, allow — so this holds against the raise's
+#     own `--allowedTools` and against the practitioner's global settings,
+#     `defaultMode: auto` included, and needs no file anywhere. THE SECOND
+#     LAYER: `claude_write_containment` below writes `.claude/settings.local.
+#     json` (the same deny rules and a `PreToolUse` registration) and
+#     `.claude/remit-no-agent-tool.sh` beside it into the worktree before the
+#     raise and removes them after; Claude Code applies an untracked local
+#     settings file in `-p` with no trust step, and `PreToolUse` hooks fire in
+#     `-p` before any permission-mode check. IT NEVER OVERWRITES a
+#     `.claude/settings.local.json` already in the tree; then the flag is the
+#     whole containment, and the `containment:` line says so. Both layers match
+#     NAMES: a build that renames its agent tool walks past both.
 #
 # WHETHER A RUN CAN SAY WHAT IT CONSULTED — the `consulted:` provenance key —
-# is a per-harness fact and this is the one place it is stated.
+# is a per-harness fact:
 #
-#   claude — YES, AND ONLY FOR THE SERVER SIDE, and it is the only seat here that
-#     answers at all. The `-p --output-format json` envelope carries a
-#     `server_tool_use` object with `web_search_requests` and
-#     `web_fetch_requests`: the API's own count of the SERVER-SIDE searches and
-#     fetches the run made. This is read where the envelope carries it and
-#     written to `consulted:` with its scope beside it.
-#     WHAT IT DOES NOT COVER, and this is the whole of why the line carries a
-#     scope. Claude Code's own `WebFetch` and `WebSearch` are CLIENT-SIDE tools:
-#     the CLI performs the request and hands the content to the model, and
-#     nothing about that reaches `server_tool_use`. A raise that fetched
-#     twenty-seven pages through them reports `web_fetch=0`, correctly, for a
-#     counter that was never measuring that path.
-#     NO OTHER ENVELOPE FIELD COUNTS A CLIENT-SIDE TOOL CALL. That is a SEARCHED
-#     negative, taken on 2026-09-02 off the shipped `claude` binary itself — the
-#     result envelope's own schema, recovered whole, is `type`, `subtype`,
-#     `duration_ms`, `duration_api_ms`, the `ttft_*`/`time_*` timings,
-#     `user_message_uuid`, `warm_spare_claimed`, `is_error`, `api_error_status`,
-#     `num_turns`, `result`, `stop_reason`, `total_cost_usd`, `usage`,
-#     `modelUsage`, `subagent_stats`, `permission_denials`, `queued_turn_count`,
-#     `structured_output`, `deferred_tool_use`, `terminal_reason`, the
-#     `fast_mode_*` pair, `origin`, `uuid` and `session_id`. Not one of them is a
-#     tool tally: `num_turns` counts assistant turns, `permission_denials` lists
-#     the calls that were REFUSED, `subagent_stats` is about sub-agents, and
-#     `usage` is the API usage block whose only tool member is the server-side
-#     counter above — which that binary's own cost model bills as a server-side
-#     line item, confirming what it is. The ONE channel in that CLI that would
-#     show a client-side fetch is `--output-format stream-json`, whose assistant
-#     messages carry the `tool_use` blocks themselves and could be counted; it is
-#     a different output mode and a different parse, this script asks for `json`,
-#     and nothing here infers a count from a trace it did not ask for.
-#     SO THE COUNT IS KEPT AND ITS SCOPE IS DECLARED, rather than the line being
-#     dropped. The counter is not vacuous for this seat — the server-side tools
-#     are reachable and are billed when they are used — so throwing it away would
-#     discard a real signal to fix a wording problem. What was wrong was never the
-#     number; it was a bare number that read as a scope it does not have.
-#   codex, copilot, devin, pi — NO EQUIVALENT COUNT IS RECORDED, and that is a
-#     searched negative over the shapes this script already parses and the probe
-#     records that captured them, not an assumption. codex's run header block
-#     carries the session, the model and the sandbox and no tool tally at all.
-#     Devin's ATIF export carries per-step `tool_calls` and `extra.
-#     committed_acu_cost` — a step-level trace, from which a search count could
-#     only be INFERRED by matching tool names, which is a guess and is not made.
-#     Copilot's JSONL carries `tool.execution_start` / `tool.execution_complete`
-#     pairs and a `result` usage block of AI credits, premium requests and files
-#     modified — again a trace, not a count, and again not inferred. Pi's stdout
-#     under `-p` is the final message and nothing else; a contained pi raise has
-#     no web tool to count in any case, since `--no-extensions` and the built-in
-#     allowlist remove `web_search` and `fetch_content` outright.
-#     So `consulted:` is ABSENT on those four seats. Absent means unreported, and
-#     it is left absent rather than written as a zero — a zero would say the run
-#     consulted nothing, which is a claim none of those channels supports.
+#   claude — YES, AND ONLY FOR THE SERVER SIDE. The `-p --output-format json`
+#     envelope carries `server_tool_use` with `web_search_requests` and
+#     `web_fetch_requests`, the API's own count of SERVER-SIDE searches and
+#     fetches. Claude Code's own `WebFetch` and `WebSearch` are CLIENT-SIDE and
+#     never reach it: a raise that fetched through them reports `web_fetch=0`,
+#     correctly, for a counter that was never measuring that path. No other
+#     envelope field counts a client-side tool call — `num_turns` counts turns,
+#     `permission_denials` lists refusals, `usage`'s only tool member is the
+#     server-side counter — and the one channel that would show one is
+#     `--output-format stream-json`, a different parse this script does not
+#     ask for. So the count is kept and its scope declared.
+#   codex, copilot, devin, pi — NO EQUIVALENT COUNT IS RECORDED. Codex's run
+#     header carries no tool tally; devin's ATIF export and copilot's JSONL
+#     carry step-level traces from which a count could only be INFERRED, and is
+#     not; pi's stdout under `-p` is the final message alone, and a contained
+#     pi raise has no web tool to count. `consulted:` is ABSENT on those four
+#     seats, never a zero.
 #
-# THE SHAPE OF BOTH NEGATIVES IS THE SAME, and it is worth naming once. Each CLI
-# HAS the distinction remit wants — Copilot's sources are tagged `user` against
-# `repository`; Codex's global doc is a separate file from the project's. Each
-# also has a lever that acts on it. Neither exposes that lever to a
-# non-interactive invocation without either taking the project's own
-# instructions away at the same time, or writing into the practitioner's
-# personal configuration, or moving the directory the seat authenticates from.
-# Those are the three refusals, and they are refusals rather than oversights.
-#
-# None of this is a read boundary and no line above should be read as one; it is
-# the INSTRUCTION SURFACE a raise inherits, which is a separate question from
-# what a raise can open.
+# THE SHAPE OF BOTH NEGATIVES IS THE SAME. Each CLI HAS the distinction remit
+# wants and a lever that acts on it; neither exposes it to a non-interactive
+# invocation without taking the project's own instructions away, writing into
+# the practitioner's personal configuration, or moving the directory the seat
+# authenticates from. Those are the three refusals. None of this is a read
+# boundary: it is the INSTRUCTION SURFACE a raise inherits.
 #
 # ==============================================================================
 # THE HONESTY RULES
 # ==============================================================================
 #
-# Each is a probed failure mode of a shipped CLI, evidenced in this repository's
-# probe records. None of them is relaxed here.
-#
 #   * Exit signals COMPLETION, not success. A CLI can exit 0 with every task
 #     command denied; nothing here reads success from an exit code.
 #   * Pi accepts a wrong model id silently, so the registered id must appear
-#     WHOLE in `pi --list-models` — as that table's `provider/id` or as the bare
-#     id. A substring of a real id is not a match.
-#   * The sandbox codex was ASKED for is not always the one it ran under, so its
-#     run HEADER BLOCK is read back after exit. A confirmed downgrade is exit 6;
-#     a header that cannot be read is reported UNCONFIRMED and claims nothing.
+#     WHOLE in `pi --list-models` — as that table's `provider/id` or as the
+#     bare id. A substring of a real id is not a match.
+#   * The sandbox codex was ASKED for is not always the one it ran under, so
+#     its run HEADER BLOCK is read back after exit. A confirmed downgrade is
+#     exit 6; a header that cannot be read is reported UNCONFIRMED.
 #   * Devin's exit code distinguishes only "the CLI refused to start" from "a
 #     run happened", so a devin run is judged from its ATIF export. Its
 #     containment is enforced by TERMINATION, not refusal, which is why its
 #     allow list is everything a context reaches for.
 #   * A DEVIN TOOL CALL THAT IS NEITHER ALLOWED NOR DENIED IS NOT SAFE. Its
-#     permission ladder ends in a default of PROMPT, there is nobody to prompt in
-#     `-p`, and the rejection cancels every sibling call in the batch — a raise
-#     can end with an empty final message and no verdict at all. A catch-all deny
-#     is not expressible, so what closes it is the ALLOW LIST, and the residual
-#     hole is stated where that list is written: `devin_write_containment` below.
-#   * Copilot reports NOTHING about the permissions that actually applied, in
-#     any channel, so there is no read-back to make. What exists instead is a
-#     canary: a cheap throwaway run under the exact configuration the context
-#     will get, which must run an ordinary command, author an ordinary in-tree
-#     file, and be BLOCKED on a wrapped `git`. Anything else refuses the raise
-#     (exit 7) — a hook that fails to load fails OPEN, silently.
+#     permission ladder ends in a default of PROMPT, there is nobody to prompt
+#     in `-p`, and the rejection cancels every sibling call in the batch. A
+#     catch-all deny is not expressible, so what closes it is the ALLOW LIST:
+#     `devin_write_containment` below.
+#   * Copilot reports NOTHING about the permissions that actually applied, so
+#     there is no read-back to make. What exists instead is a canary: a cheap
+#     throwaway run under the exact configuration the context will get, which
+#     must run an ordinary command, author an ordinary in-tree file, and be
+#     BLOCKED on a wrapped `git`. Anything else refuses the raise (exit 7) — a
+#     hook that fails to load fails OPEN, silently.
 #   * A CLAUDE RUN BILLS MORE THAN ONE MODEL and its envelope reports them as a
-#     MAP, so `model:` is CHOSEN — the registered seat's id where the run names
-#     it, else the largest output-token count — and never taken by position.
-#     Every model the run reports is written to `models:` beside it, so the
-#     ancillary is visible and is never the one the record calls the author. The
-#     rule, and the field failure that wrote it, are at THE PROVENANCE KEYS.
+#     MAP, so `model:` is CHOSEN and never taken by position, and every model
+#     the run reports is written to `models:` beside it.
 #   * WHAT A RUN CONSULTED IS RECORDED, NOT JUDGED, AND NEVER WITHOUT ITS SCOPE.
-#     Where a run reports its own web-search and web-fetch counts, `consulted:`
-#     carries them for a reader or a rubric to cite — and carries, in the same
-#     line, what those numbers do and do not cover, because a count read as
-#     wider than it is measures nothing and accuses something. This script draws
-#     no conclusion from the number, gates nothing on it, and writes no line at
-#     all for a seat that cannot report one.
 #   * There is NO enforced read boundary on claude, pi, copilot or devin here,
 #     and every provenance line says so rather than implying one.
 #   * An absent capability is reported before anything is invoked, and nothing
@@ -737,16 +467,11 @@ EOF
 # `--probe-host`: WHAT IS ON THIS HOST — the facts `remit setup` proposes from
 # ==============================================================================
 #
-# This lives here, and not in `bin/remit`, because THIS script is the one that
-# has to find each CLI at raise time. Where a binary lives, which of them are not
-# always on PATH, and which of them can be asked for a model catalogue are facts
-# with exactly one home, and a second copy in the proposer would be the copy that
-# drifts.
-#
-# It raises nothing, bills nothing, and reads no registry — a probe that needed
-# the registry could never help write the first one. The command name it looks
-# for is the CONVENTIONAL one, which is what a proposal offers for `cli`; a
-# registry may name a different command and this script uses whatever it names.
+# This lives here because THIS script is the one that has to find each CLI at
+# raise time; a second copy in the proposer would be the copy that drifts. It
+# raises nothing, bills nothing, and reads no registry. The command name it
+# looks for is the CONVENTIONAL one; a registry may name a different command and
+# this script uses whatever it names.
 #
 # One tab-separated record per harness, on stdout:
 #
@@ -754,7 +479,7 @@ EOF
 #
 # `<where>`, `<auth>`, `<model ids>` and `<note>` are empty when there is nothing
 # to say. NOTHING here is invented: a CLI with no catalogue reports no ids and
-# says in `<note>` that it has none, rather than offering ids from memory.
+# says so in `<note>`.
 
 # `pi --list-models` prints a table — `provider  model  context  max-out …` under
 # a header row of those names. Pi takes `--model` as `provider/id` or as a bare
@@ -838,15 +563,11 @@ fi
 # ONE PATH NAMESPACE
 # ==============================================================================
 #
-# The rule, and why the drive-lettered spelling is the one that travels, is
-# `ONE PATH NAMESPACE` in `bin/remit` — read it there. It applies harder on this
-# side of the seam than on that one: every path below is handed to a CLI that is
-# not an MSYS program, and `/c/Users/...` is a name only the MSYS shell that
-# produced it can open. A seat told its scratch is at `/tmp/...` is a seat told
-# nothing.
-#
-# `cygpath` is the authority; where there is none there is one spelling and this
-# is the identity function.
+# The rule is `ONE PATH NAMESPACE` in `bin/remit`. It applies harder on this side
+# of the seam: every path below is handed to a CLI that is not an MSYS program,
+# and `/c/Users/...` is a name only the MSYS shell that produced it can open.
+# `cygpath` is the authority; without it there is one spelling and this is the
+# identity.
 CYGPATH=$(command -v cygpath 2>/dev/null) || CYGPATH=''
 one_namespace() { # $1 an absolute path -> it, in the spelling everything resolves
 	if [ -n "$CYGPATH" ]; then
@@ -892,10 +613,8 @@ done
 
 case "$ROLE" in
 research | build | evaluate) ;;
-# RETIRED, 2026-09-03, on the practitioner's word: "a brief fixer has no place
-# writing anything in my words that i don't admit myself". A stopped item is his
-# to rule on, with the record in front of him; nothing is raised to propose a
-# rewrite of his brief. Refused by name, so a caller that still asks is told.
+# The `repair-brief` role is retired: an escalation raises nothing. Refused by
+# name, so a caller that still asks is told.
 repair-brief) die "the 'repair-brief' role is retired (2026-09-03): an escalation raises nothing, and a failed brief is the practitioner's to rule on from the record" ;;
 *) die "unknown role '$ROLE' — the roles are research, build and evaluate" ;;
 esac
@@ -913,17 +632,15 @@ RUBRICS=${REMIT_RUBRICS:-}
 STANDARDS=${REMIT_STANDARDS:-}
 MUSTFIX=${REMIT_MUSTFIX:-}
 DELIVERY=${REMIT_DELIVERY:-}
-# WHETHER `research.md` HAS AN AUTHOR AT THIS GATE — `yes` from the chain when it
-# is raising the gate into `refined` for an item whose authority asks for
-# research, empty everywhere else. It changes what the EVALUATOR is told it can
-# reach with a must-fix, and nothing else: THE THREE GATES' one exception in
-# `bin/remit`'s header is the law of it and this script states none of that law.
+# WHETHER `research.md` HAS AN AUTHOR AT THIS GATE — `yes` from the chain for the
+# gate into `refined` where the authority asks for research. It changes what the
+# EVALUATOR is told it can reach with a must-fix; THE THREE GATES in `bin/remit`'s
+# header is the law.
 RESEARCH_AUTHOR=${REMIT_RESEARCH_AUTHOR:-}
-# A REVIEW RAISE — `remit review --attest`: `yes` from that verb, empty
-# everywhere else. It is the `evaluate` seat asked a different question — not a
-# verdict on a gate but one line per standing finding on what the tree holds
-# now. THE REVIEW PROJECTION in `bin/remit`'s header is the law; this script
-# only words what the context is asked to return.
+# A REVIEW RAISE — `remit review --attest`: `yes` from that verb, empty everywhere
+# else. The `evaluate` seat asked a different question — one line per standing
+# finding on what the tree holds now, not a verdict on a gate. THE REVIEW
+# PROJECTION in `bin/remit`'s header is the law.
 REVIEW=${REMIT_REVIEW:-}
 PROVFILE=${REMIT_PROVENANCE:-}
 RUNS=${REMIT_RUNS:-}
@@ -965,17 +682,14 @@ fi
 	die "no registry at $SETTINGS — every seat this script raises comes from one the practitioner registered there, and there is no standing default left to fall back on. \`sh bin/remit setup\` proposes one from what is on this host, and \`sh bin/remit setup --write\` saves it"
 [ -s "$SETTINGS" ] || die "the registry $SETTINGS is empty — a registry that registers nothing can raise nothing"
 
-# A SEAT THAT REFUSED IS A FACT ABOUT THE HOST, NOT THE ITEM. miq, 2026-09-04:
-# the evaluate seat ran out of credits and five chains, one after another over
-# forty minutes, each spent a build round delivering into a gate that could not
-# answer, and each escalated on its own. The mark below is written beside the
-# git dir — machine state, never record — when a run FAILS with a signature that
-# names the seat rather than the run: credits, quota, authentication. It carries
-# the harness, the time and the reason. `bin/remit` reads it before a chain
-# raises anything and stops while it is fresh; a run on that harness that
-# completes clears it, and so does `remit setup --write`. ONLY those signatures:
-# a dead execution host or a crashed CLI is one run's failure and marks nothing,
-# or one item's bad hour would stop every other chain on the host.
+# A SEAT THAT REFUSED IS A FACT ABOUT THE HOST, NOT THE ITEM. The mark below is
+# written beside the git dir — machine state, never record — when a run FAILS
+# with a signature that names the seat rather than the run: credits, quota,
+# authentication. It carries the harness, the time and the reason. `bin/remit`
+# reads it before a chain raises anything and stops while it is fresh; a run on
+# that harness that completes clears it, and so does `remit setup --write`. ONLY
+# those signatures: a dead execution host or a crashed CLI is one run's failure
+# and marks nothing.
 REFUSAL_SIGNATURES='out of credits|insufficient credits|quota exceeded|exceeded your quota|not logged in|not authenticated|unauthori[sz]ed|invalid api key|HTTP 401|HTTP 402|HTTP 429|429 Too Many'
 refusal_mark_file() { # -> the mark's path, or nothing where there is no git dir to keep it in
 	_rmf=$(git -C "$(dirname "$SETTINGS")" rev-parse --git-common-dir 2>/dev/null) || return 0
@@ -1179,8 +893,8 @@ elif [ -n "$HARNESS" ]; then
 	SEAT_FROM='--harness, with the model the registry seats this role on there'
 	SEAT_KIND=override
 elif [ -n "$MODEL" ]; then
-	# The practitioner reaching for a named model — his own example, "use sol".
-	# It resolves when the registry carries it, and fails loudly when it does not.
+	# A named model resolves when the registry carries it, and fails loudly when it
+	# does not.
 	if [ "$(reg_default "$ROLE" model)" = "$MODEL" ]; then
 		HARNESS=$(reg_default "$ROLE" harness)
 	else
@@ -1304,9 +1018,8 @@ if [ "$HARNESS" = devin ]; then
 		;;
 	esac
 
-	# No flag guarantees a -p run is non-interactive: a probe run was dropped into
-	# an interactive picker and hung until it was killed. The wait is therefore
-	# bounded by mechanism.
+	# No flag guarantees a -p run is non-interactive, so the wait is bounded by
+	# mechanism.
 	case "$DEVIN_TIMEOUT" in
 	'' | *[!0-9]* | 0) die "REMIT_DEVIN_TIMEOUT must be a positive whole number of seconds, not '$DEVIN_TIMEOUT'" ;;
 	esac
@@ -1325,25 +1038,13 @@ if [ "$HARNESS" = devin ]; then
 		die "neither jq nor node is on PATH — a devin run is judged from its ATIF export, which nothing here could read; not raising a context"
 	fi
 
-	# THE SANDBOX REFUSAL IS TWO REFUSALS, because it had one reason and two
-	# platforms. On Windows devin's OS-level sandbox does not exist — its own docs
-	# say a session HARD-FAILS when `--sandbox` is passed — so the refusal there is
-	# the CLI's own behaviour said earlier and more clearly. Everywhere else the
-	# sandbox is real (macOS seatbelt, Linux `bwrap` + `seccomp`, per `devin
-	# --help`), and remit still does not pass it — for a DIFFERENT reason, stated
-	# as its own reason rather than hidden behind Windows'.
-	#
-	# THAT REASON: `--sandbox` selects Autonomous and, per `reference/
-	# permissions.mdx`, Autonomous is then the ONLY permission mode available. The
-	# shipped build's `--permission-mode` does not accept `autonomous` as a value
-	# at all — its `--help` lists `auto`, `accept-edits`, `smart`, `dangerous` — so
-	# a raise that asked for `accept-edits` and got Autonomous would trip this
-	# script's own mode read-back and exit 6 on every run. Making that work means
-	# not asking for a mode and not checking the one that applied, which is
-	# retiring a precondition, and NOTHING HERE ESTABLISHES that the trade is
-	# sound: there is no non-Windows host in this repository's reach and no run
-	# has been made on one. UNESTABLISHED-UNTIL-RUN, and refused rather than
-	# guessed at — an absent capability is reported before anything is invoked.
+	# THE SANDBOX IS NOT PASSED, for two reasons. On Windows devin's OS-level sandbox
+	# does not exist and a session hard-fails when `--sandbox` is passed. Everywhere
+	# else `--sandbox` selects Autonomous, then the only permission mode available,
+	# which the shipped build's `--permission-mode` does not accept as a value — so
+	# the mode read-back below would exit 6 on every run. Making that work means
+	# retiring a precondition, and nothing here establishes that the trade is sound:
+	# UNESTABLISHED-UNTIL-RUN, and refused rather than guessed at.
 	if [ "$SANDBOX_GIVEN" != no ]; then
 		case "$(uname -s 2>/dev/null)" in
 		MINGW* | MSYS* | CYGWIN* | Windows*)
@@ -1402,8 +1103,7 @@ if [ "$HARNESS" = copilot ]; then
 		COPILOT_LOGIN=$(sed -n 's/.*"login"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$COPILOT_CFG_DIR/config.json" | sed -n 1p)
 	fi
 
-	# No flag guarantees a run is non-interactive. No probe ever saw one block —
-	# but a run that has never hung is not a run that cannot.
+	# No flag guarantees a run is non-interactive; the wait is bounded.
 	case "$COPILOT_TIMEOUT" in
 	'' | *[!0-9]* | 0) die "REMIT_COPILOT_TIMEOUT must be a positive whole number of seconds, not '$COPILOT_TIMEOUT'" ;;
 	esac
@@ -1473,54 +1173,25 @@ REAL_HOME=$(one_namespace "${HOME:-}")
 SCRUB_HOME="$RUNDIR/home"
 mkdir -p "$SCRUB_HOME" "$SCRUB_HOME/AppData/Roaming" "$SCRUB_HOME/AppData/Local" || die "cannot create the scratch home under $RUNDIR"
 
-# THE ONE WRITABLE SCRATCH ROOT, and why it is in the worktree rather than beside
-# the run log. A sandboxed seat — codex on Windows runs as a dedicated local
-# account under a restricted token — can write to its WORKSPACE and to its OWN
-# temp, and to nothing else. The run log lives under the COORDINATOR's temp,
-# which on this host is a directory inside the practitioner's user profile: the
-# seat's account is refused there, so every fixture that tried to land in it
-# failed on write before it tested anything. The worktree is the one directory
-# that is writable for every seat on every harness, so that is where the scratch
-# goes, and `TMPDIR`, `TEMP` and `TMP` all name it.
-#
-# It is APPARATUS, not delivery. It is emptied before the context starts, so a
-# crashed earlier run leaves nothing for this one to trip on, and `remove_scratch`
-# below takes it away before the tree is handed back — a tree the seam is about
-# to stage must carry what the context AUTHORED and nothing it merely scribbled.
-#
-# The NAME is short on purpose. A worktree path is already long, Windows still
-# refuses a path over 260 characters in most tools, and everything a seat writes
-# now hangs off this one — a clone of the repository, a throwaway repository with
-# a `.git/objects/…` under it. Every character spent here is spent again on every
+# THE ONE WRITABLE SCRATCH ROOT is INSIDE THE WORKTREE: a sandboxed seat runs as
+# another account, can write to its workspace and its own temp and to nothing
+# else, and is refused under the coordinator's profile where the run log lives.
+# `TMPDIR`, `TEMP` and `TMP` all name it. It is APPARATUS, not delivery: emptied
+# before the context starts, and taken away by `remove_scratch` before the tree
+# is handed back. The NAME is short because Windows still refuses a path over
+# 260 characters and everything a seat writes hangs off this one.
 # file below it.
 SCRUB_TMP="$WT/.remit-tmp"
 rm -rf "$SCRUB_TMP"
 mkdir -p "$SCRUB_TMP" ||
 	die "cannot create the scratch root at $SCRUB_TMP — a seat with nowhere to write cannot run anything, and this script will not raise one that cannot"
 
-# AND IT IGNORES ITSELF, for the run that never reaches the removal below.
-#
-# `remove_scratch` takes this directory away on every path this script controls,
-# and the trap takes it on an interrupt or a terminate. NEITHER reaches a run
-# that is KILLED — a signal no shell can trap, a harness reaping a long job, a
-# machine going down mid-raise. What is left then is a directory of the seat's
-# scratch sitting at the top of a worktree the seam stages wholesale, and what
-# it holds is a clone of the repository and throwaway repositories: a delivery
-# carrying that is the residue this work exists to end, arriving by the one door
-# the cleanup cannot close.
-#
-# So the directory ignores itself. A `.gitignore` whose single pattern is `*`
-# matches every entry beneath it INCLUDING that file, so git reports nothing
-# here in `status`, counts nothing here in `ls-files --others`, and stages
-# nothing here on `add -A` — while a repository CLONED into this directory is
-# untouched by it, because a `.gitignore` above a repository's own top level is
-# not one of the files that repository reads.
-#
-# It is written here rather than checked in anywhere because the worktree is the
-# TARGET repository's, not remit's: a line in remit's own `.gitignore` would
-# protect remit's repository and no other, and this mechanism is installed into
-# repositories whose ignore file remit does not write. The one that travels is
-# the one the script makes at the moment it makes the directory.
+# AND IT IGNORES ITSELF, for the run that never reaches the removal below — a
+# kill, a reaped job, a machine going down. A `.gitignore` whose single pattern
+# is `*` matches every entry beneath it INCLUDING itself, so git stages nothing
+# here on `add -A`, while a repository CLONED into this directory is untouched by
+# it. Written here rather than checked in anywhere, because the worktree is the
+# TARGET repository's, not remit's.
 printf '*\n' >"$SCRUB_TMP/.gitignore" ||
 	die "cannot write $SCRUB_TMP/.gitignore — without it a run killed before its cleanup leaves the seat's scratch where the seam would stage it, and this script will not raise a seat it cannot keep out of a delivery"
 
@@ -1532,35 +1203,21 @@ remove_scratch() {
 	[ ! -e "$SCRUB_TMP" ]
 } # end remove_scratch
 
-# WHAT A SCRATCH ROOT THAT WILL NOT GO MEANS, in the two places it can happen.
-# The condition is the same one — `remove_scratch` reporting the directory
-# survived — and what it COSTS is not, so the answer is not either. Both are
-# written here, next to each other and to the removal itself, because a reader
-# deciding whether a difference is deliberate should not have to hold two ends of
-# a two-thousand-line script in mind to see that it is.
-#
-# Neither can be produced by this suite on both of its platforms — it needs a
-# directory writable when a run starts and unwritable when it ends, and Git Bash
-# hands the owner the write back through the ACL a POSIX `chmod` maps to. So each
-# is a FUNCTION, ending in the marker `t/unit/remit-invoke.sh` lifts it out on,
-# and what is tested there is the decision each makes when it is told the root
-# survived — which is the whole of what this script contributes to that outcome.
+# WHAT A SCRATCH ROOT THAT WILL NOT GO MEANS, in the two places it can happen —
+# both stated here beside the removal. Neither can be produced by this suite on
+# both platforms, so each is a FUNCTION `t/unit/remit-invoke.sh` lifts out and
+# tests on the decision alone.
 
-# AT THE END OF A RUN THAT FINISHED, it is a REFUSAL and not a warning. The
-# directory sits inside the worktree the seam is about to stage, and a delivery
-# carrying a context's fixtures is worse than a raise that reports it could not
-# finish. What survived is named, so it can be removed by hand.
+# AT THE END OF A RUN THAT FINISHED, it is a REFUSAL: the directory sits inside
+# the worktree the seam is about to stage. What survived is named.
 scratch_gone_or_refuse() { # -> 0 when the root went; does not return when it did not
 	remove_scratch && return 0
 	die "could not remove the scratch root at $SCRUB_TMP — refusing to hand back a tree that still carries what the context scribbled rather than what it authored. The run itself finished and what it said is in $RUNDIR"
 } # end scratch_gone_or_refuse
 
-# ON A PATH THAT IS ALREADY REFUSING, it is REPORTED and the refusal already in
-# flight is what the caller exits with. Turning it into a `die` there would swap
-# a raise's own exit code — the one that says WHY the raise was refused — for
-# this script's generic 2, and the reason the seat was never raised would be lost
-# behind the housekeeping that followed it. So it is said, loudly, and the caller
-# goes on to exit with what it came to exit with.
+# ON A PATH THAT IS ALREADY REFUSING, it is REPORTED and the refusal in flight
+# is what the caller exits with, so the reason the seat was never raised is not
+# lost behind housekeeping.
 scratch_gone_or_warn() { # -> always 0; says so when the root survived
 	remove_scratch && return 0
 	say "the scratch root at $SCRUB_TMP could not be removed — remove it before this tree is staged"
@@ -1574,10 +1231,8 @@ scratch_gone_or_warn() { # -> always 0; says so when the root survived
 trap 'rm -rf "$SCRUB_HOME" "$SCRUB_TMP"' EXIT INT TERM
 
 # --- the two visibility channels ---------------------------------------------
-# The run directory's name carries this process's pid, so nothing outside can
-# work out where to look. Saying where it is, the moment it exists, is what makes
-# tailing it possible at all — and it is said before the briefing is composed, so
-# a watcher started now sees the run rather than the end of it.
+# The run directory's name carries this process's pid, so where it is is said the
+# moment it exists, before the briefing is composed.
 : >"$PROGRESSFILE" || die "cannot create the progress log at $PROGRESSFILE"
 if [ -n "${REMIT_PROGRESS:-}" ]; then
 	printf '%s\n' "$RUNDIR" >"$REMIT_PROGRESS" ||
@@ -1621,22 +1276,13 @@ scrub_list() {
 	[ -n "${SYSTEMROOT:-}" ] && printf 'SYSTEMROOT=%s\n' "$SYSTEMROOT"
 	[ -n "${COMSPEC:-}" ] && printf 'COMSPEC=%s\n' "$COMSPEC"
 	[ -n "${PATHEXT:-}" ] && printf 'PATHEXT=%s\n' "$PATHEXT"
-	# Without this a Windows CLI writes a literal `%SystemDrive%` directory
-	# into whatever its CWD happens to be — here, the worktree the seam is
-	# about to stage. The block at the top of this file says which incident
-	# this came from.
+	# Without this a Windows CLI writes a literal `%SystemDrive%` directory into its
+	# CWD — the worktree the seam is about to stage.
 	[ -n "${SYSTEMDRIVE:-}" ] && printf 'SYSTEMDRIVE=%s\n' "$SYSTEMDRIVE"
-	# THE WINDOWS PROFILE, POINTED AT THE SCRATCH. miq, 2026-09-04: with
-	# LOCALAPPDATA unset, Windows' Python install manager wrote a 167 MB
-	# distribution relative to the builder's cwd — the worktree — and two
-	# deliveries carried it; with PROGRAMFILES(X86) unset, NuGet's machine-wide
-	# config lookup threw before any `dotnet` restore could start. So on a
-	# Windows host the three profile roots a program writes under go to THIS
-	# RAISE'S SCRATCH, the way HOME already does — an install lands there and
-	# is removed with the run — and the three machine roots a program only reads
-	# pass through as they are. A PATH is not a credential; nothing here widens
-	# what a context can reach, only where it can write without landing in the
-	# tree. Absent on any other host, because absent is what they are there.
+	# THE WINDOWS PROFILE, POINTED AT THE SCRATCH: the three roots a program writes
+	# under go to THIS RAISE'S SCRATCH, the way HOME does — an install lands there
+	# and is removed with the run — and the three machine roots a program only reads
+	# pass through as they are. A PATH is not a credential. Absent on any other host.
 	if [ -n "${SYSTEMROOT:-}" ]; then
 		printf 'USERPROFILE=%s\n' "$SCRUB_HOME"
 		printf 'APPDATA=%s/AppData/Roaming\n' "$SCRUB_HOME"
@@ -1758,11 +1404,9 @@ role_limits() {
 }
 
 # WHERE KEPT OUTPUT GOES, said to the roles that write it and to the roles that
-# read it, and said to neither when the chain named no home. The naming line is
-# `bin/remit`'s and is reproduced without being read, and what closure does with
-# what a role keeps is POINTED AT there too — this script states none of that
-# law, because a second wording of it here is a wording that can contradict the
-# code, and once did.
+# read it, and to neither when the chain named no home. The naming line is
+# `bin/remit`'s and is reproduced without being read; what closure does with it
+# is POINTED AT there.
 runs_section() {
 	[ -n "$RUNS" ] || return 0
 	printf '\n## Where kept output goes\n\n'
@@ -1784,10 +1428,9 @@ runs_section() {
 	evaluate)
 		printf 'The output kept by the contexts that worked on this item is in\n\n'
 		printf '  %s\n\n' "$RUNS"
-		# AT THE GATE INTO `refined` NOTHING HAS BEEN BUILT. miq, 2026-09-04: two
-		# gate-1 evaluators went looking for a delivery and a proof — "the runs
-		# directory contained only .gitignore" — and judged their absence. The
-		# gate judges the brief, and the research beside it where there is one.
+		# AT THE GATE INTO `refined` NOTHING HAS BEEN BUILT: the gate judges the brief,
+		# and the research beside it where there is one, and an empty runs directory is
+		# not a finding.
 		case "${RUBRICS##*/}" in
 		refined.md)
 			printf 'AT THIS GATE NOTHING HAS BEEN BUILT AND NOTHING IS EXPECTED TO HAVE BEEN\n'
@@ -1809,14 +1452,9 @@ runs_section() {
 
 # WHAT AN EVALUATOR IS LOOKING AT, named. `bin/remit` decides which tree this
 # raise stands in and which commit it hands over — WHERE AN EVALUATOR IS RAISED
-# in that script's header is the law, and this end states none of it. All this
-# does is say, to the context that has to judge, that the delivery is the files
-# under its own worktree and not something behind a command it may not run.
-#
-# THE INCIDENT, so nobody removes this as decoration: an accepted-gate evaluator
-# was raised in a tree that did not carry the delivered file, read for the file,
-# found nothing, and spent the rest of the run hunting the commit through git
-# plumbing it was contained away from — ending with no verdict at all.
+# in that script's header. This says, to the context that has to judge, that the
+# delivery is the files under its own worktree and not something behind a
+# command it may not run.
 delivery_section() {
 	[ "$ROLE" = evaluate ] || return 0
 	[ -n "$DELIVERY" ] || return 0
@@ -1832,16 +1470,9 @@ delivery_section() {
 	return 0
 } # end delivery_section
 
-# WHAT THE EVALUATOR AT THE GATE INTO `refined` CAN ACTUALLY REACH, said only
-# when it can reach something. The chain sets `REMIT_RESEARCH_AUTHOR` for that one
-# raise; everywhere else this prints nothing and the briefing is what it was.
-#
-# THE FIELD FAILURE THIS IS, dated 2026-09-01: an evaluator judged a `research.md`
-# written from recall against a brief that asked for vendor documentation, found
-# two factual errors it could cite the vendor's own documentation against — and
-# raised no must-fix, because it had been told there was nothing at this gate that
-# could act. There was: research is machine-authored, and a fresh researcher can
-# be sent back into it.
+# WHAT THE EVALUATOR AT THE GATE INTO `refined` CAN REACH, said only when it can
+# reach something: the chain sets `REMIT_RESEARCH_AUTHOR` for that one raise.
+# Research is machine-authored, and a fresh researcher can be sent back into it.
 research_author_section() {
 	[ "$ROLE" = evaluate ] || return 0
 	[ "$RESEARCH_AUTHOR" = yes ] || return 0
@@ -2160,172 +1791,67 @@ run_harness() { # $1 stdin file or 'none'; rest: the command, env prefix include
 
 # The devin context's containment, written into its tree for the run only.
 #
-# Two files, because one of them is not enough. The deny rule is the direct
-# expression of remit's law and it does block a bare `git` and a `&&` chain — but
-# it does not look inside an interpreter's quoted arguments, so `sh -c "git
-# status"` walked straight past a live deny rule when it was tried. A PreToolUse
-# hook sees the whole command string and closes that, and since a context
-# realistically needs a shell, the hook is not a second line of defence here: it
-# is the line that holds — and holds by ending the run, which is what a block
-# costs here. THE HOOK'S MATCHER IS `exec` AND STAYS THERE: an omitted matcher
-# would fire this on every tool call, and a hook that blocks is the one thing
-# under this CLI that reliably ends a run, so widening it would buy nothing and
-# cost the run. What the hook stops is git and gh, wrapped or not, and nothing
-# else.
+# TWO FILES. The deny rule blocks a bare `git` and a `&&` chain but does not
+# look inside an interpreter's quoted arguments; the PreToolUse hook sees the
+# whole command string and closes that, and under this CLI a block ENDS THE RUN.
+# THE HOOK'S MATCHER IS `exec` AND STAYS THERE: an omitted matcher would fire on
+# every tool call. What the hook stops is git and gh, wrapped or not, and
+# nothing else.
 #
-# THE ALLOW LIST IS THE UNION OF TWO CHANNELS, and it is a union because each one
-# alone has already cost a run. An entry that matches nothing is SILENT — it
-# grants nothing and says nothing, and the context that reaches for what it was
-# meant to grant ends the run instead — so the cost of a name too many is nil and
-# the cost of a name too few is the whole raise.
+# THE ALLOW LIST IS THE UNION OF TWO CHANNELS — the CLI's bundled hook
+# documentation's tool-name table, and the `function_name` values a real ATIF
+# export carries (`find_file_by_name` is in the build and not the docs). An
+# entry that matches nothing is SILENT, so a name too many costs nil and a name
+# too few costs the raise. Names dropped from it are dropped BY NAME, into the
+# deny list, because a tool that is merely unlisted dies the run without saying
+# why.
 #
-#   the CLI's own bundled documentation, `share/devin/docs/extensibility/hooks/
-#   lifecycle-hooks.mdx`, whose "tool names you can match" table is the shipped
-#   build's externally-visible inventory: `read`, `write`, `edit`, `apply_patch`,
-#   `notebook_read`, `notebook_edit`, `grep`, `glob`, `exec`, `get_output`,
-#   `write_to_process`, `kill_shell`, `webfetch`, `todo_write`,
-#   `exit_plan_mode`, `skill`, `run_subagent`, `read_subagent`, `request_scope`,
-#   `mcp_list_servers`, `mcp_list_tools`, `mcp_call_tool`, `mcp_read_resource`.
-#   (`reference/permissions.mdx` prints a much shorter list — `read`, `edit`,
-#   `grep`, `glob`, `exec` — as "available tool names". It is the same doc set
-#   contradicting itself; the matcher table is the specific one and is taken.)
+# THE FALL-THROUGH, AND WHY `exec` IS ALLOWED WHOLE. Devin's permission check is
+# a FIXED FOUR-TIER LADDER — deny, ask, allow, then a default of PROMPT — with no
+# catch-all deny expressible (`mcp__*` is the only wildcard). A tool call that
+# is neither denied nor allowed lands on the prompt; in `-p` nobody answers, the
+# CLI rejects it, and the rejection CANCELS EVERY SIBLING CALL IN THE BATCH,
+# which can end the run with an empty final message. So the allow list carries
+# the `exec` TOOL ITSELF: no ordinary command can fall through. DENY BEATS ALLOW
+# ABSOLUTELY, so `Exec(git)` and `Exec(gh)` still stand over it. This seat's
+# `boundary:` is `none`: the containment is not a read boundary.
 #
-#   the ATIF export of a real run, whose `function_name` values carry
-#   `find_file_by_name`, which appears in NO version of the documentation. The
-#   build has it and the docs do not say so.
+# THE RESIDUAL HOLE: only `exec` is closed. A tool call whose NAME is not on the
+# list still falls through, and the shipped build's full tool inventory is NOT
+# ESTABLISHED. A raise that dies with an empty final message and a tool nobody
+# listed is this hole; the run's kept log is where it is legible.
 #
-# So neither channel is authority over the other and the list carries both. The
-# names dropped from it are dropped BY NAME, into the deny list, because a tool
-# that is merely unlisted dies the run without saying why.
+# WHAT IS DENIED BY NAME — a denied call ends the run too, but against a rule
+# somebody wrote, so the kept log names the rule:
 #
-# THE FALL-THROUGH, AND WHY `exec` IS ALLOWED WHOLE. Devin's permission check is a
-# FIXED FOUR-TIER LADDER — deny, then ask, then allow, then a default of PROMPT —
-# and there is no fifth tier and no key that changes what the default resolves to.
-# There is no `"*"`, no `Exec(*)` and no `defaultMode` in the shipped build; the
-# only wildcard it carries is `mcp__*`, inside the MCP namespace. So a CATCH-ALL
-# DENY IS NOT EXPRESSIBLE, and a tool call that is neither denied nor allowed
-# lands on that default. In `-p` there is nobody to prompt, and the CLI rejects
-# it — `rejected a tool call that requires confirmation` — which CANCELS EVERY
-# SIBLING CALL IN THE SAME BATCH and can end the run with an empty final message.
-#
-# THE FIELD FAILURE, 2026-09-01, Zenith.Core: an evaluator reached for
-# `python -c "import importlib.util…"`. Not denied, not allowed. Fall-through,
-# reject, batch cancelled, empty final message, and `bin/remit` recorded
-# `cannot act: verdict` and escalated.
-#
-# So the allow list carries the `exec` TOOL ITSELF rather than a prefix apiece.
-# DENY BEATS ALLOW ABSOLUTELY, so `Exec(git)` and `Exec(gh)` still stand over it
-# and still carry remit's message, and the hook below still sees git in any
-# wrapping. What changes is that no ordinary command an evaluator reaches for —
-# `python`, `node`, a test runner, a lister — can fall through to the prompt any
-# more: it is allowed, or it is denied by name, or the hook stops it. Widening
-# this grants nothing remit's law withheld: the law is that a raised context runs
-# no `git` and no `gh`, and this seat's `boundary:` has always been reported as
-# `none` — the containment here was never a read boundary and never claimed to be.
-#
-# THE RESIDUAL HOLE, said out loud. Only `exec` is closed. A tool call whose NAME
-# is not on the list still falls through to the prompt and still rejects the same
-# way, and the shipped build's full tool inventory is NOT ESTABLISHED — a real
-# run's export reported 29 tool definitions and enumerated a subset of them. The
-# names below are the ones confirmed from real exports and from the CLI's own
-# bundled documentation. A raise that dies with an empty final message and a
-# tool nobody listed is this hole, and the run's kept log is where it is legible.
-#
-# WHAT IS DENIED BY NAME, and why a deny is the kind thing to do to a tool that
-# was going to die anyway. Under `-p` an unlisted tool call is rejected for want
-# of confirmation and takes its whole batch with it; a DENIED call ends the run
-# too (probe item 16 — a deny is a kill switch here, not a scoping), but it ends
-# it against a rule somebody wrote, and the run's kept log then names the rule
-# rather than showing a batch that vanished. So the four tools remit will not
-# have a raised context use are denied out loud:
-#
-#   mcp__*          every MCP tool, on every server. With the importers off there
-#   mcp_call_tool   are NO servers configured (measured: 1 -> 0), so no MCP call
-#                   can arise and this rule should never fire. It is the BACKSTOP
-#                   for the day one does — a server configured natively in
-#                   `%APPDATA%\devin`, which `read_config_from` does not reach.
-#                   Both spellings, because `mcp__*` matches the namespaced tools
-#                   and `mcp_call_tool` is the generic caller.
-#                   THE COST IS A RUN, so the backstop is not the control:
-#                   UNREACHABILITY is — no servers, and a briefing that asks for
-#                   nothing outside the worktree.
-#   request_scope   devin's own documented way to ask for read/write access to a
-#                   directory outside the current scope. The scope IS the
-#                   worktree, everything a raise is judged on is inside it, and
-#                   nothing outside it exists for this raise. An evaluator that
-#                   reaches for this has been sent looking for something it
-#                   cannot have, and that is a fault in the briefing — which is
-#                   why the briefing was audited for it rather than left to be
-#                   caught here.
+#   mcp__*          every MCP tool, and `mcp_call_tool` the generic caller. With
+#   mcp_call_tool   the importers off there are NO servers configured; this is
+#                   the BACKSTOP for one configured natively in `%APPDATA%\devin`.
+#   request_scope   devin's way to ask for access outside the current scope. The
+#                   scope IS the worktree; nothing outside it exists for a raise.
 #   webfetch        a raised context establishes what is true from the tree in
 #                   front of it. It has no network errand.
 #
-# `mcp_list_servers`, `mcp_list_tools` and `mcp_read_resource` stay ALLOWED: they
-# are the harmless lookups, they will answer "none", and a context that dies for
-# asking a question with an empty answer is a run lost to tidiness.
+# `mcp_list_servers`, `mcp_list_tools` and `mcp_read_resource` stay ALLOWED:
+# harmless lookups that answer "none".
 #
-# THE PERMISSION MODE STAYS `accept-edits`, and this raise does not reach for a
-# wider one. The shipped build's `--permission-mode` takes `auto`, `accept-edits`,
-# `smart` and `dangerous` — its own `--help`, which does not agree with the doc
-# set's `normal`/`bypass`/`autonomous` naming — and of those only `smart` even
-# claims to stop prompting for non-edit actions, by delegating each one to a fast
-# model. That is a WIDENING dressed as a convenience: it decides, per call,
-# something remit's allow list decides once and legibly. This tenant's
-# organisation policy also downgrades `smart` and `dangerous` to normal, so
-# resting on either would be resting on a mode that is not applied. The allow
-# list closes the fall-through; the mode never did and was never going to.
+# THE PERMISSION MODE STAYS `accept-edits`. The shipped build's other modes —
+# `auto`, `smart`, `dangerous` — either decide per call what the allow list
+# decides once and legibly, or are downgraded by organisation policy. The allow
+# list closes the fall-through; the mode never did.
 #
-# THE NEUTRAL CONTEXT — `read_config_from`, and what it was measured to do.
-#
-# Devin imports another tool's configuration by default, at PROJECT AND USER
-# scope. On 2026-09-01 an evaluate raise in Zenith.Core inherited the
-# practitioner's own instruction surface through it: 9 skills of which 5 were
-# from `~/.claude/skills`, 7 MCP servers all from `~/.claude.json`, and a global
-# Claude hook that told the evaluator to journal the session through an MCP tool
-# — which it obeyed as its first act, before reading anything it was raised to
-# judge. remit's OWN conventions were the one thing that did not load.
-#
-# `read_config_from` is valid at project scope, in the very file this function
-# already writes, and every importer is turned off in it. The key set is the
-# documented one, whole, from `share/devin/docs/reference/configuration/
-# read-config-from.mdx`: `cursor`, `windsurf`, `claude`, `copilot`, `opencode`,
-# `vscode` and `zed`. All false.
-#
-# `agents_standard` IS THE ONE LEFT TRUE, deliberately and explicitly. It is the
-# importer that carries `AGENTS.md` and `AGENTS.local.md` — remit's own
-# instruction surface, the file the installer writes remit's block into, and the
-# only channel by which this mechanism speaks to a devin session at all. Turning
-# it off would silence remit and leave the practitioner's global rule (see the
-# residual below) as the loudest thing in the context, which is the opposite of
-# the fix. It imports nothing from anybody's personal tooling: the files it names
-# are in the tree in front of the raise.
-#
-# WHAT THAT WAS MEASURED TO DO, on this host, 2026-09-01, devin 3000.6.7, in a
-# throwaway fixture carrying a marker `CLAUDE.md`, `AGENTS.md`, `AGENTS.local.md`
-# and `.claude/skills/`, through the free subcommands that raise no agent turn
-# and spend no ACU:
-#
-#   `devin skills list`   13 -> 2. Both survivors are devin's own builtins;
-#                         `~/.claude/skills` and the project `.claude/skills`
-#                         both went.
-#   `devin mcp list`      1 -> 0.
-#   `devin rules list`    4 -> 4. UNCHANGED. Both `CLAUDE` rules — the project's
-#                         and the practitioner's `~/.claude/CLAUDE.md` — and both
-#                         Standard rules were still listed, with `claude` false
-#                         AND with `agents_standard` false.
-#
-# THE RESIDUAL, AND WHAT IT IS NOT. Two readings fit that last row and this host
-# cannot separate them without spending a run: either the rules importer ignores
-# the switch, or `devin rules list` is a lister that does not apply import
-# filtering while `skills list` and `mcp list` do. Read it off the next raise's
-# own `rules discovery` log line and not off this comment. Either way there is NO
-# documented rules-level suppression to reach for — a project config accepts only
-# `permissions`, `read_config_from` and `hooks` (`config-file.mdx`), and
-# `read_config_from` is the only import switch there is — and `env -i` with a
-# scratch `HOME` does not stop it either: the global rule was still listed under
-# exactly the environment a raise gets. So a devin raise may still carry the
-# practitioner's `~/.claude/CLAUDE.md` as an always-on rule. That is stated here
-# and in THE ENVIRONMENT above, and it is not fixed.
+# THE NEUTRAL CONTEXT — `read_config_from`. Devin imports another tool's
+# configuration by default, at PROJECT AND USER scope: the practitioner's own
+# skills, MCP servers and hooks reach a raise through it. The key is valid at
+# project scope, in this file, and every importer is off — `cursor`, `windsurf`,
+# `claude`, `copilot`, `opencode`, `vscode`, `zed`. `agents_standard` IS THE ONE
+# LEFT TRUE: it carries `AGENTS.md` and `AGENTS.local.md`, remit's own
+# instruction surface, from the tree in front of the raise. Through the free
+# subcommands: `devin skills list` drops every imported skill, `devin mcp list`
+# drops every server, and `devin rules list` is UNCHANGED — the practitioner's
+# `~/.claude/CLAUDE.md` is still listed as an always-on rule, under `env -i` with
+# a scratch `HOME` too. There is no documented rules-level suppression; that
+# residual is stated at THE ENVIRONMENT above and is not fixed.
 #
 # Written here, removed before anything else, committed nowhere. The copies kept
 # in the run directory are the record of what actually applied.
@@ -2358,7 +1884,7 @@ devin_write_containment() { # $1 the context's tree
 EOF
 	# Event names sit at the top level of this file. The schema Cognition's own
 	# documentation shows (nested under "hooks") is rejected by the shipped build,
-	# and rejected SILENTLY — the hook simply never fires. Trust the probe.
+	# and rejected SILENTLY — the hook simply never fires.
 	# The SECOND entry exists for its MESSAGE and for nothing else. The four tools
 	# it matches are already denied in the config above, and a deny ends the run on
 	# its own — but devin's denial text is its own fixed sentence naming a rule, and
@@ -2420,36 +1946,27 @@ EOF
 
 # The copilot context's containment, written into its tree for the run only.
 #
-# Three things, because no one of them is enough, and because the CLI reports
-# nothing at all about what applied:
+# Three things, because no one of them is enough, and the CLI reports nothing
+# about what applied:
 #
-#   1. Deny rules for git and gh. They fire, and a denial names the rule that
-#      fired — but the matcher only ever sees the STEM of a command, so
-#      `sh -c "git status"`, `powershell -Command "…"`, `cmd /c …` and
-#      `node -e "…"` all walk through. Naming the interpreters as well only moves
-#      the hole to the next interpreter on the machine.
-#   2. A preToolUse hook. It receives the WHOLE tool call — tool name and the
-#      full command string — which is why no amount of quoting or wrapping hides
-#      from it, and it is the only thing in this CLI that sees that much. That is
-#      the whole of what it uses that sight for: git and gh, on a word boundary,
-#      in any wrapping. It is NOT a read boundary. A worktree path arm lived here
-#      and was withdrawn — ruled 2026-08-22 — because five rounds of it were
-#      escaped by a one-token respelling apiece while this git test was never
-#      escaped once, and because the mechanism that holds a read boundary is the
-#      one a context is RAISED in rather than any reading of command text. The
-#      canary below therefore puts a wrapped git to the live CLI alongside an
-#      in-tree write of real source, so neither the containment claim nor the
-#      claim that a context can still work is ever made on no attempt at all.
-#   3. The environment opt-in. Repo hooks in .github/hooks/ do not load in prompt
-#      mode unless the folder is trusted or an environment variable says so — and
-#      a raised worktree is never trusted. The permission FLAG does not satisfy
-#      that gate; only the variable does, and it is on the allow-list for exactly
-#      that reason.
+#   1. Deny rules for git and gh. A denial names the rule that fired — but the
+#      matcher only sees the STEM of a command, so `sh -c "git status"`,
+#      `powershell -Command "…"`, `cmd /c …` and `node -e "…"` walk through.
+#   2. A preToolUse hook. It receives the WHOLE tool call, so no quoting or
+#      wrapping hides from it: git and gh, on a word boundary, in any wrapping.
+#      It is NOT a read boundary; the boundary that would hold is the one a
+#      context is RAISED in. The canary below puts a wrapped git to the live CLI
+#      alongside an in-tree write of real source, so neither the containment
+#      claim nor the claim that a context can still work is made on no attempt.
+#   3. The environment opt-in. Repo hooks in .github/hooks/ do not load in
+#      prompt mode unless the folder is trusted or an environment variable says
+#      so, and a raised worktree is never trusted; the permission FLAG does not
+#      satisfy that gate.
 #
 # The hook file's schema is nested and Claude-Code-shaped, and `matcher` is a
-# regular expression, not a glob: `.*` matches every tool and `*` is rejected as
-# an invalid regex with the hook silently skipped. A hook that fails to load
-# blocks nothing and says nothing on stderr, which is why the canary exists.
+# regular expression: `.*` matches every tool and `*` is rejected with the hook
+# silently skipped. A hook that fails to load blocks nothing and says nothing,
+# which is why the canary exists.
 #
 # Written here, removed before anything else, committed nowhere. The copies kept
 # in the run directory are the record of what actually applied.
@@ -2474,9 +1991,8 @@ copilot_write_containment() { # $1 the context's tree
   }
 }
 EOF
-	# git and gh, in any wrapping, and nothing else. Nothing is baked into this
-	# file at write time: the tree path was, and it was baked in for the path arm
-	# that has since been withdrawn.
+	# git and gh, in any wrapping, and nothing else. Nothing is baked into this file
+	# at write time.
 	cat >"$1/.github/hooks/remit-no-git.sh" <<'EOF' || return 1
 #!/bin/sh
 # Written by remit-invoke for one raise, and removed after it. A context never
@@ -2495,9 +2011,8 @@ EOF
 # them is one this hook has broken rather than contained.
 #
 # THIS HOOK ENFORCES NOTHING ELSE, and that is a decision rather than an
-# oversight. It is not a read boundary. A worktree path arm was built here and
-# withdrawn: five rounds of it were escaped by a one-token respelling apiece,
-# while this git test was never escaped once. A context under this hook runs on
+# oversight. It is not a read boundary: a reading of command text is escaped by
+# a respelling, and this git test is not. A context under this hook runs on
 # the host's own login and reaches whatever that login reaches. The boundary
 # that would hold is the one the context is RAISED in — an OS-level sandbox, a
 # container, a scratch user — and no reading of command text substitutes for
@@ -2525,17 +2040,11 @@ copilot_remove_containment() { # $1 the context's tree
 	return 0
 } # end copilot_remove_containment
 
-# THE ONE WAY OUT WHEN THE CANARY REFUSES THE RAISE. No context ran, so there is
-# nothing to capture and nothing to report about one; what is left is a tree
-# carrying this script's own apparatus — the containment it wrote, and the
-# scratch root it made — and neither may outlive the raise that made it. Exit 7
-# is the canary's own code and is why the caller stops here: the reason the seat
-# was never raised is in it, and `copilot_canary` has already said the rest.
-#
-# It is a function so that the whole path can be run in one piece by
-# `t/unit/copilot-containment.sh`, which cannot reach it through the CLI: making
-# a real canary fail needs the copilot CLI, an account and a billed run, and the
-# offline tier may have none of the three.
+# THE ONE WAY OUT WHEN THE CANARY REFUSES THE RAISE. No context ran; what is left
+# is this script's own apparatus — the containment it wrote and the scratch root
+# — and neither may outlive the raise. Exit 7 is the canary's own code. A
+# function, so `t/unit/copilot-containment.sh` can run the whole path without a
+# billed run.
 copilot_canary_refused() { # $1 the context's tree — does not return
 	copilot_remove_containment "$1"
 	scratch_gone_or_warn
@@ -2567,52 +2076,28 @@ copilot_get() { # $1 envelope file  $2 field
 } # end copilot_get
 
 # The canary. Containment on this CLI is tested at every raise and never assumed,
-# because the one mechanism that holds fails OPEN when it fails: a hook with a
-# bad matcher, a bad schema, or a path the CLI cannot reach is skipped and the
-# run proceeds uncontained with nothing on stderr to say so.
+# because the one mechanism that holds fails OPEN: a hook with a bad matcher, a
+# bad schema, or a path the CLI cannot reach is skipped and the run proceeds
+# uncontained with nothing on stderr to say so.
 #
-# So a cheap throwaway run, in the context's own tree, under the exact
+# A cheap throwaway run, in the context's own tree, under the exact
 # configuration the context will get, attempts three things. Two must RUN: an
-# ordinary command, and an ordinary in-tree FILE WRITE through the file tool. One
-# must be BLOCKED: a wrapped `git`, which is the whole of what this containment
-# claims. Anything else — including a run in which the model simply declined to
-# attempt one of them — refuses the raise. This is the honest analogue of the
-# codex sandbox read-back: refuse, never downgrade silently.
+# ordinary command, and an ordinary in-tree FILE WRITE through the file tool.
+# One must be BLOCKED: a wrapped `git`, which is the whole of what this
+# containment claims. Anything else — including a run in which the model
+# declined to attempt one — refuses the raise: refuse, never downgrade silently.
 #
-# It probes exactly what the containment claims and nothing else. It once put
-# four spellings of leaving the tree to the CLI as well, for a worktree path arm
-# that has since been withdrawn: there is no read boundary to test now, and a
-# canary that went on testing one would be certifying a claim this raise no
-# longer makes.
+# The WRITE probe is there because a containment can be tightened until nothing
+# escapes and nothing works, and its CONTENT is a line of real source — a line
+# comment and a closing markup tag, the shapes a boundary built out of slashes
+# refuses first — read back and required before the gate calls the write a
+# write. The probes are written to a manifest FIRST and the prompt is generated
+# from it, so what the CLI is asked and what a test replays are one list.
 #
-# The WRITE probe is here for the mirror image of that, and it is not decoration.
-# A containment can be tightened until nothing escapes and nothing works, and a
-# gate that only ever probes escapes reports PASSED over a hook under which no
-# builder can author a line — which is exactly what happened here once, when a
-# network-path test began firing on every Windows path a file tool sends,
-# including the tree's own. Ordinary work is now part of what the gate certifies,
-# so that failure cannot pass this gate again.
-#
-# The probe's CONTENT is load-bearing for the same reason. A write probe whose
-# text is one line of prose no boundary would ever object to certifies nothing
-# about authoring: it passed unchanged over a containment that refused a `//`
-# comment and a closing tag in a builder's own source. So the probe writes a line
-# of real source — a line comment and a closing markup tag — and the file is read
-# back and required to carry both before the gate calls the write a write.
-#
-# The probes are written to a manifest FIRST and the prompt is generated from it,
-# so what the CLI is asked to do and what any test replays are one list and
-# cannot drift apart.
-#
-# Its cost is one small run. It bills the raise's own model unless
-# REMIT_COPILOT_CANARY_MODEL names a cheaper one, so nothing is substituted
-# behind the caller's back, and what it cost is recorded in the provenance.
-#
-# It tests the BASE containment — the rules and the hook this script writes — and
-# not any rules a caller added with --allowed-tools or --exclude-tools. That is
-# deliberate and it is not a hole: an added deny only narrows what a context may
-# do, a denial outranks any allow, and the hook runs before either is consulted,
-# so no caller addition can loosen what the canary proved.
+# It bills the raise's own model unless REMIT_COPILOT_CANARY_MODEL names a
+# cheaper one, and what it cost is recorded. It tests the BASE containment and
+# not a caller's additions: an added deny only narrows, a denial outranks any
+# allow, and the hook runs before either.
 COPILOT_CANARY_MARK=REMIT_CANARY_CONTROL_OK
 COPILOT_CANARY_FILE=remit-canary-write-probe.ts
 # Ordinary source, not prose: a line comment and a closing markup tag are the two
@@ -2662,8 +2147,7 @@ copilot_canary() { # $1 the context's tree — returns 0 if contained, 1 if not
 	# The canary runs under the SAME allow-listed environment the context will
 	# get: a probe of a different environment certifies a different run. Where the
 	# allow-list file is not there, this function has been lifted out on its own
-	# by a test, and the repo-hook opt-in alone is set — which is what the
-	# wrapper did before the scrub existed.
+	# by a test, and the repo-hook opt-in alone is set.
 	if [ -f "${ENVLIST:-/nonexistent}" ]; then
 		set --
 		while IFS= read -r cop_v; do
@@ -2749,15 +2233,11 @@ model_channel=''
 # claude's containment, written per raise
 # ==============================================================================
 #
-# WHY THIS IS HERE AND NOT IN THE INSTALLER is at THE ENVIRONMENT's `claude`
-# entry above, which is the one place it is stated. This is the code.
-#
-# THE FLAG IS THE MECHANISM and it is unconditional — `CLAUDE_DENY_TOOLS` goes
-# into every claude raise's argv below, whatever happens here. What this function
-# adds is the hook arm, and it is BEST EFFORT: a tree it cannot write into
-# refuses nothing, because the deny list has already contained the raise and
-# losing a raise over a second layer would cost more than the layer is worth.
-# What actually applied is recorded on the `containment:` provenance line.
+# WHY it is written per raise is THE ENVIRONMENT's `claude` entry above. THE
+# FLAG IS THE MECHANISM and it is unconditional — `CLAUDE_DENY_TOOLS` goes into
+# every claude raise's argv. This function adds the hook arm, BEST EFFORT: a
+# tree it cannot write into refuses nothing. What applied is on the
+# `containment:` provenance line.
 CLAUDE_DENY_TOOLS='Agent,Task,AgentTool'
 CLAUDE_SETTINGS_MADE=no
 CLAUDE_DIR_MADE=no
@@ -2851,20 +2331,13 @@ claude_remove_containment() { # $1 the context's tree
 
 # Reading one field out of a JSON envelope, with whichever reader exists.
 #
-# `model` IS THE ONE FIELD THAT IS NOT A LOOKUP. The envelope's `modelUsage` is a
-# MAP, and a Claude Code run puts the author and an internal ancillary model in
-# it together, so the author is CHOSEN by the rule at THE PROVENANCE KEYS —
-# the registered seat's id when the run names it, else the largest `outputTokens`
-# — and the third argument is the id that was asked for, which is what makes the
-# first clause possible. `models` renders the whole map for the record, and
-# `consulted` reads the run's own server-tool counts.
-#
-# `consulted` LOOKS IN A FIXED ORDER — `.server_tool_use`, then
-# `.usage.server_tool_use`, then the first object anywhere in the envelope
-# carrying either key — and takes THE FIRST it finds rather than summing across
-# them, because two envelopes shaped differently must not be added together. A
-# run whose envelope carries neither key yields nothing at all, which is what
-# keeps an unreported count out of the record instead of a zero.
+# `model` IS THE ONE FIELD THAT IS NOT A LOOKUP: `modelUsage` is a MAP, and the
+# author is CHOSEN by the rule at THE PROVENANCE KEYS — the registered seat's id
+# when the run names it, else the largest `outputTokens`; the third argument is
+# the id asked for. `models` renders the whole map. `consulted` LOOKS IN A FIXED
+# ORDER — `.server_tool_use`, `.usage.server_tool_use`, then the first object
+# anywhere carrying either key — and takes THE FIRST rather than summing; neither
+# key yields nothing, never a zero.
 NODE_JSON='const fs=require("fs");let o;try{o=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}catch(e){process.exit(1)}
 const k=process.argv[2],want=process.argv[3]||"";const u=(o&&o.modelUsage)||{};
 function n(x){return typeof x==="number"?x:0}
@@ -2994,11 +2467,8 @@ HARNESS_EXIT=0
 
 case "$HARNESS" in
 claude)
-	# THE CONTAINMENT IS WRITTEN HERE, PER RAISE, and the whole of why — that an
-	# installed hook cannot reach a raise that runs in a worktree the installed
-	# file is shadow-excluded from — is at THE ENVIRONMENT's `claude` entry in
-	# this script's header. Written before the flag so the `containment:` line
-	# records both layers together.
+	# THE CONTAINMENT IS WRITTEN HERE, PER RAISE — THE ENVIRONMENT's `claude` entry —
+	# before the flag, so the `containment:` line records both layers together.
 	claude_write_containment "$WT"
 	for _ccf in settings.local.json remit-no-agent-tool.sh; do
 		[ -f "$WT/.claude/$_ccf" ] || continue
@@ -3023,15 +2493,11 @@ claude)
 	;;
 codex)
 	# `-` takes the briefing on stdin; -o writes the final message; the sandbox
-	# denies .git by upstream design, which is the ruled behaviour enforced.
-	#
-	# No `-c` override and no `--ignore-user-config` here, and that is a searched
-	# result rather than an omission: nothing this CLI accepts suppresses the
-	# `$CODEX_HOME/AGENTS.md` a raise inherits without also taking away the
-	# project's own instructions, the practitioner's own configuration, or the
-	# directory the seat authenticates from. What was enumerated and what was
-	# rendered is in THE ENVIRONMENT at the head of this script, which is the one
-	# place it is stated.
+	# denies .git by upstream design. No `-c` override and no `--ignore-user-config`:
+	# nothing this CLI accepts suppresses the `$CODEX_HOME/AGENTS.md` a raise
+	# inherits without also taking the project's own instructions, the
+	# practitioner's configuration, or the directory the seat authenticates from —
+	# THE ENVIRONMENT at the head of this script.
 	set -- "$@" codex exec -s "$SANDBOX" -C "$WT" --skip-git-repo-check -o "$FINALFILE"
 	[ -n "$MODEL" ] && set -- "$@" -m "$MODEL"
 	set -- "$@" -
@@ -3101,28 +2567,16 @@ devin)
 		die "could not remove the containment at $WT/.devin — refusing to leave a tree that still carries this script's apparatus"
 	;;
 copilot)
-	# The briefing goes on stdin. `--prompt-file` does not exist here and the argv
-	# channel dies above roughly 32 KB with the shell's own "Argument list too
-	# long" before the CLI even starts — a cliff with no warning on the near side
-	# of it, and a remit briefing is kilobytes and grows.
-	#
-	# `--allow-all-tools` and never `--allow-all` or `--yolo`: the blunt flags
-	# throw away the file-tool refusals and the naive-command refusals for
-	# nothing. That default path wall is kept because it is free, not because it
-	# contains anything — the hook is what contains.
-	#
-	# `--disable-builtin-mcps` because the built-in GitHub server connects on
-	# every run by default, and a context reaching GitHub through an MCP tool is
-	# invisible to every shell deny rule and to a hook that inspects shell
-	# commands. Ruled: the CLI is the route and that server is not.
-	#
-	# Never `--no-custom-instructions`: it is one boolean over the whole
-	# custom-instruction section, so it would strip the AGENTS.md a context needs
-	# in order to strip the practitioner's own files. That it cannot be scoped,
-	# and every other lever that was searched for and did not exist, is stated
-	# once in THE ENVIRONMENT at the head of this script and nowhere else. Never
-	# `--share`, whose default path writes the transcript into the directory
-	# about to be staged; never `--share-gist`.
+	# The briefing goes on stdin: `--prompt-file` does not exist here and the argv
+	# channel dies above roughly 32 KB. `--allow-all-tools` and never `--allow-all`
+	# or `--yolo`: the blunt flags throw away the file-tool and naive-command
+	# refusals for nothing. `--disable-builtin-mcps`: the built-in GitHub server
+	# connects on every run by default, and a context reaching GitHub through an MCP
+	# tool is invisible to every shell deny rule and to the hook. Never
+	# `--no-custom-instructions`: one boolean over the whole custom-instruction
+	# section, which would strip the AGENTS.md a context needs (THE ENVIRONMENT).
+	# Never `--share` or `--share-gist`: the transcript would land in the directory
+	# about to be staged.
 	copilot_write_containment "$WT" || {
 		copilot_remove_containment "$WT"
 		die "could not write the context's containment under $WT/.github/hooks — not raising a context this script cannot contain"
@@ -3203,13 +2657,10 @@ claude)
 	else
 		json_get "$OUTFILE" result >"$FINALFILE"
 		RUN_ID=$(json_get "$OUTFILE" session_id)
-		# The envelope names the model that actually served the run; a raise names
-		# an alias. Authorship is never obscured, so the provenance follows the
-		# envelope where they differ.
-		#
-		# `$MODEL` GOES IN because this envelope reports a MAP and the seat that was
-		# registered is the first clause of the rule that reads it — the rule, and the
-		# field failure that wrote it, are at THE PROVENANCE KEYS in this header.
+		# The envelope names the model that actually served the run; the provenance
+		# follows the envelope where they differ. `$MODEL` GOES IN because this envelope
+		# reports a MAP and the registered seat is the first clause of the rule that
+		# reads it — THE PROVENANCE KEYS.
 		run_model=$(json_get "$OUTFILE" model "$MODEL")
 		[ -n "$run_model" ] && MODEL_SERVED=$run_model
 		# EVERY model the run billed, so the ancillary is visible on the record and
@@ -3365,19 +2816,10 @@ write_provenance() {
 		# not a duplication: it is the whole of what was billed, and reading it
 		# against `model:` is how a reader sees there was nothing else.
 		[ -n "$MODELS_SEEN" ] && printf 'models: %s\n' "$MODELS_SEEN"
-		# WHAT THE RUN CONSULTED, from the run's own count and only where it
-		# carries one. This seam draws no conclusion from it and gates nothing on
-		# it; it is here for a reader or a rubric to cite. Which seats can answer
-		# it, and why the other four write no line at all rather than a zero, is
-		# at THE ENVIRONMENT in this script's header.
-		#
-		# THE SCOPE IS PART OF THE LINE AND IS WRITTEN HERE, once, rather than
-		# folded into the value `json_get` returns — that reader has two
-		# implementations and a sentence in both is a sentence that can differ in
-		# one. What it says is the header's law rendered for whoever reads the
-		# record without the header in front of them: a reader or a rubric that
-		# has only this line must not be able to mistake a server-side zero for a
-		# finding about the run. The field failure it repairs is dated 2026-09-02.
+		# WHAT THE RUN CONSULTED, from the run's own count and only where it carries one;
+		# recorded, never judged (THE ENVIRONMENT says which seats answer). THE SCOPE IS
+		# PART OF THE LINE AND IS WRITTEN HERE, once: a reader with only this line must
+		# not mistake a server-side zero for a finding about the run.
 		[ -n "$CONSULTED" ] && printf 'consulted: server-side %s — the API'\''s own count of the SERVER-SIDE web tools, which is the only tool count this envelope carries. A CLI'\''s CLIENT-SIDE fetches (Claude Code'\''s WebFetch and WebSearch) never reach it, so a zero here is NOT evidence that nothing was consulted.\n' "$CONSULTED"
 		[ -n "$MODEL_CHECK" ] && printf 'model-check: %s\n' "$MODEL_CHECK"
 		[ -n "$RUN_ID" ] && printf 'session: %s\n' "$RUN_ID"
@@ -3449,16 +2891,11 @@ if [ -n "$STALLED" ]; then
 	exit 8
 fi
 
-# A DEAD EXECUTION HOST IS NOT A VERDICT. miq, 2026-09-04: two codex evaluate
-# raises exited 0 within seventy seconds, their stderr carrying `code-mode host
-# exited during handshake` three to eight times each, and their text a verdict
-# on a brief neither had read — one a FAIL with an UNRUN finding, the other a
-# `fix: r0` must-fix against the brief. Both went on the record as judgements
-# and stopped their items for the practitioner; both passed on the retry. A
-# run whose own stderr says its tools never came up is a run that did not
-# happen, whatever its exit code, and is reported as the run-level failure it
-# is — which the chain escalates as `cannot act`, and a resume picks up clean.
-# ONE signature, the one seen, matched on the CLI's stderr and nowhere else.
+# A DEAD EXECUTION HOST IS NOT A VERDICT. A codex run whose own stderr says its
+# tools never came up — `code-mode host exited during handshake` — is a run that
+# did not happen, whatever its exit code, and is reported as the run-level
+# failure it is; the chain escalates `cannot act` and a resume picks it up
+# clean. ONE signature, matched on the CLI's stderr and nowhere else.
 if [ "$HARNESS_EXIT" -eq 0 ] && [ "$HARNESS" = codex ] &&
 	grep -q 'code-mode host exited during handshake' "$ERRFILE" 2>/dev/null; then
 	HARNESS_EXIT=1
