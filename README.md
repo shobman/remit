@@ -9,7 +9,7 @@ stay with the person who owns their consequences. It is three POSIX scripts and 
 no service, no database, no daemon. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.3.17. Early, and in use.**
+**Version 0.3.18. Early, and in use.**
 
 ## One piece of work, start to finish
 
@@ -165,11 +165,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.3.17` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.3.18` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.17 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.18 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:
@@ -230,47 +230,26 @@ Everything below is detail a first read can skip.
 | `.remit/` | The work location, with no work item in it: `work-items/`, `field-reports/`, and `rules/` holding the rubrics remit ships. An upgrade migrates those rubric by rubric: it adds, changes and removes only its own, keeps every rubric you wrote or edited, and reports what it did to each. |
 | `.remit/.install/manifest` | A record of the installed content and version. |
 
-### Two hosts, and what a first day on each taught
+### Host notes
 
-On Windows: a raised context's `USERPROFILE`, `APPDATA` and `LOCALAPPDATA` point at that raise's
-scratch, so a tool that installs itself (Python's install manager, NuGet's caches) lands there and
-goes with the run rather than into your tree; and every worktree that builds a listener will trip
-Windows Defender Firewall's prompt once per path — `Set-NetFirewallProfile -All -NotifyOnListen
-False` in an elevated PowerShell ends that. Running remit from WSL on a clone kept on the Linux
-filesystem avoids both, and runs the test suite in minutes rather than most of an hour.
+- **Windows.** A raised context's `USERPROFILE`, `APPDATA` and `LOCALAPPDATA` point at the raise's
+  scratch, so a tool that installs itself lands there and goes with the run. A worktree that opens a
+  listener trips Windows Defender Firewall's prompt once per path; `Set-NetFirewallProfile -All
+  -NotifyOnListen False` in an elevated PowerShell ends that. WSL on a clone kept on the Linux
+  filesystem avoids both and runs the test suite in minutes.
+- **Linux.** `ssh` inside a raise has none of your keys, known hosts or config; a host a build must
+  reach gets a `Host` stanza in `/etc/ssh/ssh_config` naming `IdentityFile` and
+  `UserKnownHostsFile` under your real home. Ubuntu 24.04's `gh` (2.45) cannot `gh pr edit`;
+  remit writes the pull request body over REST when that call fails.
 
-On Linux: a raised context's `HOME` is scratch, so `ssh` inside a raise has none of your keys,
-known hosts or config — a rig a build or a proof must reach gets a `Host` stanza in
-`/etc/ssh/ssh_config` naming `IdentityFile` and `UserKnownHostsFile` under your real home, which
-is the one route a raise can use. And the `gh` Ubuntu 24.04 ships (2.45) cannot `gh pr edit` at
-all since GitHub retired classic projects; remit writes a pull request body over REST when that
-call fails, and a current `gh` from GitHub's own package repository ends it.
+### Where each CLI lists its models
 
-### The models each CLI offered, read on 21 August 2026
-
-These lists are perishable: what is available to you depends on your subscription, vendors change
-their offerings often, and remit maintains no compatibility matrix. Check the source named beside
-each for what your subscription includes today; the pull request records which model actually
-served each run.
-
-- **Claude Code** exposes no account catalogue: `claude --help` documents only the selectors
-  `fable`, `opus`, `sonnet` and the full-name example `claude-fable-5`.
-- **Codex** has no `models` subcommand; `~/.codex/models_cache.json` marks six entries
-  `visibility: list`: `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4` and
-  `gpt-5.4-mini`.
-- **Pi** reads the providers configured on the machine; here `pi --list-models` printed one row,
-  provider `llamacpp`, model `qwen3.6-35b`.
-- **Devin**: `devin models list` printed 22 families: `claude-opus-5`, `claude-fable-5`,
-  `claude-sonnet-5`, `claude-opus-4.8`, `claude-opus-4.7`, `claude-sonnet-4.6`, `claude-haiku-4.5`,
-  `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5`, `gemini-3.6-flash`, `gemini-3.1-pro`, `gemini-3-flash`,
-  `kimi-k3`, `kimi-k2.7`, `kimi-k2.6`, `glm-5.2`, `swe-1.7`, `swe-1.7-lightning`, `swe-1.6`,
-  `swe-1.6-fast` and `adaptive`.
-- **GitHub Copilot CLI**: `copilot help config` lists 27 ids: `claude-sonnet-5`, `claude-fable-5`,
-  `claude-opus-5`, `claude-opus-4.8`, `claude-opus-4.8-fast`, `claude-opus-4.7`, `claude-sonnet-4.6`,
-  `claude-opus-4.6`, `claude-sonnet-4.5`, `claude-opus-4.5`, `claude-haiku-4.5`, `gpt-5.6-sol`,
-  `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex`,
-  `gpt-5-mini`, `mai-code-1-flash-picker`, `gemini-3.7-flash`, `gemini-3.6-flash`,
-  `gemini-3.5-flash`, `gemini-3.1-pro-preview`, `grok-4.5`, `kimi-k3` and `kimi-k2.7-code`.
+Model lists are perishable and depend on your subscription, so none is printed here. Ask the CLI:
+Claude Code exposes no catalogue and the run's own report names what served it; Codex has no
+`models` subcommand and caches its visible ids in `~/.codex/models_cache.json`; Pi answers
+`pi --list-models` from the providers configured on the machine; Devin answers
+`devin models list`; Copilot CLI lists the ids its configuration accepts under `copilot help
+config`. The pull request records which model actually served each run.
 
 ### Contributions, positioning, licence
 
