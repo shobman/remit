@@ -435,6 +435,11 @@ usage:
       nothing, bills nothing and reads no registry. `remit setup` proposes a
       registry from it; the record's fields are at `--probe-host` below.
 
+  remit-invoke --check-registry
+      Reads the registry exactly as a raise would and stops: exit 0 with the
+      seats on one line, or the same refusal a raise would get, exit 2. Nothing
+      is raised. The installer runs it once and prints the outcome.
+
 Raises ONE fresh context in a named harness, with a briefing composed from the
 role's limits and the authority in REMIT_AUTHORITY, in the worktree given, and
 returns that context's final text on stdout and nothing else. Provenance goes to
@@ -557,6 +562,17 @@ if [ "${1:-}" = --probe-host ]; then
 	[ $# -eq 1 ] || die "--probe-host takes no other argument: it reads this host and raises nothing"
 	probe_host
 	exit 0
+fi
+
+# `--check-registry` reads the registry exactly as a raise would — the same
+# parse, the same shape refusals, the same exit 2 — and stops before any seat
+# is resolved or any CLI is looked for. It raises nothing. The installer runs it
+# once so a registry the seam would refuse is said in the install report.
+CHECK_REGISTRY=no
+if [ "${1:-}" = --check-registry ]; then
+	[ $# -eq 1 ] || die "--check-registry takes no other argument: it reads the registry and raises nothing"
+	CHECK_REGISTRY=yes
+	set -- evaluate check-registry .
 fi
 
 # ==============================================================================
@@ -820,6 +836,11 @@ if printf '%s\n' "$REGISTRY" | grep -q '^!'; then
 fi
 
 TAB=$(printf '\t')
+
+if [ "$CHECK_REGISTRY" = yes ]; then
+	printf 'registry ok — %s\n' "$(printf '%s\n' "$REGISTRY" | awk -F"$TAB" '$1 == "D" { printf "%s on %s %s; ", $2, $3, $4 }' | sed 's/; $//')"
+	exit 0
+fi
 
 reg_registered() { # $1 harness -> 0 when the registry carries it
 	printf '%s\n' "$REGISTRY" | awk -F"$TAB" -v h="$1" '$1 == "H" && $2 == h { f = 1 } END { exit f ? 0 : 1 }'
@@ -1342,6 +1363,14 @@ role_limits() {
 		printf '  gate reads it; the code you write is read by someone maintaining it. A\n'
 		printf '  comment says what a reader of THAT file needs and no more; the reasoning\n'
 		printf '  behind a design goes in a README or the document that carries it, once.\n'
+		printf -- '- Where the authority asks that something stay UNCHANGED — a look, a\n'
+		printf '  behaviour, a measurement — capture it BEFORE your first edit: build and\n'
+		printf '  serve the tree as it was delivered to you, record what the authority names\n'
+		printf '  (a screenshot, an output, a number) into the kept-output home, then work,\n'
+		printf '  then capture it again the same way. You have no earlier build to compare\n'
+		printf '  against but the one in front of you now, and a parity claim with no\n'
+		printf '  before is a claim, not a proof: the gate reads the two halves, or reads\n'
+		printf '  the proof as unrun.\n'
 		;;
 	evaluate)
 		printf 'You are an EVALUATOR. You JUDGE the work in front of you and you change\n'

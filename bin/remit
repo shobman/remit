@@ -107,9 +107,10 @@
 #                                stage, open or archived — THE REVIEW PROJECTION
 #                                below. `--attest` raises ONE context to say of
 #                                each whether it stands, is fixed, or is moot
-#   remit answer <slug> <n> "<words>" [--conductor]
+#   remit answer <slug> <n> "<words>" [<n> "<words>"...] [--conductor]
 #                                answer question <n> of the item's last `asked:`
-#                                stop, verbatim, as a ruling; then resume
+#                                stop, verbatim, as a ruling — every pair given —
+#                                then resume once, after the last
 #   remit report new <name>      file a field report from stdin
 #   remit report close <name>    archive it to `field-reports/.archive/`
 #   remit rules init             lay down `.remit/rules/` — the three gate files
@@ -886,6 +887,9 @@ usage:
                          is that rule, and this is not a second statement of it.
                          --park attaches to the --until beside it; on its own it
                          is refused — `remit park <slug>` is that instruction.
+                         A resume that could move nothing — no stop given, none
+                         recorded, and no promote rubric at the next gate — is
+                         refused (exit 2, nothing written) and names the flag.
   remit park <slug>      attention -> parked. The stage does not move.
   remit stop <slug>      end the chain running on this item — their word that the
                          in-flight work is gone. Refused only when there is no
@@ -962,8 +966,10 @@ usage:
   remit migrate          one-time: .remit/<slug>/ -> .remit/work-items/<slug>/,
                          evaluation.md -> log.md, **State:** -> **Attention:** +
                          **Stage:**, root field-reports/ -> .remit/field-reports/
-  remit answer <slug> <n> "<words>" [--conductor]
-                         answer question <n> of the item's last `asked:` stop.
+  remit answer <slug> <n> "<words>" [<n> "<words>"...] [--conductor]
+                         answer question <n> of the item's last `asked:` stop —
+                         every pair given, in order, and the chain resumes ONCE,
+                         after the last.
                          The words are appended VERBATIM under `## Rulings` in
                          the authority, beside the question, as a RULING — not an
                          amendment: the stage does not go back to `new`. The
@@ -1092,27 +1098,38 @@ resume)
 	fi
 	;;
 answer)
-	# `answer <slug> <n> "<words>" [--conductor]`: the number is the record's, the
-	# words are filed verbatim. Without the flag the ruling is theirs and settled; with
-	# it, the conductor's and provisional. `record_answer` checks both against the
-	# record before anything is written.
+	# `answer <slug> <n> "<words>" [<n> "<words>"...] [--conductor]`: every pair is a
+	# ruling, filed in the order given, and the chain resumes ONCE, after the
+	# last. The numbers are the record's, the words are filed verbatim. Without
+	# the flag the rulings are the practitioner's and settled; with it, the
+	# conductor's and provisional. `record_answer` checks each against the record
+	# before anything is written. The pairs are left in the positional
+	# parameters for the dispatch below.
 	[ $# -ge 3 ] || usage
 	slug=$1
-	answer_n=$2
-	answer_text=$3
-	shift 3
+	shift
+	check_slug "$slug"
 	answer_by=practitioner
-	while [ $# -gt 0 ]; do
+	_ans_pairs=0
+	_ans_rot=$#
+	while [ "$_ans_rot" -gt 0 ]; do
 		case "$1" in
-		--conductor) answer_by=conductor; shift ;;
-		*) usage ;;
+		--conductor) answer_by=conductor; shift; _ans_rot=$((_ans_rot - 1)) ;;
+		*)
+			[ "$_ans_rot" -ge 2 ] || usage
+			case "$1" in
+			'' | *[!0-9]* | 0*) die "the question is named by its number on the record — not '$1'" ;;
+			esac
+			case "$2" in --conductor) usage ;; esac
+			[ -n "$(printf '%s' "$2" | tr -d '[:space:]')" ] || die "an answer is their words, and there are none here for question $1"
+			set -- "$@" "$1" "$2"
+			shift 2
+			_ans_rot=$((_ans_rot - 2))
+			_ans_pairs=$((_ans_pairs + 1))
+			;;
 		esac
 	done
-	check_slug "$slug"
-	case "$answer_n" in
-	'' | *[!0-9]* | 0*) die "the question is named by its number on the record — not '$answer_n'" ;;
-	esac
-	[ -n "$(printf '%s' "$answer_text" | tr -d '[:space:]')" ] || die "an answer is their words, and there are none here"
+	[ "$_ans_pairs" -ge 1 ] || usage
 	;;
 park | stop | close)
 	[ $# -eq 1 ] || usage
@@ -2934,6 +2951,11 @@ escalate() { # $1 reason
 		[ -n "$GATE" ] &&
 			printf -- '- gate: into %s\n' "$GATE"
 		printf -- '- stage: %s (UNCHANGED — an escalation holds the stop it could not leave)\n' "$(hdr "$brief" Stage)"
+		# Where THIS RUN returned the pull request to draft — an amendment out of
+		# `accepted`, or a phase hand-off — the escalation says so: a merge the
+		# practitioner then orders is refused on a draft, and the reason has to
+		# be on the entry they read.
+		[ -n "$PR_DRAFT_NOTE" ] && printf -- '- %s\n' "$PR_DRAFT_NOTE"
 		# THE ROUND IT REACHED, not a count of rounds this run made: a run that
 		# continued from the record began above 1, and the two are only the same
 		# number when it began at the beginning.
@@ -2955,6 +2977,7 @@ escalate() { # $1 reason
 	else
 		say "ESCALATED — $_reason"
 	fi
+	[ -n "$PR_DRAFT_NOTE" ] && say "$PR_DRAFT_NOTE."
 	print_row
 	[ "$PUSH_FAILED" = yes ] && exit 3
 	exit 4
@@ -4520,9 +4543,10 @@ rubrics_seed() {
 		[ -e "$_p" ] && continue
 		{
 			printf '# What it takes to become `%s`\n\n' "$_g"
-			printf 'The practitioner'"'"'s rubrics for this gate, in their words, each under the ruling\n'
-			printf 'it came from and its date. `bin/remit` hands THIS FILE, and no other, to the\n'
-			printf 'fresh context that evaluates at this gate, and acts only on the citations that\n'
+			printf 'The practitioner'"'"'s rubrics for this gate, in their words. A rubric carries no\n'
+			printf 'date and no account of the incident that led to it: a rule is a rule, and git\n'
+			printf 'holds the history. `bin/remit` hands THIS FILE, and no other, to the fresh\n'
+			printf 'context that evaluates at this gate, and acts only on the citations that\n'
 			printf 'context returns. What each section does, and the shape of a line, are in\n'
 			printf '`bin/remit`'"'"'s header. Only a retro they call writes here.\n\n'
 			for _s in promote hold fix accept; do
@@ -4919,7 +4943,12 @@ record_answer() {
 	return 0
 }
 if [ "$cmd" = answer ]; then
-	record_answer
+	while [ $# -ge 2 ]; do
+		answer_n=$1
+		answer_text=$2
+		shift 2
+		record_answer
+	done
 	cmd=resume
 	want_until=''
 	want_park=no
@@ -5727,6 +5756,19 @@ resume)
 	AMBIGUOUS) die "'$slug' names more than one **Current phase:** — the smallest ruling that unsticks this is which one" ;;
 	"DANGLING "*) die "'$slug' points at a phase file that is not there: ${AUTHORITY#DANGLING }" ;;
 	esac
+
+	# A RESUME THAT COULD MOVE NOTHING IS REFUSED, before anything is written: no
+	# `--until` given, none recorded, and no `promote` rubric at the next gate to
+	# carry it. Such a run would stop at once as `until ran out`, commit nothing
+	# but the reading, and read as a stop the chain reached.
+	if [ -z "$want_until" ] && [ ! -f "$marker" ]; then
+		read_until "$(hdr "$brief" Until)"
+		if [ -z "$UNTIL_STOP" ]; then
+			case "$st" in new) _next=refined ;; refined) _next=accepted ;; *) _next=closed ;; esac
+			[ -n "$(rubric_ids "$_next" promote)" ] ||
+				die "no stop is recorded for '$slug', and no promote rubric at the gate into $_next could carry it — name one: $ME resume $slug --until refined|accepted|closed"
+		fi
+	fi
 
 	# THE ONE VERB THAT CONTINUES A CRASHED RUN, never automatically. LAST of the
 	# preconditions, because it WRITES (`crash_take`); the marker it wipes is

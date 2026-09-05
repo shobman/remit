@@ -26,10 +26,15 @@ what would be pruned, because a rubric that has stopped matching how they rule i
 removing and a retro that only ever adds is a ratchet. Against every proposal, quote the
 ruling and its date.
 
+A rubric must reach past the item it came from. Before proposing one, ask whether it would apply
+to a future item that is not this one; a ruling that only restates one brief's spec is that
+brief's and is left out. Say which rulings were left out for that reason, in one line.
+
 ## Write only what they ruled
 
 Their words, into the files they ruled on, in the line form `bin/remit`'s header fixes — read it
-before writing. Then check the folder still reads, and commit it alone:
+before writing. A rubric carries no date and no account of the incident that led to it: the
+ruling and its date were quoted in the proposal, and git holds them after. Then check the folder still reads, and commit it alone:
 
 ```sh
 sh "$(git rev-parse --show-toplevel)/bin/remit" list >/dev/null

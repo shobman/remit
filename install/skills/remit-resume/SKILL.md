@@ -12,9 +12,11 @@ and stop there yourself.
 sh "$(git rev-parse --show-toplevel)/bin/remit" resume <slug> [--until refined|accepted|closed [--park]]
 ```
 
-Give `--until` only when they named a stop just now. Parking outright and ending a running chain
-are their own commands — `park <slug>` and `stop <slug>`. `resume` is also the one verb that
-continues a `crashed` row.
+Give `--until` only when they named a stop just now. A resume with none, on an item that has no
+stop recorded and no rubric that could carry it, is refused with exit 2 and names the flag: relay
+that refusal and ask how far the item may go. Never invent a stop. Parking outright and ending a
+running chain are their own commands — `park <slug>` and `stop <slug>`. `resume` is also the one
+verb that continues a `crashed` row.
 
 The command runs the chain — nothing in it is yours to perform, brief, sequence or repeat, and
 no step of it happens in this conversation. It raises real fresh contexts and takes minutes to

@@ -621,6 +621,17 @@ printf 'remit install v%s -> %s\n' "$VERSION" "$TGT"
 # compared against are converted by one set of rules: that target's own.
 hash_of() { git -C "$TGT" hash-object -- "$1"; }
 
+# A FILE WHOSE HASH AN EARLIER MANIFEST RECORDED IS REMIT'S — an older copy, not
+# a local edit — however it came to be on disk. The manifest is committed, so
+# the target's own history holds every id remit ever recorded for a path.
+manifest_ever_recorded() { # $1 id  $2 dst-rel -> 0 when a manifest in the target's history recorded it
+	git -C "$TGT" rev-parse --verify -q HEAD >/dev/null 2>&1 || return 1
+	git -C "$TGT" log --format=%H -- "$MANIFEST" 2>/dev/null |
+		while read -r _mc; do
+			git -C "$TGT" show "$_mc:$MANIFEST" 2>/dev/null | grep -q "^file $1 $2\$" && { printf 'yes\n'; break; }
+		done | grep -q yes
+}
+
 # What the manifest says remit installed there last time. Empty if never.
 manifest_id() { # $1 record-type  $2 path
 	[ -f "$MANIFEST_ABS" ] || return 0
@@ -641,12 +652,16 @@ report() { printf '  %-10s %s%s\n' "$1" "$2" "${3:+ — $3}"; }
 #   updated    it was exactly what remit last installed; now the new payload
 #   unchanged  it already equals the payload
 #   kept       it is the target's own, or locally edited since install —
-#              remit does not overwrite it
+#              remit does not overwrite it. A file whose hash an EARLIER
+#              manifest in the target's history recorded is not this: it is an
+#              older remit copy, and it is `updated`
 #   restored   MANAGED FILES ONLY: it was remit's and someone edited it; it is
 #              the payload again. A managed file is one whose content is a
 #              mechanic remit maintains, where a stale local edit misdirects
 #              whoever reads it — so the file is remit's to keep current and
 #              the third argument says so at the call site.
+#   registry   not a file outcome: the seam's own reading of
+#              `.remit/settings.json`, ok or refused, in the report
 #
 # `restored` reaches only a file the manifest already records as remit's. A file
 # the target had before remit arrived has no record, is not remit's to manage,
@@ -691,6 +706,11 @@ install_file() { # $1 src-abs  $2 dst-rel  [$3 managed]
 		cp "$src" "$TGT/$dst"
 		record file "$new_id" "$dst"
 		report restored "$dst" "edited since install; this file is remit's and is put back"
+		TOUCHED="$TOUCHED $dst"
+	elif manifest_ever_recorded "$cur_id" "$dst"; then
+		cp "$src" "$TGT/$dst"
+		record file "$new_id" "$dst"
+		report updated "$dst" "it was an earlier remit copy, not a local edit"
 		TOUCHED="$TOUCHED $dst"
 	else
 		record file "$old_id" "$dst"
@@ -1512,6 +1532,19 @@ if [ "$SHADOW" = yes ]; then
 	printf 'directory-keyed global state any of these harnesses has carries a TRUST\n'
 	printf 'decision, which cannot carry an instruction.\n'
 else
+	# --- the registry, read once by the seam that will read it -----------------
+	# A registry the seam refuses makes every chain escalate at its first raise
+	# with the seam named. It is said here instead, in the report, where the
+	# cause is; the install itself is not refused, because the registry is the
+	# practitioner's file and the fix is theirs.
+	if [ -s "$TGT/.remit/settings.json" ]; then
+		if _rc_out=$(REMIT_SETTINGS="$TGT/.remit/settings.json" sh "$TGT/bin/remit-invoke" --check-registry 2>&1); then
+			report registry ".remit/settings.json" "$(printf '%s' "$_rc_out" | sed -n 1p)"
+		else
+			report registry ".remit/settings.json" "REFUSED by bin/remit-invoke, so every chain would escalate at its first raise: $(printf '%s' "$_rc_out" | tr '\n' ' ' | cut -c1-400)"
+		fi
+	fi
+
 	# --- commit exactly what this install touched, in the target ------------------
 	staged=''
 	ignored=''

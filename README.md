@@ -10,7 +10,7 @@ genuinely yours, and it does not nag you for it. It is three POSIX scripts and s
 there is no service to operate. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.3.19.**
+**Version 0.3.20.**
 
 ## Start by talking to your agent
 
@@ -61,7 +61,8 @@ sh bin/remit answer retry-failed-upload 1 "Show the second failure to the user."
 ```
 
 Your words go verbatim under `## Rulings` in the brief, beside the question, and the chain resumes
-at the stage it is at. A ruling is not an amendment: editing the brief by hand puts the stage back
+at the stage it is at. If it asked two questions, answer both in the one command, each number with
+its words; every ruling is filed and the chain resumes once, after the last. A ruling is not an amendment: editing the brief by hand puts the stage back
 to `new` so the first gate judges it again; an answer adds the decision the brief was missing and
 costs nothing else. Every later context is told the rulings are settled ground. The agent driving
 remit for you is the conductor, and it may answer some questions itself, under a file you write;
@@ -86,6 +87,10 @@ may travel without you; the chain stops at that stage, or earlier where it needs
 | "take it to accepted" | a delivery is built, judged, and its pull request taken out of draft |
 | "take it all the way" | the closing gate judges the record; if it passes, the item closes |
 | "... and rest there" | it runs to that stop and parks; no rubric carries it further |
+
+"Pick it up" with no stop recorded on the item, and no rubric that could carry it, is refused:
+`remit resume` exits 2 and names `--until`. Your agent relays that refusal and asks how far; it
+never invents a stop.
 
 `remit close` is different: it is your word that the item is over, at whatever stage it reached. It
 does not take the item through the closing gate.
@@ -176,7 +181,9 @@ convention proposes a rubric anywhere else, not at a verdict and not at a closur
 A rubric is one line under one of four headings in a gate file: `promote` carries an item past the
 gate whatever `until` said; `hold` stops it for your eyes whatever else was cited; `fix` names the
 standard a delivery missed; `accept` disposes of a finding. An evaluator cites a rubric by its id
-and the evidence; a citation of a rubric the file does not carry changes nothing.
+and the evidence; a citation of a rubric the file does not carry changes nothing. A rubric must
+reach past the item it came from, and it carries no date and no account of the incident: a rule
+is a rule, and git holds the history.
 
 Try one session in this order: review what shipped without you, make your rulings, then call a
 retro and let your conductor advise you on the rubrics.
@@ -220,11 +227,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.3.19` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.3.20` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.19 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.20 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:
@@ -243,8 +250,10 @@ the registry of which agents and models each role may use, for you to accept or 
 file first. Write `.remit/elevation.md` yourself if you want the conductor to rule for you;
 nothing installs it.
 
-Re-run the installer to upgrade. It replaces content that still matches what it installed, keeps
-your local edits, and reports each result. Two files have their own rule: `CONTRIBUTING.md` is
+Re-run the installer to upgrade. It replaces content that still matches any copy remit ever
+installed, keeps your local edits, and reports each result. It also runs the seam's own check of
+`.remit/settings.json` and reports the registry line, so an unknown seat is named at install, not
+at the first chain. Two files have their own rule: `CONTRIBUTING.md` is
 the one file remit manages, so a local edit to it is restored, while a `CONTRIBUTING.md` the
 repository already had is kept; and the shipped rubrics are migrated one rubric at a time, adding,
 changing and removing only remit's own and keeping every rubric you wrote. Every installed file is
@@ -262,7 +271,7 @@ is not vibes, it is discipline.
 ```text
 sh bin/remit new <slug> [--until refined|accepted|closed] [--park]   admit, from the brief on stdin
 sh bin/remit resume <slug> [--until <stage> [--park]]                 run the chain as far as you said
-sh bin/remit answer <slug> <n> "<words>" [--conductor]               rule on question <n>, then resume
+sh bin/remit answer <slug> <n> "<words>" [<n> "<words>"...] [--conductor]   rule on every question given, then resume once
 sh bin/remit park <slug> | stop <slug> | close <slug>                 rest it; end its chain; archive it
 sh bin/remit list [--parked]                                          the board
 sh bin/remit review [today|yesterday|week|since <date>|<slug>...] [--attest]
