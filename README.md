@@ -10,7 +10,7 @@ genuinely yours, and it does not nag you for it. It is three POSIX scripts and s
 there is no service to operate. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.3.20.**
+**Version 0.3.21.**
 
 ## Start by talking to your agent
 
@@ -104,7 +104,10 @@ does not take the item through the closing gate.
 A gate is a fresh context that did not author the work, judging it against your brief and the
 rubrics in `.remit/rules/<gate>.md`. Put the evaluator on a different model family from the builder:
 a model favours its own output ([Panickssery et al., 2024](https://arxiv.org/abs/2404.13076)), and
-a judge from another family does not share that bias. Agreement is never verification,
+a judge from another family does not share that bias. The registry seats each role for the whole
+repository; a brief may seat a role for its own item on a `**Seats:**` line, "have Astra build
+this one, and Fable judge it", and your agent writes that line with `--seat`. Only a pair the
+registry carries is accepted, so the registry stays the one place a seat is proven. Agreement is never verification,
 so the proof a builder ran is kept in the item's `runs/` folder where the next gate can read it.
 
 The loop is bounded. A builder gets four rounds at a gate. The same must-fix twice stops it. A
@@ -227,11 +230,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.3.20` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.3.21` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.20 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.21 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:
@@ -251,7 +254,9 @@ file first. Write `.remit/elevation.md` yourself if you want the conductor to ru
 nothing installs it.
 
 Re-run the installer to upgrade. It replaces content that still matches any copy remit ever
-installed, keeps your local edits, and reports each result. It also runs the seam's own check of
+shipped, at any version and however it got there, keeps your local edits, and reports each
+result. `bin/remit` and `bin/remit-invoke` ship as a pair; an upgrade that keeps one and updates
+the other says so on its own line. It also runs the seam's own check of
 `.remit/settings.json` and reports the registry line, so an unknown seat is named at install, not
 at the first chain. Two files have their own rule: `CONTRIBUTING.md` is
 the one file remit manages, so a local edit to it is restored, while a `CONTRIBUTING.md` the
@@ -269,8 +274,8 @@ relay what happened. remit is mechanical where it can be, with skills that use t
 is not vibes, it is discipline.
 
 ```text
-sh bin/remit new <slug> [--until refined|accepted|closed] [--park]   admit, from the brief on stdin
-sh bin/remit resume <slug> [--until <stage> [--park]]                 run the chain as far as you said
+sh bin/remit new <slug> [--until refined|accepted|closed] [--park] [--seat <role>=<harness>/<model>]...   admit, from the brief on stdin
+sh bin/remit resume <slug> [--until <stage> [--park]] [--seat ...]     run the chain as far as you said
 sh bin/remit answer <slug> <n> "<words>" [<n> "<words>"...] [--conductor]   rule on every question given, then resume once
 sh bin/remit park <slug> | stop <slug> | close <slug>                 rest it; end its chain; archive it
 sh bin/remit list [--parked]                                          the board
@@ -322,7 +327,11 @@ minutes and no chain raises into it while the mark is fresh.
 
 Codex: an enforced sandbox, its own files and nothing else, read back from the run's own header
 after every run and refused on a downgrade. Claude Code: its sub-agent tool denied by flag and by a
-hook written for the run. Devin: an allow list written for the run, which ends the run on anything
+hook written for the run, and the docker verbs that drop data denied the same two ways, in Bash and
+in PowerShell, so a builder that meets a stale database password stops for you instead of resetting
+the database; the settings block the installer offers denies them in your own sessions too. A deny
+rule is a fence, not a wall: it names commands, and a context that wants past it can look for
+another spelling. The sandbox is the wall, and it is the direction. Devin: an allow list written for the run, which ends the run on anything
 outside it. Copilot CLI: a hook against `git` and `gh` in any wrapping, tested by a throwaway run
 before the real one. Pi: built-in tools only, extensions off. Every context starts with an emptied
 environment and an allow-list: your `PATH`, a scratch `HOME` removed after the run, a scratch temp

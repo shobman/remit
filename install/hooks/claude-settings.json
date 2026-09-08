@@ -2,6 +2,28 @@
   "env": {
     "BASH_MAX_TIMEOUT_MS": "10800000"
   },
+  "permissions": {
+    "deny": [
+      "Bash(docker compose down *)",
+      "Bash(docker-compose down *)",
+      "Bash(docker compose rm *)",
+      "Bash(docker-compose rm *)",
+      "Bash(docker rm *)",
+      "Bash(docker volume rm *)",
+      "Bash(docker volume prune *)",
+      "Bash(docker container prune *)",
+      "Bash(docker system prune *)",
+      "PowerShell(docker compose down *)",
+      "PowerShell(docker-compose down *)",
+      "PowerShell(docker compose rm *)",
+      "PowerShell(docker-compose rm *)",
+      "PowerShell(docker rm *)",
+      "PowerShell(docker volume rm *)",
+      "PowerShell(docker volume prune *)",
+      "PowerShell(docker container prune *)",
+      "PowerShell(docker system prune *)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {

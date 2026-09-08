@@ -25,7 +25,7 @@ establish and what it should hand back, and write their answer as a `**Research:
 ## The command
 
 ```sh
-sh "$(git rev-parse --show-toplevel)/bin/remit" new <slug> [--until refined|accepted|closed] [--park] < <brief-file>
+sh "$(git rev-parse --show-toplevel)/bin/remit" new <slug> [--until refined|accepted|closed] [--park] [--seat <role>=<harness>/<model>]... < <brief-file>
 ```
 
 | They said | The command |
@@ -34,6 +34,7 @@ sh "$(git rev-parse --show-toplevel)/bin/remit" new <slug> [--until refined|acce
 | nothing about how far | no flag |
 | a stop they named | `--until <that stop>` |
 | a stop they named, and to rest there | `--until <stop> --park` |
+| a seat they named for this item — "have Astra build this one" | `--seat build=codex/gpt-6-astra`, one per role named; the pair must be in the registry, or the command refuses and nothing is filed |
 
 With `--until`, the command runs the chain itself — it raises real fresh contexts and takes
 minutes to hours, so run it backgrounded and report when it returns.

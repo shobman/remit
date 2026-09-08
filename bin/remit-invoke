@@ -322,11 +322,18 @@
 #     the installed hook registration does not exist in the `work/<slug>`
 #     worktree a raise runs in, and the global configuration carries no such
 #     hook. THE MECHANISM IS THE FLAG: every claude raise passes
-#     `--disallowedTools Agent,Task,AgentTool` alongside its `--allowedTools`
+#     `--disallowedTools Agent Task AgentTool ...` alongside its `--allowedTools`
 #     (`Agent` is the tool's name, `Task` its retained alias, `AgentTool`
-#     carried as the shipped hook carries it). A DENY OUTRANKS EVERY ALLOW — the
-#     documented order is deny, ask, allow — so this holds against the raise's
-#     own `--allowedTools` and against the practitioner's global settings,
+#     carried as the shipped hook carries it). THE SAME FLAG DENIES THE DOCKER
+#     VERBS THAT DROP DATA — `compose down`, `compose rm`, `rm`, `volume rm`,
+#     `volume prune`, `container prune`, `system prune` — as `Bash(<verb> *)`
+#     and `PowerShell(<verb> *)`, because a Windows raise has both shells: a
+#     builder that meets a stale database password stops for the practitioner
+#     instead of resetting the database. A DENY OUTRANKS EVERY ALLOW — the
+#     documented order is deny, ask, allow — it holds in every permission mode,
+#     bypass included, and matches the verb inside a subshell or behind a
+#     leading assignment; so this holds against the raise's own
+#     `--allowedTools` and against the practitioner's global settings,
 #     `defaultMode: auto` included, and needs no file anywhere. THE SECOND
 #     LAYER: `claude_write_containment` below writes `.claude/settings.local.
 #     json` (the same deny rules and a `PreToolUse` registration) and
@@ -435,9 +442,11 @@ usage:
       nothing, bills nothing and reads no registry. `remit setup` proposes a
       registry from it; the record's fields are at `--probe-host` below.
 
-  remit-invoke --check-registry
+  remit-invoke --check-registry [--harness <name> --model <id>]
       Reads the registry exactly as a raise would and stops: exit 0 with the
-      seats on one line, or the same refusal a raise would get, exit 2. Nothing
+      seats on one line, or the same refusal a raise would get, exit 2. Given
+      a seat, resolves it the way a raise would — the harness registered, the
+      model registered for it — and answers `seat ok`, or that refusal. Nothing
       is raised. The installer runs it once and prints the outcome.
 
 Raises ONE fresh context in a named harness, with a briefing composed from the
@@ -570,9 +579,16 @@ fi
 # once so a registry the seam would refuse is said in the install report.
 CHECK_REGISTRY=no
 if [ "${1:-}" = --check-registry ]; then
-	[ $# -eq 1 ] || die "--check-registry takes no other argument: it reads the registry and raises nothing"
+	shift
+	# Only a seat may follow: the check resolves it exactly as a raise would.
+	for _cra in "$@"; do
+		case "$_cra" in
+		--harness | --model) ;;
+		-*) die "--check-registry takes a seat and nothing else: --harness <name> --model <id>" ;;
+		esac
+	done
 	CHECK_REGISTRY=yes
-	set -- evaluate check-registry .
+	set -- evaluate check-registry . "$@"
 fi
 
 # ==============================================================================
@@ -837,9 +853,14 @@ fi
 
 TAB=$(printf '\t')
 
-if [ "$CHECK_REGISTRY" = yes ]; then
+if [ "$CHECK_REGISTRY" = yes ] && [ -z "$HARNESS" ] && [ -z "$MODEL" ]; then
 	printf 'registry ok — %s\n' "$(printf '%s\n' "$REGISTRY" | awk -F"$TAB" '$1 == "D" { printf "%s on %s %s; ", $2, $3, $4 }' | sed 's/; $//')"
 	exit 0
+fi
+# A check names a whole seat or none: it stands in for no role, so there is no
+# default to fill in the half it did not give.
+if [ "$CHECK_REGISTRY" = yes ] && { [ -z "$HARNESS" ] || [ -z "$MODEL" ]; }; then
+	die "--check-registry takes a whole seat — --harness <name> --model <id> — or none; a seat is not half a seat"
 fi
 
 reg_registered() { # $1 harness -> 0 when the registry carries it
@@ -935,6 +956,13 @@ else
 		die "the registry $SETTINGS registers no seat for the '$ROLE' role, so there is nothing to raise it on and nothing to substitute"
 	SEAT_FROM="the registry's own default for this role"
 	SEAT_KIND=registered
+fi
+
+# A check that named a seat stops here, with the seat resolved as a raise would
+# resolve it and nothing looked for on the host.
+if [ "$CHECK_REGISTRY" = yes ]; then
+	printf 'seat ok — %s %s\n' "$HARNESS" "$MODEL"
+	exit 0
 fi
 
 # Reasoning effort is expressible on the command line for exactly one of these
@@ -2267,7 +2295,18 @@ model_channel=''
 # every claude raise's argv. This function adds the hook arm, BEST EFFORT: a
 # tree it cannot write into refuses nothing. What applied is on the
 # `containment:` provenance line.
+# The docker verbs that drop data, denied in both shells. One list, comma
+# separated, read into the flag below and into the per-raise settings file, so
+# the two layers cannot come apart.
+CLAUDE_DENY_DOCKER='docker compose down,docker-compose down,docker compose rm,docker-compose rm,docker rm,docker volume rm,docker volume prune,docker container prune,docker system prune'
 CLAUDE_DENY_TOOLS='Agent,Task,AgentTool'
+_cdifs=$IFS; IFS=,
+for _cdv in $CLAUDE_DENY_DOCKER; do
+	CLAUDE_DENY_TOOLS="$CLAUDE_DENY_TOOLS,Bash($_cdv *),PowerShell($_cdv *)"
+done
+IFS=$_cdifs
+# The list as a JSON array, for the settings file.
+CLAUDE_DENY_JSON=$(printf '%s\n' "$CLAUDE_DENY_TOOLS" | tr ',' '\n' | awk 'NF { if (n++) printf ", "; printf "\"%s\"", $0 }')
 CLAUDE_SETTINGS_MADE=no
 CLAUDE_DIR_MADE=no
 CLAUDE_HOOK_MADE=no
@@ -2319,10 +2358,10 @@ EOF
 	# `permissions.deny` says the same thing as the flag, in the file, so the two
 	# layers cannot come apart; the hook is the arm that fires on a tool this
 	# script has not heard of yet under one of these names.
-	if ! cat >"$_ccset" <<'EOF'
+	if ! cat >"$_ccset" <<EOF
 {
   "permissions": {
-    "deny": ["Agent", "Task", "AgentTool"]
+    "deny": [$CLAUDE_DENY_JSON]
   },
   "hooks": {
     "PreToolUse": [
@@ -2510,7 +2549,12 @@ claude)
 	# AND THE DENY, on EVERY raise, allowlist or none. A deny outranks every
 	# allow at every level, so this is the one containment here that does not
 	# depend on a file existing anywhere.
-	set -- "$@" --disallowedTools "$CLAUDE_DENY_TOOLS"
+	# One argument per rule: the CLI takes them variadically, and a rule such
+	# as `Bash(docker compose down *)` carries spaces. Nothing follows them.
+	set -- "$@" --disallowedTools
+	_cdifs=$IFS; IFS=,
+	for _cdr in $CLAUDE_DENY_TOOLS; do set -- "$@" "$_cdr"; done
+	IFS=$_cdifs
 	say "invoking: claude -p --output-format json${MODEL:+ --model $MODEL}${ALLOWED:+ --allowedTools $ALLOWED} --disallowedTools $CLAUDE_DENY_TOOLS < $(basename "$BRIEF")"
 	say "containment: $CLAUDE_CONTAINMENT"
 	run_harness "$BRIEF" "$@"

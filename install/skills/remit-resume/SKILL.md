@@ -9,10 +9,12 @@ The practitioner has said an item may move. Run one command, report where it sto
 and stop there yourself.
 
 ```sh
-sh "$(git rev-parse --show-toplevel)/bin/remit" resume <slug> [--until refined|accepted|closed [--park]]
+sh "$(git rev-parse --show-toplevel)/bin/remit" resume <slug> [--until refined|accepted|closed [--park]] [--seat <role>=<harness>/<model>]...
 ```
 
-Give `--until` only when they named a stop just now. A resume with none, on an item that has no
+Give `--seat` only when they named a seat for this item just now — "judge this one with Fable" is
+`--seat evaluate=claude/claude-fable-5-1` — and only pairs the registry carries; a refused seat
+is relayed in its words. Give `--until` only when they named a stop just now. A resume with none, on an item that has no
 stop recorded and no rubric that could carry it, is refused with exit 2 and names the flag: relay
 that refusal and ask how far the item may go. Never invent a stop. Parking outright and ending a
 running chain are their own commands — `park <slug>` and `stop <slug>`. `resume` is also the one

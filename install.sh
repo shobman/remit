@@ -120,12 +120,15 @@
 #
 # One file, one honest outcome:
 #   installed  it was absent; it is now remit's payload
-#   updated    it was exactly what remit last installed; now the new payload
+#   updated    it was what remit last installed, or bytes remit shipped at any
+#              version, however they got there; now the new payload
 #   unchanged  it already equals the payload
 #   kept       it is the target's own, or locally edited since install —
 #              remit does not overwrite it, and does not delete it
 #   removed    remit installed it, remit no longer ships it, and it is still
 #              exactly what remit put there
+#   pair       bin/remit and bin/remit-invoke ship as a pair: one kept and the
+#              other not is said on its own line
 # ONE FILE IS THE EXCEPTION, and it is deliberate: CONTRIBUTING.md is MANAGED.
 # A local edit to it is reported `restored` and put back to the payload on the
 # next upgrade, because what it describes is remit's own mechanic and a stale
@@ -632,6 +635,20 @@ manifest_ever_recorded() { # $1 id  $2 dst-rel -> 0 when a manifest in the targe
 		done | grep -q yes
 }
 
+# A FILE WHOSE BYTES REMIT SHIPPED, AT ANY VERSION, IS REMIT'S — a newer seam
+# copied in by hand, a copy no manifest ever recorded — whatever the manifest
+# says. A built payload carries SHIPPED, every installable file's id at every
+# release; an installer run from a checkout asks that checkout's own history.
+# SHIPPED is the one payload file that MAY be absent — a checkout has none —
+# so it is not spelled as a `$SRC/` root the payload must carry.
+shipped_ever() { # $1 id -> 0 when remit shipped a file with this id
+	if [ -f "${SRC}/SHIPPED" ]; then
+		grep -q " $1 " "${SRC}/SHIPPED"
+	else
+		[ -n "$(git -C "$SRC" log --all --format=%H -n1 --find-object="$1" -- bin install CONTRIBUTING.md 2>/dev/null)" ]
+	fi
+}
+
 # What the manifest says remit installed there last time. Empty if never.
 manifest_id() { # $1 record-type  $2 path
 	[ -f "$MANIFEST_ABS" ] || return 0
@@ -653,8 +670,9 @@ report() { printf '  %-10s %s%s\n' "$1" "$2" "${3:+ — $3}"; }
 #   unchanged  it already equals the payload
 #   kept       it is the target's own, or locally edited since install —
 #              remit does not overwrite it. A file whose hash an EARLIER
-#              manifest in the target's history recorded is not this: it is an
-#              older remit copy, and it is `updated`
+#              manifest in the target's history recorded, or whose bytes remit
+#              SHIPPED at any version, is not this: it is a remit copy, and it
+#              is `updated`
 #   restored   MANAGED FILES ONLY: it was remit's and someone edited it; it is
 #              the payload again. A managed file is one whose content is a
 #              mechanic remit maintains, where a stale local edit misdirects
@@ -671,6 +689,7 @@ report() { printf '  %-10s %s%s\n' "$1" "$2" "${3:+ — $3}"; }
 # remit never installed, and the takeover is silent until the upgrade after it,
 # when the payload moves and the file the target owns is `updated` out from
 # under them, or they edit it and get it back `restored`.
+OUTCOME=''    # the last install_file's outcome word, for the pair rule below
 install_file() { # $1 src-abs  $2 dst-rel  [$3 managed]
 	src=$1 dst=$2 managed=${3:-}
 	new_id=$(hash_of "$src")
@@ -680,6 +699,7 @@ install_file() { # $1 src-abs  $2 dst-rel  [$3 managed]
 		cp "$src" "$TGT/$dst"
 		record file "$new_id" "$dst"
 		report installed "$dst"
+		OUTCOME=installed
 		TOUCHED="$TOUCHED $dst"
 		return 0
 	fi
@@ -694,27 +714,33 @@ install_file() { # $1 src-abs  $2 dst-rel  [$3 managed]
 	# installer that was never given the file.
 	if [ -z "$old_id" ] && { [ -n "$managed" ] || [ "$cur_id" != "$new_id" ]; }; then
 		report kept "$dst" "already present and not remit's; left alone"
+		OUTCOME=kept
 	elif [ "$cur_id" = "$new_id" ]; then
 		record file "$new_id" "$dst"
 		report unchanged "$dst"
+		OUTCOME=unchanged
 	elif [ "$cur_id" = "$old_id" ]; then
 		cp "$src" "$TGT/$dst"
 		record file "$new_id" "$dst"
 		report updated "$dst"
+		OUTCOME=updated
 		TOUCHED="$TOUCHED $dst"
 	elif [ -n "$managed" ]; then
 		cp "$src" "$TGT/$dst"
 		record file "$new_id" "$dst"
 		report restored "$dst" "edited since install; this file is remit's and is put back"
+		OUTCOME=restored
 		TOUCHED="$TOUCHED $dst"
-	elif manifest_ever_recorded "$cur_id" "$dst"; then
+	elif manifest_ever_recorded "$cur_id" "$dst" || shipped_ever "$cur_id"; then
 		cp "$src" "$TGT/$dst"
 		record file "$new_id" "$dst"
 		report updated "$dst" "it was an earlier remit copy, not a local edit"
+		OUTCOME=updated
 		TOUCHED="$TOUCHED $dst"
 	else
 		record file "$old_id" "$dst"
 		report kept "$dst" "modified locally since install; left alone"
+		OUTCOME=kept
 	fi
 }
 
@@ -749,7 +775,18 @@ retire_file() { # $1 dst-rel  $2 what replaced it, in words
 # and .claude/skills/, so the copy written here is the one it reads, and adding a
 # fourth location for it would be a second home for content that already has one.
 install_file "$SRC/bin/remit" "bin/remit"
+REMIT_OUTCOME=$OUTCOME
 install_file "$SRC/bin/remit-invoke" "bin/remit-invoke"
+SEAM_OUTCOME=$OUTCOME
+# bin/remit and bin/remit-invoke SHIP AS A PAIR: bin/remit raises through the
+# seam with this version's flags, and a seam from another version answers them
+# its own way. One kept and the other not leaves the two apart, and the report
+# says so on its own line rather than leaving it to the first chain.
+if [ "$SEAM_OUTCOME" = kept ] && [ "$REMIT_OUTCOME" != kept ]; then
+	report pair "bin/remit and bin/remit-invoke" "they ship as a pair, and this install leaves them apart: bin/remit-invoke is kept while bin/remit is v$VERSION's"
+elif [ "$REMIT_OUTCOME" = kept ] && [ "$SEAM_OUTCOME" != kept ]; then
+	report pair "bin/remit and bin/remit-invoke" "they ship as a pair, and this install leaves them apart: bin/remit is kept while bin/remit-invoke is v$VERSION's"
+fi
 install_file "$SRC/bin/remit-exposure" "bin/remit-exposure"
 for s in $SKILLS; do
 	for loc in .claude .agents .pi; do
@@ -799,13 +836,13 @@ if [ "$SHADOW" = yes ]; then
 	# a decision it had no business making. The local file `.claude/settings.local.json`
 	# is the surface that IS a shadow install's to suggest — and suggesting is all
 	# this does, here as everywhere else settings are concerned.
-	report skipped "$SETTINGS_REL" "--shadow: remit writes no settings file here. Merge the block below into .claude/settings.local.json yourself — the \"hooks\" object to enforce the agent-tool guard, and \"$SETTINGS_KEY\": \"$SETTINGS_MS\" under \"env\", without which Claude Code kills any raise past its own 600000 ms ceiling"
+	report skipped "$SETTINGS_REL" "--shadow: remit writes no settings file here. Merge the block below into .claude/settings.local.json yourself — the \"hooks\" object to enforce the agent-tool guard, the \"permissions\" deny list against the docker verbs that drop data, and \"$SETTINGS_KEY\": \"$SETTINGS_MS\" under \"env\", without which Claude Code kills any raise past its own 600000 ms ceiling"
 	sed 's/^/               /' "$GUARD_CLAUDE"
 elif [ ! -e "$claude_settings" ]; then
 	ensure_dir "$TGT/.claude"
 	cp "$GUARD_CLAUDE" "$claude_settings"
 	record file "$new_id" "$SETTINGS_REL"
-	report installed "$SETTINGS_REL" "the agent-tool guard's PreToolUse registration, and $SETTINGS_KEY so a raise longer than ten minutes is not killed on Claude Code"
+	report installed "$SETTINGS_REL" "the agent-tool guard's PreToolUse registration, the deny list against the docker verbs that drop data, and $SETTINGS_KEY so a raise longer than ten minutes is not killed on Claude Code"
 	TOUCHED="$TOUCHED $SETTINGS_REL"
 else
 	cur_id=$(hash_of "$claude_settings")
@@ -820,9 +857,9 @@ else
 	else
 		if [ -n "$old_id" ]; then record file "$old_id" "$SETTINGS_REL"; fi
 		if grep -q "$SETTINGS_KEY" "$claude_settings" 2>/dev/null; then
-			report kept "$SETTINGS_REL" "it is yours and remit does not rewrite it; it already sets $SETTINGS_KEY, and that value is yours too. To make Claude Code enforce the guard, merge the \"hooks\" object below into it deliberately"
+			report kept "$SETTINGS_REL" "it is yours and remit does not rewrite it; it already sets $SETTINGS_KEY, and that value is yours too. To make Claude Code enforce the guard and deny the docker verbs that drop data, merge the \"hooks\" object and the \"permissions\" deny list below into it deliberately"
 		else
-			report kept "$SETTINGS_REL" "it is yours and remit does not rewrite it; merge the block below into it deliberately — the \"hooks\" object to enforce the guard, and \"$SETTINGS_KEY\": \"$SETTINGS_MS\" under \"env\", without which Claude Code kills any raise past its own 600000 ms ceiling"
+			report kept "$SETTINGS_REL" "it is yours and remit does not rewrite it; merge the block below into it deliberately — the \"hooks\" object to enforce the guard, the \"permissions\" deny list against the docker verbs that drop data, and \"$SETTINGS_KEY\": \"$SETTINGS_MS\" under \"env\", without which Claude Code kills any raise past its own 600000 ms ceiling"
 		fi
 		sed 's/^/               /' "$GUARD_CLAUDE"
 	fi
@@ -1540,6 +1577,10 @@ else
 	if [ -s "$TGT/.remit/settings.json" ]; then
 		if _rc_out=$(REMIT_SETTINGS="$TGT/.remit/settings.json" sh "$TGT/bin/remit-invoke" --check-registry 2>&1); then
 			report registry ".remit/settings.json" "$(printf '%s' "$_rc_out" | sed -n 1p)"
+		elif [ "$SEAM_OUTCOME" = kept ]; then
+			# A seam that is not this version's may not know the question at
+			# all; what it printed is not a verdict on the registry.
+			report registry ".remit/settings.json" "not checked — bin/remit-invoke is kept (above), not v$VERSION's seam, and did not answer --check-registry: $(printf '%s' "$_rc_out" | sed -n 1p)"
 		else
 			report registry ".remit/settings.json" "REFUSED by bin/remit-invoke, so every chain would escalate at its first raise: $(printf '%s' "$_rc_out" | tr '\n' ' ' | cut -c1-400)"
 		fi

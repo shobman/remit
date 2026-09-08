@@ -41,6 +41,17 @@
 #              build, written by nobody here; `put_header` leaves it where it
 #              is, as it does `**Research:**` and `**Current phase:**`. WHAT A
 #              BRIEF DEPENDS ON below is its law.
+#
+#              and **Seats:** — THEIR line, optional: `<role> <harness>/<model>`,
+#              comma separated, a role at most once, the model id everything
+#              after the FIRST slash. A role it names is raised on that seat for
+#              this item; a role it does not name takes the registry's default.
+#              Every seat on it is checked against the registry through the
+#              seam's own check (`bin/remit-invoke --check-registry --harness
+#              --model`) at `new` and at `resume`, and one the registry does
+#              not carry is refused there, before anything is written or raised.
+#              `--seat <role>=<harness>/<model>` on `new` and `resume` writes
+#              the line exactly as they would by hand, replacing what was there.
 #   log.md     append-only. Every verdict as it was returned, every finding with
 #              its disposition, every delivery, every escalation, every ruling.
 #
@@ -69,17 +80,21 @@
 # THE VERBS
 # ==============================================================================
 #
-#   remit new <slug> [--until refined|accepted|closed] [--park]
+#   remit new <slug> [--until refined|accepted|closed] [--park] [--seat <role>=<harness>/<model>]...
 #       Create the item from the brief on stdin, which must carry a title. A
 #       `**Depends on:**` line is optional — omitted is `none` — and one that is
-#       there is REFUSED unless every name on it can be read. Born ACTIVE at
+#       there is REFUSED unless every name on it can be read. `--seat` writes
+#       the `**Seats:**` line above; a seat the registry does not carry is
+#       refused and no item is created. Born ACTIVE at
 #       `new`. `--park` ALONE files it parked at `new`, and it moves for
 #       nothing. `--until X --park` is ONE ruling and runs like `--until X`:
 #       `**Until:**` above states it.
 #
-#   remit resume <slug> [--until refined|accepted|closed [--park]]
+#   remit resume <slug> [--until refined|accepted|closed [--park]] [--seat <role>=<harness>/<model>]...
 #       The whole chain. Activates a parked or escalated item, records a new
-#       `until` if one is given, then moves the item ONE GATE AT A TIME as far
+#       `until` if one is given, writes the seats if `--seat` names any and
+#       refuses a `**Seats:**` line the registry cannot honour, then moves the
+#       item ONE GATE AT A TIME as far
 #       as that `until` reaches, or as far as a `promote` rubric a gate's
 #       evaluator cited carries it, and never past a `hold` one cited, a
 #       must-fix that still stands, or a `**Depends on:**` work item that does
@@ -855,7 +870,7 @@ TAB=$(printf '\t')
 usage() {
 	cat >&2 <<'EOF'
 usage:
-  remit new <slug> [--until refined|accepted|closed] [--park]
+  remit new <slug> [--until refined|accepted|closed] [--park] [--seat <role>=<harness>/<model>]...
                          create .remit/work-items/<slug>/ from the brief on
                          stdin, which must begin with a `# Title`. A
                          `**Depends on:**` line — the work items it depends on,
@@ -874,7 +889,11 @@ usage:
                          ruling and runs like --until X: the chain runs NOW, as
                          far as X, and PARKS IT THERE — no promote carries it
                          past X, then or ever.
-  remit resume <slug> [--until refined|accepted|closed [--park]]
+                         --seat writes the brief's `**Seats:**` line — which
+                         harness and model raise a role for THIS item, checked
+                         against the registry; a role it does not name takes
+                         the registry's default.
+  remit resume <slug> [--until refined|accepted|closed [--park]] [--seat <role>=<harness>/<model>]...
                          the whole chain: activate, record the ruling, then move
                          one gate at a time as far as the until says, or as far
                          as a promote rubric a gate's evaluator cited carries it,
@@ -1057,6 +1076,131 @@ check_slug() {
 	esac
 }
 
+# ==============================================================================
+# THE SEATS LINE — which harness and model raise a role, for one item
+# ==============================================================================
+#
+# `**Seats:**` is theirs and optional; its law is in this script's header. Here:
+# the form is read, each seat is checked against the registry through the seam,
+# and `--seat` builds the line to write. Nothing here picks a seat.
+
+WANT_SEATS=''   # from --seat: `role harness/model` entries, newline separated
+
+seat_role_ok() { # $1 role -> 0 when it is one of remit's three
+	case "$1" in research | build | evaluate) return 0 ;; esac
+	return 1
+}
+
+# One `<role> <harness>/<model>` entry -> `<role>\t<harness>\t<model>` on stdout,
+# or a refusal on stderr and 1. The model is everything after the FIRST slash,
+# because a model id may carry one of its own.
+seat_parse() { # $1 the entry
+	_sp=$(printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+	_sprole=${_sp%% *}
+	_spseat=${_sp#* }
+	[ "$_sprole" != "$_sp" ] && [ -n "$_spseat" ] ||
+		{ printf "a seat is written '<role> <harness>/<model>', not '%s'\n" "$_sp" >&2; return 1; }
+	_spseat=$(printf '%s' "$_spseat" | sed 's/^[[:space:]]*//')
+	seat_role_ok "$_sprole" ||
+		{ printf "'%s' is not a role remit has — the roles are research, build and evaluate\n" "$_sprole" >&2; return 1; }
+	case "$_spseat" in
+	*/*) ;;
+	*) printf "a seat names its model after a slash — '%s' names only a harness\n" "$_spseat" >&2; return 1 ;;
+	esac
+	_sph=${_spseat%%/*}
+	_spm=${_spseat#*/}
+	case "$_sph$_spm" in
+	'' | *[!A-Za-z0-9._:/-]*) printf "a seat is a harness and a model id, not '%s'\n" "$_spseat" >&2; return 1 ;;
+	esac
+	[ -n "$_sph" ] && [ -n "$_spm" ] ||
+		{ printf "a seat names both a harness and a model — '%s' does not\n" "$_spseat" >&2; return 1; }
+	printf '%s\t%s\t%s\n' "$_sprole" "$_sph" "$_spm"
+}
+
+# The whole line -> one parsed seat per line on stdout; a refusal and 1 on any
+# entry that cannot be read or a role named twice. Empty line: nothing, 0.
+seats_parse() { # $1 the line's value
+	_spall=''
+	_spifs=$IFS
+	set -f
+	IFS=,
+	for _spent in $1; do
+		IFS=$_spifs
+		set +f
+		[ -n "$(printf '%s' "$_spent" | tr -d '[:space:]')" ] || continue
+		_spone=$(seat_parse "$_spent") || return 1
+		_sprr=${_spone%%	*}
+		case "$_spall" in
+		"$_sprr	"* | *"
+$_sprr	"*) printf "the '%s' role is seated twice on one line\n" "$_sprr" >&2; return 1 ;;
+		esac
+		_spall="${_spall:+$_spall
+}$_spone"
+	done
+	IFS=$_spifs
+	set +f
+	[ -z "$_spall" ] || printf '%s\n' "$_spall"
+}
+
+# `--seat role=harness/model` -> an entry of WANT_SEATS, refused on its form
+# here so a bad flag dies before anything is read.
+seat_flag() { # $1 the flag's value
+	case "$1" in
+	*=*) ;;
+	*) die "--seat is written <role>=<harness>/<model>, not '$1'" ;;
+	esac
+	_sfrole=${1%%=*}
+	_sfseat=${1#*=}
+	seat_parse "$_sfrole $_sfseat" >/dev/null || die "--seat $1 was refused"
+	WANT_SEATS="${WANT_SEATS:+$WANT_SEATS
+}$_sfrole $_sfseat"
+}
+
+# Every seat on the line, checked against the registry as a raise would check
+# it — through the seam, so the two cannot disagree. Dies 2 with the seam's
+# words on the first the registry does not carry.
+seats_check() { # $1 the line's value
+	_scparsed=$(seats_parse "$1") || die "the brief's **Seats:** line cannot be read whole — see above. That line is theirs: '<role> <harness>/<model>', comma separated"
+	[ -n "$_scparsed" ] || return 0
+	[ -s "$SETTINGSFILE" ] || die "the brief names a seat, and there is no registry at .remit/settings.json to check it against"
+	printf '%s\n' "$_scparsed" | while IFS='	' read -r _scr _sch _scm; do
+		[ -n "$_scr" ] || continue
+		if ! _scout=$(REMIT_SETTINGS="$SETTINGSFILE" sh "$INVOKE" --check-registry --harness "$_sch" --model "$_scm" 2>&1); then
+			printf '%s: the seat for %s — %s/%s — was refused by bin/remit-invoke: %s\n' "$ME" "$_scr" "$_sch" "$_scm" "$(printf '%s' "$_scout" | sed -n '$p')" >&2
+			exit 2
+		fi
+	done || exit 2
+	return 0
+}
+
+# The value `--seat` flags write: `role harness/model, role harness/model`.
+seats_flag_value() {
+	printf '%s\n' "$WANT_SEATS" | awk 'NF { if (n++) printf ", "; printf "%s", $0 } END { printf "\n" }'
+}
+
+# Write or replace the brief's `**Seats:**` line. Where there is one, it is
+# replaced in place; where there is none, it goes after the `**Stage:**` line,
+# or — on a brief that has no header yet, as at `new` before `put_header` —
+# after the title, where `put_header` leaves it.
+seats_write() { # $1 file  $2 value
+	_swf=$1 _swv=$2
+	if nocr "$_swf" | grep -q '^\*\*Seats:\*\*'; then
+		nocr "$_swf" | awk -v v="$_swv" '/^\*\*Seats:\*\*/ { if (!d) { print "**Seats:** " v; d = 1 }; next } { print }' >"$_swf.tmp"
+	elif nocr "$_swf" | grep -q '^\*\*Stage:\*\*'; then
+		nocr "$_swf" | awk -v v="$_swv" '{ print } /^\*\*Stage:\*\*/ && !d { print "**Seats:** " v; d = 1 }' >"$_swf.tmp"
+	else
+		nocr "$_swf" | awk -v v="$_swv" '{ print } /^# / && !d { print ""; print "**Seats:** " v; d = 1 }' >"$_swf.tmp"
+	fi
+	mv "$_swf.tmp" "$_swf"
+}
+
+# The seat a raise passes for a role: `--harness H --model M`, or nothing.
+seat_args() { # $1 role -> the flags on stdout, space separated, or nothing
+	_saline=$(hdr "$brief" Seats)
+	[ -n "$_saline" ] || return 0
+	seats_parse "$_saline" 2>/dev/null | awk -F'\t' -v r="$1" '$1 == r { printf "--harness %s --model %s\n", $2, $3; exit }'
+}
+
 check_stop() {
 	case "$1" in
 	refined | accepted | closed) ;;
@@ -1074,6 +1218,7 @@ new)
 		case "$1" in
 		--until) [ $# -ge 2 ] || die "--until needs a value"; want_until=$2; check_stop "$want_until"; shift 2 ;;
 		--park) want_park=yes; shift ;;
+		--seat) [ $# -ge 2 ] || die "--seat needs a value: <role>=<harness>/<model>"; seat_flag "$2"; shift 2 ;;
 		*) usage ;;
 		esac
 	done
@@ -1087,6 +1232,7 @@ resume)
 		case "$1" in
 		--until) [ $# -ge 2 ] || die "--until needs a value"; want_until=$2; check_stop "$want_until"; shift 2 ;;
 		--park) want_park=yes; shift ;;
+		--seat) [ $# -ge 2 ] || die "--seat needs a value: <role>=<harness>/<model>"; seat_flag "$2"; shift 2 ;;
 		*) usage ;;
 		esac
 	done
@@ -2827,7 +2973,7 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 		REMIT_DELIVERY="${EVAL_DELIVERY:-}" \
 		REMIT_RESEARCH_AUTHOR="${RESEARCH_AUTHOR:-}" \
 		REMIT_MUSTFIX="$_mf" \
-		sh "$INVOKE" "$_role" "$slug" "$_wt" >"$_out" 2>"$WORK/invoke.err" </dev/null &
+		sh "$INVOKE" "$_role" "$slug" "$_wt" $(seat_args "$_role") >"$_out" 2>"$WORK/invoke.err" </dev/null &
 	RAISE_PID=$!
 	mark_raise "$RAISE_PID"
 	wait "$RAISE_PID"
@@ -4774,6 +4920,15 @@ create_item() {
 	'# '*) ;;
 	*) rm -rf "$item"; die "the brief must begin with a '# Title' heading" ;;
 	esac
+	# THEIR SEATS, from `--seat` or from the brief, checked against the registry
+	# before the item stands; a refusal leaves no item behind.
+	if [ -n "$WANT_SEATS" ]; then
+		seats_write "$brief" "$(seats_flag_value)"
+	fi
+	_cseats=$(hdr "$brief" Seats)
+	if [ -n "$_cseats" ]; then
+		( seats_check "$_cseats" ) || { rm -rf "$item"; exit 2; }
+	fi
 	# WHAT IT DEPENDS ON is theirs and OPTIONAL — omitted is `none`. A line that is
 	# THERE and cannot be read whole is refused. Nothing here writes the line.
 	if ! depends_on_names "$brief"; then
@@ -5770,6 +5925,15 @@ resume)
 		fi
 	fi
 
+	# THEIR SEATS: what `--seat` names now, else what the brief carries, checked
+	# against the registry before anything is written or raised.
+	if [ -n "$WANT_SEATS" ]; then
+		seats_check "$(seats_flag_value)"
+	else
+		_rseats=$(hdr "$brief" Seats)
+		[ -z "$_rseats" ] || seats_check "$_rseats"
+	fi
+
 	# THE ONE VERB THAT CONTINUES A CRASHED RUN, never automatically. LAST of the
 	# preconditions, because it WRITES (`crash_take`); the marker it wipes is
 	# replaced by its own on the next line.
@@ -5788,6 +5952,15 @@ resume)
 		recorded_until=$(until_value "$want_until" "$want_park")
 		put_header "$brief" active "$st" "$recorded_until" KEEP
 		printf 'Recorded at a resume.\n' | log_append "ruling — until $recorded_until — $(now)"
+		changed=yes
+	fi
+	if [ -n "$WANT_SEATS" ]; then
+		# A seat is a ruling, not an amendment: the brief's digest is taken again
+		# and put on the entry, exactly as an answer does, so the next read does
+		# not see the authority changed and send the stage back to `new`.
+		seats_write "$brief" "$(seats_flag_value)"
+		resolve_authority
+		{ printf 'Recorded at a resume.\n\n'; authority_lines; } | log_append "ruling — seats $(seats_flag_value) — $(now)"
 		changed=yes
 	fi
 	[ "$changed" = yes ] && commit_step "remit: resume $slug" ".remit/work-items/$slug"
