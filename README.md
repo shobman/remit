@@ -10,7 +10,7 @@ genuinely yours, and it does not nag you for it. It is three POSIX scripts and s
 there is no service to operate. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.3.21.**
+**Version 0.3.22.**
 
 ## Start by talking to your agent
 
@@ -230,11 +230,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.3.21` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.3.22` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.21 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.22 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:
@@ -249,7 +249,13 @@ command through `sh` the same way.
 
 Then seat your agents. `sh bin/remit setup` reads the host and proposes `.remit/settings.json`,
 the registry of which agents and models each role may use, for you to accept or edit;
-`sh bin/remit setup --write` saves it. Never redirect `setup` over the registry; it reads that
+`sh bin/remit setup --write` saves it. A Devin seat on an account that belongs to more than one
+organisation needs one more key, `"org": "<id>"`, beside its models: Devin asks which organisation
+every run belongs to, and a raised context has nobody to answer with. remit hands it over by
+copying your own Devin config for the run and setting the organisation in the copy; your file is
+never written to, and your credentials are not in it. A run that reaches that question anyway is
+ended at once and tells you to name it. Run `devin` once interactively to see the organisations
+your account offers, and their ids. Never redirect `setup` over the registry; it reads that
 file first. Write `.remit/elevation.md` yourself if you want the conductor to rule for you;
 nothing installs it.
 

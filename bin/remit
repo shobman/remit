@@ -5383,7 +5383,7 @@ setup)
 	if [ -f "$SETTINGSFILE" ]; then
 		had_registry=yes
 		if jq -r '
-			( (.harnesses // {}) | to_entries[] | "H\t\(.key)\t\(.value.cli // "")\t\((.value.models // []) | join(" "))" ),
+			( (.harnesses // {}) | to_entries[] | "H\t\(.key)\t\(.value.cli // "")\t\((.value.models // []) | join(" "))\t\(.value.org // "")" ),
 			( (.defaults  // {}) | to_entries[] | "D\t\(.key)\t\(.value.harness // "")\t\(.value.model // "")" )
 		' "$SETTINGSFILE" >"$cur" 2>/dev/null; then
 			cur_ok=yes
@@ -5472,7 +5472,10 @@ setup)
 			note "      models: $pmodels ($psrc)"
 			note "      $pnote"
 		fi
-		printf 'H%s%s%s%s%s%s\n' "$TAB" "$ph" "$TAB" "$pcli" "$TAB" "$pmodels" >>"$prop"
+		# The organisation on a devin seat is the practitioner's answer to devin's
+		# organisation picker; a proposal that dropped it would ask again.
+		porg=$(from_cur H "$ph" 5)
+		printf 'H%s%s%s%s%s%s%s%s\n' "$TAB" "$ph" "$TAB" "$pcli" "$TAB" "$pmodels" "$TAB" "$porg" >>"$prop"
 	done <"$probe"
 
 	prop_has() { # $1 harness -> 0 when the proposal carries it
@@ -5587,8 +5590,9 @@ setup)
 		(split("\n") | map(select(length > 0) | split("\t"))) as $rows
 		| {
 			harnesses: ( [ $rows[] | select(.[0] == "H")
-			               | { key: .[1], value: { cli: .[2],
-			                   models: ( if ((.[3] // "") | length) == 0 then [] else (.[3] | split(" ")) end ) } } ]
+			               | { key: .[1], value: ( { cli: .[2],
+			                   models: ( if ((.[3] // "") | length) == 0 then [] else (.[3] | split(" ")) end ) }
+			                   + ( if ((.[4] // "") | length) == 0 then {} else { org: .[4] } end ) ) } ]
 			             | from_entries ),
 			defaults:  ( [ $rows[] | select(.[0] == "D")
 			               | { key: .[1], value: { harness: (.[2] // ""), model: (.[3] // "") } } ]

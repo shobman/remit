@@ -33,6 +33,39 @@
 #               `REMIT_HEARTBEAT=<n>` is its interval in seconds; default 30,
 #               `0` silences it. Neither channel changes what stdout carries.
 #
+# THE ORGANISATION QUESTION — DEVIN ONLY. An account that belongs to more than
+# one organisation is asked which, at the start of every run, print mode
+# included, and a raised context has nobody to answer with: the CLI prints its
+# picker and waits until something ends it.
+#
+# WHERE THE ANSWER LIVES, established live on 2026-09-10, one run each:
+#
+#   * devin reads `org_id` from its USER config — `%APPDATA%/devin/config.json`
+#     on Windows — and a run whose user config carries it never asks (5s).
+#   * a project `.devin/config.json` carrying `org_id` does NOT answer it: the
+#     picker appeared anyway.
+#   * `--config <a copy of that user config, plus org_id>` answers it in a full
+#     environment and BREAKS AUTHENTICATION in this script's scrubbed one —
+#     `Error: Not logged in`. Devin resolves its credentials through the config
+#     it is given, so a config outside its own directory has none.
+#
+# So this script does NOT inject the organisation: no road to it exists that
+# does not either write the practitioner's own configuration or carry a
+# credential into a scratch directory, and a raise may do neither. WHAT IT DOES
+# INSTEAD is refuse to raise a devin seat this host is not configured for,
+# BEFORE anything is billed: the registry names it on the seat
+# (`harnesses.devin.org`), the user config is read, and an absence or a
+# mismatch is exit 2 saying which one to change. A registry that names none is
+# left alone — an account with one organisation is never asked.
+#
+# AND THE QUESTION IS WATCHED FOR, because a registry may be right and a CLI
+# may still ask something new. `devin`'s stdout is matched against the picker's
+# own line while the run is up; on a match the run is ended within a tick and
+# this script exits 2, rather than being killed by the idle bound below and
+# read as a stall. The sidecar carries `prompted:` and the prompt stays in the
+# run log. WHAT IS NOT DONE: no key is pressed and no answer is sent — a raise
+# that answered a question of its own would be choosing for the practitioner.
+#
 # THE IDLE BOUND — `REMIT_QUIET`. The bounded wait each harness gets is WALL
 # CLOCK, and the heartbeat is this script's own clock and says nothing about
 # the CLI. So there is a SECOND bound, on the run's own output: if neither the
@@ -199,6 +232,12 @@
 #   LOCALAPPDATA             three roots a program writes its profile under, so
 #                            a tool that installs itself lands in the scratch
 #                            and goes with the run rather than into the tree.
+#                            ONE EXCEPTION, devin: it resolves its own
+#                            configuration directory from `USERPROFILE` and
+#                            from nothing else, so a devin raise is given the
+#                            real one. THE ORGANISATION QUESTION below says how
+#                            that was established and what it does and does not
+#                            widen.
 #   PROGRAMDATA, ProgramFiles, Windows only, passed through as the machine's:
 #   ProgramFiles(x86)        roots a program reads and never writes.
 #   the harness's own        so a CLI whose credentials live in the real home
@@ -211,7 +250,11 @@
 #                                        has NO config-directory variable, and
 #                                        its `--config` REPLACES the user config
 #                                        rather than layering with it, so it is
-#                                        never passed.
+#                                        never passed. That file is also where
+#                                        devin reads WHICH ORGANISATION a run
+#                                        belongs to, which this script reads and
+#                                        never writes — THE ORGANISATION
+#                                        QUESTION below.
 #   GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS   copilot only: without it repo hooks
 #                            do not load in prompt mode at all, and the
 #                            equivalent flag does not satisfy the gate.
@@ -434,6 +477,10 @@ usage:
       [--allowed-tools <spec>] [--exclude-tools <spec>] [--final-message <file>]
 
       role: research | build | evaluate
+
+      A devin seat may name `org` in the registry — the organisation its runs
+      belong to. This host must already be configured for it; a seat it is not
+      configured for is refused before anything is billed.
 
   remit-invoke --probe-host
       Reads THIS HOST — which of the five harness CLIs are here, where, what
@@ -784,8 +831,12 @@ def nonempty: type == "string" and length > 0;
             E("`harnesses.\($h.key)` is not a harness remit drives — those are claude, codex, pi, devin and copilot")
           elif ($h.value | type) != "object" then
             E("`harnesses.\($h.key)` is a \($h.value | type), not an object with `cli` and `models`")
-          elif ((($h.value | keys) - ["cli","models"]) | length) > 0 then
-            E("`harnesses.\($h.key)` carries \((($h.value | keys) - ["cli","models"]) | join(", ")) — a harness entry carries `cli` and `models`, and nothing else")
+          elif ((($h.value | keys) - ["cli","models","org"]) | length) > 0 then
+            E("`harnesses.\($h.key)` carries \((($h.value | keys) - ["cli","models","org"]) | join(", ")) — a harness entry carries `cli` and `models`, and `org` on devin, and nothing else")
+          elif ($h.value | has("org")) and ($h.key != "devin") then
+            E("`harnesses.\($h.key).org` — only a devin seat takes `org`: devin is the one CLI that asks which organisation a run belongs to, and no other harness has the question")
+          elif ($h.value | has("org")) and ((($h.value.org // null) | nonempty) | not) then
+            E("`harnesses.devin.org` is empty — it names the organisation devin runs under, and an empty one answers nothing")
           elif (($h.value.cli // null) | nonempty | not) then
             E("`harnesses.\($h.key).cli` is missing or not a non-empty string — it names the command this host runs")
           elif (($h.value.models // null) | type) != "array" then
@@ -828,7 +879,7 @@ def nonempty: type == "string" and length > 0;
 ) as $errs
 | if ($errs | length) > 0 then $errs[]
   else
-    ( $r.harnesses | to_entries[] | "H\t\(.key)\t\(.value.cli)\t\(.value.models | join(" "))" ),
+    ( $r.harnesses | to_entries[] | "H\t\(.key)\t\(.value.cli)\t\(.value.models | join(" "))\t\(.value.org // "")" ),
     ( $r.defaults  | to_entries[] | "D\t\(.key)\t\(.value.harness)\t\(.value.model)" )
   end
 '
@@ -871,6 +922,9 @@ reg_cli() { # $1 harness -> the command the registry names for it
 }
 reg_harnesses() { # -> every registered harness, space separated
 	printf '%s\n' "$REGISTRY" | awk -F"$TAB" '$1 == "H" { printf "%s ", $2 }' | sed 's/ $//'
+}
+reg_org() { # $1 harness -> the organisation the registry names for it, or empty
+	printf '%s\n' "$REGISTRY" | awk -F"$TAB" -v h="$1" '$1 == "H" && $2 == h { print $5; exit }'
 }
 reg_models() { # $1 harness -> its registered ids, space separated
 	printf '%s\n' "$REGISTRY" | awk -F"$TAB" -v h="$1" '$1 == "H" && $2 == h { print $4; exit }'
@@ -1031,6 +1085,7 @@ fi
 
 DEVIN='' DEVIN_TIER='' DEVIN_ORG='' DEVIN_TIER_NOTE='' DEVIN_JSON=''
 DEVIN_MODE=accept-edits DEVIN_TIMEOUT=${REMIT_DEVIN_TIMEOUT:-3600}
+DEVIN_ORG_ID='' DEVIN_CONFIG_FILE='' DEVIN_HOST_ORG=''
 DEVIN_VERSION='' DEVIN_ACU='' PERM_APPLIED='' ATIF=''
 
 if [ "$HARNESS" = devin ]; then
@@ -1094,6 +1149,27 @@ if [ "$HARNESS" = devin ]; then
 	# the mode read-back below would exit 6 on every run. Making that work means
 	# retiring a precondition, and nothing here establishes that the trade is sound:
 	# UNESTABLISHED-UNTIL-RUN, and refused rather than guessed at.
+	# THE ORGANISATION, CHECKED BEFORE ANYTHING IS BILLED. Its law is THE
+	# ORGANISATION QUESTION at the head of this script.
+	DEVIN_ORG_ID=$(reg_org devin)
+	if [ -n "$DEVIN_ORG_ID" ]; then
+		for _dvc in "${APPDATA:-}/devin/config.json" "${REAL_HOME:-${HOME:-}}/.config/devin/config.json"; do
+			case "$_dvc" in /devin/config.json) continue ;; esac
+			[ -f "$_dvc" ] && { DEVIN_CONFIG_FILE=$_dvc; break; }
+		done
+		_dvhow="Run \`devin\` once, interactively, and choose that organisation — devin writes the choice into its own configuration and every later run reads it."
+		[ -n "$DEVIN_CONFIG_FILE" ] ||
+			die "the registry seats devin on organisation $DEVIN_ORG_ID, and this host has no devin configuration to read one from — devin asks which organisation every run belongs to and a raised context cannot answer. Nothing was raised and nothing was billed. $_dvhow"
+		case "$DEVIN_JSON" in
+		jq) DEVIN_HOST_ORG=$(jq -r '.org_id // ""' "$DEVIN_CONFIG_FILE" 2>/dev/null) ;;
+		node) DEVIN_HOST_ORG=$(node -e 'try{const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(d.org_id||"")}catch(e){}' "$DEVIN_CONFIG_FILE" 2>/dev/null) ;;
+		esac
+		[ -n "$DEVIN_HOST_ORG" ] ||
+			die "the registry seats devin on organisation $DEVIN_ORG_ID and $DEVIN_CONFIG_FILE names none — devin would ask which organisation this run belongs to and a raised context cannot answer. Nothing was raised and nothing was billed. $_dvhow"
+		[ "$DEVIN_HOST_ORG" = "$DEVIN_ORG_ID" ] ||
+			die "the registry seats devin on organisation $DEVIN_ORG_ID and this host is configured for $DEVIN_HOST_ORG ($DEVIN_CONFIG_FILE). A run would go to the wrong one, so none was raised. Change whichever is wrong: the registry is the repository's, the configuration is this machine's."
+	fi
+
 	if [ "$SANDBOX_GIVEN" != no ]; then
 		case "$(uname -s 2>/dev/null)" in
 		MINGW* | MSYS* | CYGWIN* | Windows*)
@@ -1360,6 +1436,16 @@ scrub_list() {
 		# state live under these two, and `--config` is refused rather than passed.
 		[ -n "${APPDATA:-}" ] && printf 'APPDATA=%s\n' "$APPDATA"
 		[ -n "${LOCALAPPDATA:-}" ] && printf 'LOCALAPPDATA=%s\n' "$LOCALAPPDATA"
+		# AND THE REAL `USERPROFILE`, the one variable devin resolves its
+		# CONFIGURATION DIRECTORY from — established on 2026-09-10 by running the
+		# same raise four ways: a scratch `USERPROFILE` gives `Failed to determine
+		# config directory`, and in a fuller environment a run that stops to ask
+		# which organisation it belongs to; a real one answers in five seconds.
+		# `HOME` stays the scratch directory. This widens nothing `APPDATA` had
+		# not already given a devin raise — its own configuration, which THE
+		# ENVIRONMENT above already states is readable here and is why every
+		# importer is turned off in `devin_write_containment`.
+		[ -n "${USERPROFILE:-}" ] && printf 'USERPROFILE=%s\n' "$USERPROFILE"
 		;;
 	esac
 	return 0
@@ -1800,15 +1886,34 @@ idle_kill() { # $1 the pid this script started
 	fi
 	return 0
 }
+# THE PROMPT WATCH — devin only. Its law is THE ORGANISATION QUESTION at the
+# head of this script. One signature, on the CLI's own stdout: a run that
+# reaches the picker is ended within a tick and named, never waited out.
+PROMPTED=''
+prompt_seen() { # -> the prompt's name, or nothing
+	[ "$HARNESS" = devin ] || return 0
+	grep -q 'Select your Devin organization' "$OUTFILE" 2>/dev/null && printf 'organization\n'
+	return 0
+}
+
 idle_watch() { # $1 the pid to watch. Returns when it has gone, or kills it.
 	_iw_pid=$1
 	_iw_tick=$QUIET
+	[ "$_iw_tick" -eq 0 ] && _iw_tick=15
 	[ "$_iw_tick" -gt 15 ] && _iw_tick=15
 	_iw_sig=$(idle_sig)
 	_iw_quiet=0
 	while kill -0 "$_iw_pid" 2>/dev/null; do
 		sleep "$_iw_tick"
 		kill -0 "$_iw_pid" 2>/dev/null || return 0
+		_iw_p=$(prompt_seen)
+		if [ -n "$_iw_p" ]; then
+			say "$ME: THE RUN IS ASKING A QUESTION — $CLI printed its $_iw_p prompt, which no raised context can answer. Ending it."
+			printf '%s: prompted — %s; the CLI was ended\n' "$ME" "$_iw_p" >>"$PROGRESSFILE"
+			PROMPTED=$_iw_p
+			idle_kill "$_iw_pid"
+			return 0
+		fi
 		_iw_now=$(idle_sig)
 		if [ "$_iw_now" = "$_iw_sig" ]; then
 			_iw_quiet=$((_iw_quiet + _iw_tick))
@@ -1816,7 +1921,7 @@ idle_watch() { # $1 the pid to watch. Returns when it has gone, or kills it.
 			_iw_sig=$_iw_now
 			_iw_quiet=0
 		fi
-		if [ "$_iw_quiet" -ge "$QUIET" ]; then
+		if [ "$QUIET" -gt 0 ] && [ "$_iw_quiet" -ge "$QUIET" ]; then
 			say "$ME: THE RUN HAS GONE SILENT — $CLI has written nothing to stdout or stderr for ${_iw_quiet}s (REMIT_QUIET=$QUIET). Ending it."
 			printf '%s: stalled — no output for %ss; the CLI was ended\n' "$ME" "$_iw_quiet" >>"$PROGRESSFILE"
 			STALLED=$_iw_quiet
@@ -1839,7 +1944,11 @@ run_harness() { # $1 stdin file or 'none'; rest: the command, env prefix include
 		(cd "$WT" && "$@" <"$sf") >"$OUTFILE" 2>"$ERRFILE" &
 	fi
 	HARNESS_PID=$!
-	[ "$QUIET" -gt 0 ] && idle_watch "$HARNESS_PID"
+	# The watcher runs for the idle bound OR for the prompt watch: a devin run
+	# with `REMIT_QUIET=0` still has a question that would be waited out for ever.
+	if [ "$QUIET" -gt 0 ] || [ "$HARNESS" = devin ]; then
+		idle_watch "$HARNESS_PID"
+	fi
 	wait "$HARNESS_PID"
 	HARNESS_EXIT=$?
 	HARNESS_PID=''
@@ -2631,6 +2740,7 @@ devin)
 	# starts and before anything is billed, so a wrong id fails loudly by itself
 	# rather than being answered by something else.
 	[ -n "$MODEL" ] && set -- "$@" --model "$MODEL"
+	[ -n "$DEVIN_ORG_ID" ] && say "organisation : $DEVIN_ORG_ID — the registry's, and what $DEVIN_CONFIG_FILE is configured for"
 	say "invoking: devin -p --prompt-file $(basename "$BRIEF") --permission-mode $DEVIN_MODE${MODEL:+ --model $MODEL}"
 	run_harness none "$@"
 	# The containment was apparatus for the run; it is not part of the tree the
@@ -2869,6 +2979,8 @@ write_provenance() {
 		printf 'harness: %s\n' "$HARNESS"
 		printf 'seat: %s\n' "$SEAT_KIND"
 		printf 'registry: %s %s\n' "$SETTINGS" "$REGISTRY_HASH"
+		[ -n "$PROMPTED" ] && printf 'prompted: %s\n' "$PROMPTED"
+		[ -n "$DEVIN_ORG_ID" ] && printf 'organisation: %s (registry; this host is configured for it)\n' "$DEVIN_ORG_ID"
 		if [ -n "$MODEL_SERVED" ]; then
 			printf 'model: %s\n' "$MODEL_SERVED"
 			if [ -n "$MODEL" ] && [ "$MODEL_SERVED" != "$MODEL" ]; then
@@ -2956,6 +3068,17 @@ write_provenance() {
 # process this script killed exits non-zero and would otherwise be reported as a
 # CLI that failed on its own. It did not: it stopped saying anything and was
 # ended for it. Whatever it had said is in the run directory either way.
+# A QUESTION IS ITS OWN OUTCOME, and it is a registry or a machine to fix
+# rather than a run that failed. THE ORGANISATION QUESTION at the head of this
+# script.
+if [ -n "$PROMPTED" ]; then
+	final_note="prompted: the CLI asked which $PROMPTED this run belongs to, and no raised context can answer. The prompt is in $RUNDIR${final_note:+; $final_note}"
+	write_provenance
+	say "THE RUN ASKED A QUESTION: $CLI printed its $PROMPTED prompt and was ended. Name it on the devin seat in $SETTINGS (\"org\": \"<id>\"), and configure this machine for it by running devin once interactively and choosing it."
+	print_harness_stderr
+	exit 2
+fi
+
 if [ -n "$STALLED" ]; then
 	final_note="stalled: no output for ${STALLED}s. The CLI was ended by this script's idle bound (REMIT_QUIET=$QUIET), not by its own wall bound and not by any failure it reported. What it had written by then is in $RUNDIR${final_note:+; $final_note}"
 	write_provenance
