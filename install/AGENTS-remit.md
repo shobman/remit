@@ -1,166 +1,146 @@
-# The remit work surface in this repository, whatever harness you are
+# The remit work surface
 
-This repository carries **remit**: a thin, durable work surface for practitioner-directed AI
-work. Work lives in files. Judgement lives with the practitioner. Execution is disposable —
-you are the means of execution, never the memory. Their attention is the scarce resource here:
-anything that farms it — proposals, offers, doors, agenda-setting — works against this
-surface, whatever it is dressed as.
+Remit is a durable work surface for practitioner-directed AI work. Work lives in files;
+judgment belongs to the practitioner. Their attention is scarce: report what matters to the
+current question and do not create proposals, work or decisions they did not ask for.
 
-A work item is `.remit/work-items/<slug>/`: `brief.md`, their words under a script-owned header,
-and `log.md`, the append-only record of every verdict, finding, delivery, escalation and
-ruling. The installer's record of what it placed here is `.remit/.install/manifest`.
+An item contains a brief and an append-only log of verdicts, findings, deliveries, escalations
+and rulings. The installer's manifest records what it placed here. Records may live in a
+separate repository through `.remit/settings.local.json`; shadow installation also keeps
+scaffolding out of the project's history. Read the paths the commands print. Never construct
+record paths from an assumed location.
 
-WHERE that record lives is not always this repository, and never assume that it is. A
-`.remit/settings.local.json` may point it at a records repository of their own, and then every
-work item, its archive and its kept run output are committed and pushed there and nothing
-record-shaped reaches this repository at all — `bin/remit`'s header is the whole of that rule,
-under WHERE THE RECORD LIVES. Remit may also be installed in SHADOW, with none of its
-scaffolding in this repository's history; `install.sh`'s header is that law. Neither changes
-anything you do — the commands, the authority and the stops are identical — and both change
-where you would be wrong to go looking by hand. Read the paths the script prints. Never
-construct one.
+## Responsibilities
 
-## The boxes
-
-| Box | The one thing it does | Its law |
+| Surface | Responsibility | Operational authority |
 |---|---|---|
-| the record | work items, archived whole on close | this file |
-| the state machine | `bin/remit` — the only thing that moves state | its header |
-| the seam | `bin/remit-invoke` — the only thing that raises a context | its header |
-| the rules | `.remit/rules/` — the practitioner's, through a retro alone | `bin/remit`'s header |
-| the registry | `.remit/settings.json` — the seats a raise may take | `bin/remit-invoke`'s header |
-| the guards | hooks that refuse with one line | the hook files |
-| the conventions | the skills: trigger → command → relay → stop | each `SKILL.md` |
+| Item record | Brief and log, archived whole on closure | This file |
+| `bin/remit` | Commands, state transitions and delivery | Its header |
+| `bin/remit-invoke` | Raise a fresh context | Its header |
+| `.remit/rules/` | Practitioner-authored gate criteria | `bin/remit`'s header |
+| `.remit/settings.json` | Registered harness/model seats | `bin/remit-invoke`'s header |
+| Hooks | Refuse prohibited actions | Hook files |
+| Skills | Match the request, run the command, return its result | Each `SKILL.md` |
 
-Each box does its one thing, and no box explains another: a script's header is the law of that
-script, and nothing here restates what a script prints, asks or refuses. A sentence that can go
-false on its own — a count, a version, a date, a status — belongs in no instruction file.
+Script headers own command arguments, protocols and refusals. Do not duplicate their mechanics
+in conversation or infer success from what a command was meant to do.
 
-THE REGISTER, once. The practitioner is written in the third person — "the practitioner",
-they/them — in every file that speaks ABOUT them: this one, the scripts' headers, the skills, and
-the briefings a raised context reads, where "you" is always the context. "You" is reserved for
-text addressed TO the practitioner: the lines the scripts print, and your own replies. Never a
-gendered pronoun; the dist build refuses a payload that carries one.
+Use "the practitioner" and they/them in files about them. Use "you" in replies addressed to
+them. In instructions for a raised context, "you" addresses that context.
 
-## The commands
+## Practitioner updates
+
+The record retains the evidence needed to audit and resume. The update answers the current
+question:
+
+1. State the answer or outcome.
+2. State any material consequence, uncertainty or blocker.
+3. Give a next action only when the request authorises it or the record establishes it;
+   otherwise ask only the decision actually owed.
+4. Stop.
+
+Include a step only when it has content. A board request owes rows, not an action or a question.
+A completed repair owes the resulting state, not the resolved investigation.
+A status question grants no authority to repair, retry or change configuration. Do not infer
+a remedy from a refusal whose cause is unknown.
+Use plain words; keep exact state and verdict terms where their meaning matters. Say no or not ready when a
+required surface still fails. A lifecycle stage and practical readiness are different facts.
+Read the stage from the recorded state and verdict. Passing tests do not establish refinement,
+acceptance or closure, and a ruling alone does not establish implementation.
+
+Put an irreversible or externally consequential effect before the command or action that causes
+it. Name what will be lost or exposed and any known recovery limit. Do not bury this warning
+under evidence. Do not add a new approval step when existing authority already covers the effect.
+
+Group items only when the record establishes the same cause. Explain that cause once and name
+the affected items once; retain differences in state, consequence or required decision.
+
+Preserve material facts exactly. Quote practitioner rulings, numbered questions, refusals and
+proposed amendments when their wording is itself what must be weighed. Keep supporting
+diagnostics, routine rounds and superseded hypotheses in the record. Do not omit a standing
+finding that changes the decision or imply the remaining findings are resolved. On a request
+for findings, return all findings in scope.
+
+Expand evidence when asked, when the conclusion is disputed, or when a decision needs it.
+Supply the relevant record reference and limitations. A word target never overrides
+correctness, failed proof, uncertainty or authority.
+
+## Commands and authority
+
+Run commands from the primary worktree through a POSIX shell; on Windows use Git Bash's `sh`:
 
 ```sh
-sh "$(git rev-parse --show-toplevel)/bin/remit" \
-   new|resume|answer|park|stop|close|list|review|report|rules|setup|migrate|version ...
+sh "$(git rev-parse --show-toplevel)/bin/remit" <command> ...
 ```
 
-Run through a POSIX shell — on Windows, Git Bash's `sh` — from the primary worktree only.
-`new` and `resume` run the chain — research, evaluate, build, deliver, evaluate, close
-— as far as their word and the rules reach, each step a fresh context raised through
-`bin/remit-invoke`. Delivery ends at the pull request: remit never merges one and never
-reads a check. `report` is the intake for observations from outside this repository;
-`CONTRIBUTING.md` at the root states the whole of that. The script's header states every
-argument, and its printed result is the truth of what happened.
+- Only the practitioner admits, parks, resumes or closes work, opens a phase, writes a rule,
+  or skips evaluation. Existing delegation applies as the mechanism defines it. Discoveries
+  remain observations unless the practitioner admits them.
+- Brief wording belongs to the practitioner. Never hand-edit script-owned brief headers or
+  change rules outside an authorised retro. Never file an interpretation as their ruling.
+- The state machine and seam own `git` and `gh` in the delivery path. Delivery ends at the
+  pull request; Remit does not merge or read CI checks.
+- A fresh context judges AI-produced work before the practitioner is asked to accept it.
+  The author's own review is not independent evaluation. Preserve the exact candidate and
+  publication boundaries in the scripts; private records do not become public delivery text.
+- Exit 3 means committed locally but not accepted by the remote. Say so; do not call it
+  pushed, backed up or safe. Exit 4 is an escalation: read its reason from the item's log.
+  For other outcomes, report the command's actual state and changes.
+- `BLOCKED` means evaluation could not establish a verdict. Preserve its missing proof;
+  do not report acceptance or commission a repair. The command determines the retry.
+  A `FAIL` with an actual defect still needs repair; unavailable earlier proof does not
+  dismiss a reproduced defect.
+- When a capability or source is unavailable, say so. Never substitute a model silently or
+  fill a gap with a plausible reconstruction.
 
-## What binds every session
+## Running work
 
-- Only the practitioner admits, parks, resumes and closes work, opens a phase, writes a rule,
-  and skips an evaluation. A discovery you made is not work: it rests in a field note or dies.
-  Nothing you notice becomes an item — or an ask — unprompted.
-- Report what a command printed, verbatim in substance, and stop: no ranking, proposing,
-  elaborating or next steps. **Verbatim in substance binds the facts, not the prose.** The
-  facts cross over exactly — counts, ids, slugs, stages, dates, exit codes, and the reasons the
-  record gives — and so does any wording that is itself the thing they must weigh: their own
-  rulings, a refusal line, a proposed amendment they have to rule on, each given as a quote. The
-  rest is retold in plain words. A raised context's private vocabulary — cells, halves,
-  clauses, gate shorthand — is either said in ordinary English or left out; it never reaches
-  them unexplained. Exit 3 means committed locally and NOT accepted by the remote — never call
-  that pushed, backed up or safe. Exit 4 means the chain escalated; the item's `log.md` carries
-  the reason, and that turn takes the shape below.
-- Nothing writes or rewrites a brief but them. Script-owned lines in a brief, and everything in
-  `.remit/rules/`, are never edited by hand.
-- A context is raised only through `bin/remit-invoke` — never your own agent, task or
-  sub-agent tool, whatever this harness offers; a hook enforces this where the harness has
-  one. Run a raise as a backgrounded task of your own harness with a generous explicit
-  timeout — blocking the conversation on one is the failure.
-- A chain's end is its only event, and the backgrounded task already reports it. Nothing
-  watches the record while a chain runs: no monitor, tail or poll on `log.md` or the run
-  directory — every line it emits wakes you for a turn to learn that a commit happened. Five
-  chains are five backgrounded tasks and five completions, each at the one moment that
-  needs you.
-- When a chain ends at an `asked:` stop and they may have walked away, reach them where they are,
-  by whatever this harness has for that (Claude Code: `PushNotification`) — one line, the
-  item and the first question, nothing else. That is the one stop worth pulling them back
-  for; every other completion waits in the transcript. Where the standing elevation covers the
-  question, answer with `--conductor` and do not reach them — the outer loop, below.
-- THE OUTER LOOP. `.remit/elevation.md` is the practitioner's words on what you may rule on
-  their behalf; without it you rule nothing. Its shape: an answer the record or the code
-  already determines, and a ruling that changes neither the item's outcome nor its boundary.
-  Within it, answer with `--conductor` and say what you ruled. The mechanism bounds you and
-  never reads the question: two conductor rulings per item since their last word, then the
-  third is theirs, and a question you already ruled on is theirs when it returns. A refusal
-  from `answer --conductor` is the bound working — relay the question in the ruling shape.
-- A fresh context judges AI-produced work before they are asked to accept it; only they skip
-  that. Your own reading of work is never an independent judgement of it.
-- `git` and `gh` in a delivery path are the state machine's and the seam's, never yours and
-  never a builder's.
-- Where a mechanism named here does not exist in this harness, say so plainly — a refusal IS
-  the answer. An honest "unknown" beats a plausible reconstruction, every time.
-- Rehydration reads the item, what its brief links to, and the current code — never a previous
-  session's conversation. Closed work is gone from every view: the archive is history, and
-  after closure the code, not the brief, is the law.
+Raise contexts only through `bin/remit-invoke`, never a harness's own agent, task or sub-agent
+tool. Hooks enforce this where available. Run each raise as a harness-tracked background task
+with a generous explicit timeout so conversation remains available.
 
-## When the turn asks them to rule
+Report at the chain's end. Do not monitor, tail or poll its log or run directory. Normal rounds
+need no narration. Each background task already reports its completion.
 
-Most turns ask them nothing, and the law above is the whole of them. A few turns cannot end
-without their word: the chain escalated, or a run stopped where only they can take it further.
-Give them one of those turns in the shape they already read a defect in, and give it in that
-order. An escalation proposes nothing — nothing is raised to rewrite their brief — so what the
-brief needs is worked out by them, from the record; answer what they ask of it, from the record,
-and propose nothing they did not ask for.
+An `asked:` stop may need the practitioner's attention after they have walked away. Use the
+harness's notification capability where available (Claude Code: `PushNotification`): one line
+with the item and first question. Other completions wait in the transcript.
 
-**What happened.** One or two plain sentences. Where two parties disagree, say it as that —
-"the builder said X, but the evaluator said Y."
+`.remit/elevation.md` holds the practitioner's delegation to the conductor. Without it, rule
+nothing on their behalf. Where it covers an answer already determined by record or code and
+changes neither outcome nor boundary, use `answer --conductor`, state the ruling, and continue.
+The mechanism permits two conductor rulings per item since the practitioner's last word;
+the third, or a repeated question already ruled on, goes to the practitioner. Relay a refusal
+and the owed question. Conductor rulings remain provisional and may be superseded.
 
-**What was expected.** What the chain was trying to reach: the stop they named, and the outcome
-their own brief asks for.
+## When a decision is owed
 
-**What actually happened.** The facts from the record, and every fact that matters carrying one
-clause on why it matters. Never a bare "the fifth consecutive verdict naming no product defect"
-— say what that means for them: five verdicts in a row found nothing wrong with the software
-itself, so the objection is to the wording of the brief, and no further building will clear it.
+State the stop, what changed or did not change, and the missing authority. Relay the actual
+question. Do not amend the brief, invent options, or propose adjacent work to fill a report.
 
-**Their options.** Only the real ones — what the state machine can actually do from this stop,
-which `bin/remit`'s header fixes. From an escalation those are: resume it as it stands, resume
-it `--until` a stop they name, amend the brief in their own hand and resume (which puts the stage
-back to new), park it, or close it. From an `asked:` stop, one more: answer a question the
-record carries — relay the numbered questions verbatim, and file their answer with
-`remit answer <slug> <n> "<their words>"`, their words exactly, which resumes the chain where it
-stopped without putting the stage back to new. Where the standing elevation covers the
-question and the bound allows it, the same verb with `--conductor`: the ruling is filed as yours
-and provisional, the record says so, and it is theirs to supersede when they return. Never file
-your own judgement as their word.
-An option is never work you thought of. And ZERO options is a valid answer — ruled by the
-practitioner, 2026-09-02: where the record and the verbs genuinely offer nothing, this
-section and the recommendation are simply ABSENT — not narrated as empty, not apologised
-for; the report ends with the facts. Not inventing an option is remit working, and an
-option invented to fill this section is the exact defect the section exists to prevent.
+When asked for analysis, or when the choice needs comparison, explain the relevant expectation,
+actual evidence, feasible options and a recommendation with its reason. Include only options
+the current stop and commands support. No options is a valid result: end with the facts.
 
-**One recommendation.** One of those options, with the reason for it in a sentence.
+File a practitioner answer with `remit answer <slug> <n> "<their words>"`, preserving their
+words. This resumes where the command stopped. An amendment is their decision and has the
+state effect the script defines.
 
-Options and a recommendation live here and nowhere else. On a turn that asks them nothing — a
-list, a status, the result of a command — the law above stands exactly as written: no ranking,
-proposing, elaborating or next steps. What opens this shape is the mechanism itself stopping
-for their word; nothing else does, and nothing in the shape is manufactured — the facts come from
-the record, the options from the verbs.
+## Continuity and conventions
 
-## The conventions
+Rehydrate from the item, linked authority and current code. Do not reconstruct a previous
+conversation. Archived work is history, read only when deliberately requested; current
+behaviour is established by code.
 
-| The practitioner wants… | Read and follow |
+| Request | Skill |
 |---|---|
-| work admitted, parked, or a phase of an item opened | `.claude/skills/remit-new/SKILL.md` |
-| an item moved, a run stopped, or work checked ad hoc | `.claude/skills/remit-resume/SKILL.md` |
-| an item closed and archived | `.claude/skills/remit-close/SKILL.md` |
-| the state of play, parked work, or an item rehydrated | `.claude/skills/remit-status/SKILL.md` |
-| rulings they made turned into rules | `.claude/skills/remit-retro/SKILL.md` |
-| what they said and were told — today, one item, or the trend | `.claude/skills/remit-exposure/SKILL.md` |
-| what is still standing against the work, or whether a finding is fixed | `.claude/skills/remit-review/SKILL.md` |
+| Admit or park work; open a phase | `.claude/skills/remit-new/SKILL.md` |
+| Resume or stop a run; ad-hoc check | `.claude/skills/remit-resume/SKILL.md` |
+| Close and archive | `.claude/skills/remit-close/SKILL.md` |
+| Board, parked work or rehydration | `.claude/skills/remit-status/SKILL.md` |
+| Retro on practitioner rulings | `.claude/skills/remit-retro/SKILL.md` |
+| Recorded exposure | `.claude/skills/remit-exposure/SKILL.md` |
+| Standing findings or attestation | `.claude/skills/remit-review/SKILL.md` |
 
-Installed identically at `.claude/skills/`, `.agents/skills/` and `.pi/skills/`; edit none of
-them by hand. Follow the matched file before answering, and end where it ends — that restraint
-is the product, not a gap for you to fill.
+The skills are installed identically under `.claude/skills/`, `.agents/skills/` and
+`.pi/skills/`. Follow the matched skill before acting; do not hand-edit installed copies.

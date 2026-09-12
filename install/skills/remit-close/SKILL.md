@@ -1,42 +1,33 @@
 ---
 name: remit-close
-description: 'Close a work item in this repository''s .remit/ work location and archive it whole. Use only on the practitioner''s word that the work is over — "close it", "close X", "that''s finished, archive it", "we''re not doing this, drop it", "abandon it" — and use it then, including for work that shipped nothing. Never to propose, suggest, or check whether something could be closed.'
+description: 'Close and archive an item on the practitioner’s word: "close it", "archive it", "drop it" or "abandon it", including work that shipped nothing. Explain material closure consequences and act on existing authority.'
 ---
 
 # Close
 
-The practitioner has ruled a piece of work over. Closure is theirs alone: never infer it, never
-raise it, and never read a merged pull request or a green suite as a reason to.
+Closure belongs to the practitioner. A merged pull request or green suite does not authorise
+it; an explicit instruction to close or abandon does.
 
-Show them what their ruling covers first — every finding still without a disposition is sealed by
-closure as pre-authorised:
+Before the command, read the record and explain any material consequence: work remains
+undelivered, a pull request is unmerged, required proof is absent, or a consequential finding
+is unresolved. Closing seals unresolved findings as pre-authorised and archives the item;
+it does not merge a pull request or deliver unfinished work. Keep this disclosure compact.
+Do not make closure a new review, require each finding to be ruled separately, or ask for
+confirmation already supplied.
 
-```sh
-grep -n '^- finding ' .remit/work-items/<slug>/log.md
-```
-
-Read that list to them plainly, with no recommendation. Then ask whether any commit or pull
-request shipped the work, offering what the repository actually shows — never a link they have
-not confirmed. Abandoned work has no links, and that is fine.
-
-## The command
+Record delivery links the practitioner has confirmed. Links are optional; their absence
+does not block closure or require another question.
 
 ```sh
 sh "$(git rev-parse --show-toplevel)/bin/remit" close <slug> <<'DELIVERY'
-- <a link they confirmed, one per line>
+- <confirmed delivery link>
 DELIVERY
 ```
 
-With nothing to record, close with empty input: `... close <slug> < /dev/null`.
+With no confirmed links, use empty input: `... close <slug> < /dev/null`.
 
-## Report it, and then it is gone
+Report the command's actual result under AGENTS.md's contract. Exit 3 still means the item
+closed locally, with the remote not accepting the record. A refusal is not closure.
 
-Report what it printed, verbatim in substance. Exit 3: committed here, NOT accepted by the
-remote — say so; the item is closed either way. Exit 2: nothing changed. Exit 4: the close
-escalated; the item's `log.md` carries the reason, and that turn asks them to rule.
-
-Closure is final: the item leaves every listing and nothing about it returns as an
-instruction, a reminder, or an account of current behaviour. If a constraint from the work
-still governs the software, it belongs in the code — a test, a name, a comment; say that once.
-When they deliberately ask for closed work, read it from `.remit/work-items/.archive/<slug>/`
-and report it as the past — after closure the code, not the brief, is the law. Then stop.
+The archived item leaves the current-work view. Read it only on a deliberate request and
+report it as history; current behaviour comes from code. No reminders or new work follow.

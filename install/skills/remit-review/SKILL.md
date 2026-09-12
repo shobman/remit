@@ -1,54 +1,38 @@
 ---
 name: remit-review
-description: 'Show the findings still standing against this repository''s work items — open or archived — from the record, and on their word have one fresh context attest which of them the code has since fixed. Use when they ask what is standing, in whatever words — "what''s standing", "review today''s findings", "what did the evaluators leave", "anything still open from last week" — or whether a finding is fixed: "did we fix X", "is that cache header thing still there", "attest".'
+description: 'Show standing findings and their present disposition, or on request attest whether code has fixed them. Use for "what is standing", "review today’s findings", "anything still open", "did we fix X", "is that still there" or "attest".'
 ---
 
 # Review
 
-The standing findings are what the last verdict at each gate still carried with no
-disposition — read from the verdicts, so a closed item's seal changes nothing. Run the one that
-matches what they asked:
+Read the requested window from the record, including archived items when in scope:
 
 ```sh
-sh "$(git rev-parse --show-toplevel)/bin/remit" review                  # every item
-sh "$(git rev-parse --show-toplevel)/bin/remit" review today            # or yesterday, week
+sh "$(git rev-parse --show-toplevel)/bin/remit" review
+sh "$(git rev-parse --show-toplevel)/bin/remit" review today
 sh "$(git rev-parse --show-toplevel)/bin/remit" review since <YYYY-MM-DD>
 sh "$(git rev-parse --show-toplevel)/bin/remit" review <slug> [<slug>...]
 ```
 
-Report the rows verbatim in substance — item, stage, gate, verdict date, finding number, the
-finding's first line, and the delivery it stood against — and stop. If it prints nothing, say
-nothing is standing in that window. No ranking, no triage, no proposal: a standing finding is
-a fact the record holds, and what becomes of it is theirs.
+The command also supports `yesterday` and `week`. Return all rows in scope: item, stage,
+gate, verdict date, finding number, its first line and the delivery it stood against. If no
+rows exist, say nothing is standing in that window. Do not rank findings or turn them into work.
 
-## When they say "attest"
-
-Only on their word. This raises ONE fresh context, in the primary worktree at HEAD, to say of
-each standing finding whether it still stands, is fixed, or is moot — and records what it said
-on every item's `log.md`, the archive included. Run it as a backgrounded task of your own
-harness with a generous explicit timeout, exactly as a resume is run:
+## Attest on request
 
 ```sh
 sh "$(git rev-parse --show-toplevel)/bin/remit" review [<window> | <slug>...] --attest
 ```
 
-Its stdout is the rows, then the count per category. Give them that turn in the shape
-`AGENTS.md` fixes for a turn that asks them to rule:
+Run backgrounded as AGENTS.md requires. It raises a fresh context against the named HEAD and
+records its attestation in the item logs, including archives.
 
-- **What happened.** One context attested the standing findings against the tree at the HEAD
-  the command named.
-- **What was expected.** The window or items they named, and how many findings stood in it.
-- **What actually happened.** The three-way result with its counts — how many stand, how many
-  are fixed, how many are moot, and how many the context did not attest — each finding's
-  attestation given as the record has it, the evidence after the dash quoted. A finding
-  attested fixed will not be re-judged; one attested moot or standing is still standing.
-- **Their options.** From the verbs, and only these: admit a standing finding as a work item in
-  their own words, or leave it. Nothing here re-opens a closed item and nothing here moves one.
-- **One recommendation.** One of those, with the reason in a sentence.
+For a full attestation report, return the counts and each finding's present disposition:
+standing, fixed, moot or unattested. For a question about one finding, answer that finding first;
+include other results only when they affect that answer.
+A fixed finding will not be re-judged; moot remains standing. Name the candidate and include
+evidence where it affects the conclusion or a requested recommendation. Expand evidence on
+request. Attestation itself creates no decision, item or automatic recommendation.
 
-## Then stop
-
-You are reporting, not recording. Exit 3 means committed locally and NOT accepted by the
-remote — say so. Exit 2 means nothing was raised and nothing was recorded; pass the reason on
-word for word. Do not attest without their word, do not attest twice, and do not turn a finding
-into work they did not admit.
+Report failures and local-only durability under AGENTS.md's contract. Do not attest without
+the practitioner's request or repeat an attestation unasked.

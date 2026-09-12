@@ -10,14 +10,14 @@ genuinely yours, and it does not nag you for it. It is three POSIX scripts and s
 there is no service to operate. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.4.1.**
+**Version 0.4.2.**
 
 ## Start by talking to your agent
 
 You do not learn a command set. You say what you want in your own words to the agent you already
 use, and the installed conventions do the rest: each one recognises a kind of request, runs the
-command, reports what it printed, and stops. It does not rank, propose, elaborate, or raise
-anything later unasked.
+command, reports the outcome and any material consequence, and stops. Supporting evidence
+stays available in the record and is expanded when you ask or need it for a decision.
 
 | You say something like | The convention | What it does |
 |---|---|---|
@@ -26,7 +26,7 @@ anything later unasked.
 | "where are we", "catch me up on X" | status | the board, or one item read from its record and the code |
 | "close it", "we're not doing this" | close | archives the item on your word |
 | "what's standing", "did we fix X", "attest" | review | the findings still standing, and one context's word on the code now |
-| "let's do a retro" | retro | turns rulings you made into rubrics |
+| "let's do a retro" | retro | proposes one batch of useful changes or pruning from your rulings |
 | "how much have I said today" | exposure | the words you typed and the words said back |
 
 ## Your first work item
@@ -69,10 +69,17 @@ remit for you is the conductor, and it may answer some questions itself, under a
 a section below says when.
 
 Merging the pull request is yours. When you decide the work is over, say "close it." The close
-convention shows you every finding still standing, asks which links shipped the work, and runs
+convention explains material unresolved findings and any undelivered or unmerged work, then runs
 `sh bin/remit close retry-failed-upload`. The item leaves the board and its folder moves to the
 archive. From then on remit treats the code, not the brief, as the law: the brief was a means to
 that end, and it does not return as context in a future session unless you ask for the history.
+Closing seals unresolved findings as pre-authorised; it does not deliver unfinished work or
+merge a pull request. Confirmed delivery links are optional.
+
+Preparation fits the work. An uncertain or consequential outcome can start with an established
+problem, a researched solution, a researched technical approach and a test strategy before
+build. Existing authority can supply those answers by reference. A small change can keep its
+outcome and proof in one brief; no new stages or mandatory document sequence are added.
 
 ## How far to take it
 
@@ -129,9 +136,14 @@ sh bin/remit list            # the board: attention, stage, why it stopped, item
 sh bin/remit list --parked   # the parked work
 ```
 
-When a turn does need your word, your agent gives it to you in one fixed shape: what happened,
-what was expected, what actually happened, your options from the verbs, and one recommendation.
-Where the record and the verbs offer nothing, the options are simply absent.
+Updates lead with the answer or outcome, then any material consequence or blocker, then the
+next required action or decision. A destructive effect comes before its command. Items stopped
+by the same cause share one explanation. A board request returns rows; a rehydration returns
+current state and what needs you. Detailed evidence and comparisons remain available on request.
+
+A retro considers whether each lesson belongs in a rubric, executable check, environment or
+configuration, item authority, or no durable change. It prunes duplicates and proposes one
+compact batch. Your ruling authorises a rubric change; a proposal does not create new work.
 
 ## When your agent may answer for you
 
@@ -247,11 +259,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.4.1` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.4.2` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.4.1 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.4.2 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:
@@ -274,11 +286,11 @@ Before a shadow install, put a personal records pointer in the target's untracke
 Use a separate private repository with the intended access permissions. Shadow mode refuses
 without this pointer; upgrades must keep the original installation mode.
 
-Shadow mode is not a publication or read-isolation guarantee. Delivery branches, commit
-metadata and PR bodies remain visible, and currently include worker delivery text. Do not
-put confidential material in that text. A fork does not change this boundary, and local
-Git exclusions do not prevent deliberate force-staging. Stronger publication and isolated
-worker boundaries are not implemented by this installation mode.
+Shadow mode is not a read-isolation guarantee. The publication boundary described above applies
+in both modes: public delivery text is deliberately selected, and raw worker returns stay in
+the work record, whose visibility depends on its repository and access permissions.
+Already published history remains exposed. A fork or local Git exclusion
+does not provide isolation or prevent deliberate force-staging.
 
 The target must be inside your repository's primary worktree; a linked worktree is refused. The
 installer needs only Git and a POSIX shell; on Windows, use Git Bash's `sh`. Run every remit

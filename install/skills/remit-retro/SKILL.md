@@ -1,46 +1,45 @@
 ---
 name: remit-retro
-description: 'Turn rulings the practitioner actually made into rubrics in this repository''s .remit/rules/ folder. Use only when they call one — "let''s do a retro", "retro time", "run a retro", "turn that into a rule", "should that be a rubric?" — and use it then. This is the only door to that folder: no other convention, and no session, proposes a rubric anywhere else.'
+description: 'On a called retro, examine actual practitioner rulings and propose one compact batch of additions or pruning, routing each lesson to its useful home. Use for "retro", "turn that into a rule" or "should that be a rubric". Rubric changes require the practitioner’s ruling.'
 ---
 
 # Retro
 
-The practitioner has called a retro. Read back the rulings they made, propose in one batch what
-they would add to or prune from `.remit/rules/`, write only what they rule, commit, and stop.
+Read the actual rulings and their words; do not infer preferences. Consult archived rulings
+only when the practitioner asks. A retro is the only convention that proposes rubric changes;
+do not offer one at a verdict, closure or an unrelated turn.
 
-AI never offers a rubric anywhere else — not at a verdict, not at a closure, not "while we're
-here". If this skill was not called, there is nothing to propose.
+## One batch
 
-## Their rulings, their words
+For each lesson, choose one home: a gate rubric, executable check, environment/configuration,
+item authority, or no durable change. Prefer a check or environment correction for a repeated
+operational failure that prose cannot prevent. An item-specific ruling stays with that item.
+A lesson may remain only a field report.
 
-Gather every place they ruled something, in the words they used — never what they seemed to want or
-a preference you inferred. The archive too, only if they ask:
-`grep -rn 'ruled: ' .remit/work-items/.archive/*/log.md`. A ruling with no words of theirs is not
-a ruling; leave it out.
+Present one compact batch of proposed changes and pruning, quoting the supporting ruling and
+date. Remove duplication before adding a rubric. A gate criterion must change whether future
+work continues, stops, is accepted or needs repair; explanatory speaking style is not a gate.
+Preserve existing IDs and compatibility. Say briefly which lessons need no durable change.
 
-## One batch, one pass
+A proposal for a check or environment change does not create new work or authorise its
+implementation. Ask only for the actual unresolved ruling.
 
-Lay the folder down if absent — `sh "$(git rev-parse --show-toplevel)/bin/remit" rules init` —
-then put one list in front of them, grouped by gate file and section: what would be added, and
-what would be pruned, because a rubric that has stopped matching how they rule is worth
-removing and a retro that only ever adds is a ratchet. Against every proposal, quote the
-ruling and its date.
+## Apply the ruling
 
-A rubric must reach past the item it came from. Before proposing one, ask whether it would apply
-to a future item that is not this one; a ruling that only restates one brief's spec is that
-brief's and is left out. Say which rulings were left out for that reason, in one line.
+Write only the rubric changes the practitioner approves. Read `bin/remit`'s header for the
+line format. Initialise the folder only when needed:
 
-## Write only what they ruled
+```sh
+sh "$(git rev-parse --show-toplevel)/bin/remit" rules init
+```
 
-Their words, into the files they ruled on, in the line form `bin/remit`'s header fixes — read it
-before writing. A rubric carries no date and no account of the incident that led to it: the
-ruling and its date were quoted in the proposal, and git holds them after. Then check the folder still reads, and commit it alone:
+Rubrics contain their approved words, without incident history or dates; the proposal and
+commit retain provenance. Validate and commit only that folder:
 
 ```sh
 sh "$(git rev-parse --show-toplevel)/bin/remit" list >/dev/null
 git add .remit/rules && git commit -m "remit: rubrics ruled in a retro"
 ```
 
-Report what those printed, verbatim in substance — a refusal names the file and line and means
-nothing in the folder is applied — then what was written and pruned, and stop. Do not
-summarise the session, propose work, or carry anything out of the retro.
+A validation refusal names the file and line; do not commit invalid rules. Report what was
+written or pruned and any failure. Do not recap the session or propose further work.

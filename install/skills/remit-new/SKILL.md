@@ -1,56 +1,55 @@
 ---
 name: remit-new
-description: 'Admit a work item in this repository''s .remit/ work location, and say how far it may go without the practitioner. Use on their words for putting something on the durable surface — "file it", "park this", "an idea", "for the backlog", "new work item", "raise an item", "create a brief for X", "take it to refined", "take it to accepted", "take it all the way" — and on their word that an admitted item takes a further phase. Never to manufacture an item so that something can be started.'
+description: 'Admit or park practitioner-directed work, or open a phase they authorise. Use for "file it", "park this", "new item", "create a brief", "take it to refined", "take it to accepted" or "take it all the way". Keep intake problem-first and ask only what is missing to make the outcome judgeable.'
 ---
 
 # New
 
-The practitioner is admitting work. Help them say it well, run one command, report what it
-printed, and stop.
+The brief preserves the practitioner's words and boundary. Structure them without widening
+them; mark interpretations before filing. Do not fill an unknown with plausible authority.
+If supplied wording would defeat the stated outcome or leave a material contradiction, explain
+that consequence and ask for the specific missing decision before filing it. Do not silently
+correct it or treat an unexplained contradiction as a settled ruling. Missing earlier answers
+do not establish the intended choice.
+Write `**Depends on:**` from mechanical facts: a required contract's item slug, or `none`.
+Do not ask for scheduling or invent work to enable a start.
 
-The brief is their words: sharpen and structure them, never widen them, and never fill a gap they
-left with something plausible. A sentence that is your reading of their words is marked as a
-reading before the brief is filed, never left standing as theirs. Write the `**Depends on:**` line yourself, from the mechanical
-facts — a contract this work builds on, named by slug, or `none`. Sequencing is theirs; they volunteer it, and they are not asked for it.
+For "file it", "park it", an idea or backlog, use `--park`. If the supplied words already
+establish a judgeable outcome, ask nothing more. Otherwise ask once what would show it
+delivered, and take the answer as it stands.
 
-**Parked — "file it", "park it", an idea, for the backlog:** file what they wrote, verbatim, with
-`--park`. Ask one thing only, once — is there enough here to evaluate, an outcome a stranger
-could judge delivered or not? — and take their answer as it stands.
+For a brief or refinement, read `.remit/rules/refined.md`. Ask only about unmet `fix`
+criteria, once each. Reuse answers and authority already supplied. When research is requested,
+establish what it should answer and return; record that in a `**Research:**` line without
+re-asking what the practitioner already specified.
 
-**Refined — "create a brief", "take it to refined" or further:** read this repository's own bar
-first — `cat .remit/rules/refined.md` — and ask them, once each, every criterion under `## fix`
-that what they said does not already satisfy. When they ask for research, ask what it should
-establish and what it should hand back, and write their answer as a `**Research:**` line.
+## Proportionate preparation
 
-## The command
+Establish the problem before selecting a solution. For consequential or uncertain work, use
+research to describe valuable outcomes without prematurely choosing technology, then research
+the technical approach and define how the outcome will be judged before build. Reuse existing
+authority by reference. Small work may express all needed outcome and proof in one brief;
+legacy work stays valid. This guidance adds no state, mandatory document or automatic phase.
+A choice about value, scope, risk or taste remains the practitioner's.
+
+## Command
 
 ```sh
 sh "$(git rev-parse --show-toplevel)/bin/remit" new <slug> [--until refined|accepted|closed] [--park] [--seat <role>=<harness>/<model>]... < <brief-file>
 ```
 
-| They said | The command |
-|---|---|
-| "file it", "park it", an idea, for the backlog | `--park` |
-| nothing about how far | no flag |
-| a stop they named | `--until <that stop>` |
-| a stop they named, and to rest there | `--until <stop> --park` |
-| a seat they named for this item — "have Astra build this one" | `--seat build=codex/gpt-6-astra`, one per role named; the pair must be in the registry, or the command refuses and nothing is filed |
+Use `--until` only for a named stop; add `--park` when asked to rest there. If no stop was
+named, pass no `--until`. Use `--seat` only for a seat the practitioner named, and only a
+registered pair. Relay any refusal.
 
-With `--until`, the command runs the chain itself — it raises real fresh contexts and takes
-minutes to hours, so run it backgrounded and report when it returns.
+With `--until`, the command runs the chain. Run it backgrounded under AGENTS.md's contract.
 
-## A further phase
+## Further phase and return
 
-A phase is theirs to open, exactly as the item was: `phase-<n>.md` beside the brief, that part's
-own outcome and proof inside the item's. Write it and commit it; the script does the rest. A
-part that changes the item's outcome or boundary is an amendment or a new item — their word says
-which.
+A phase is opened only by the practitioner. Write and commit `phase-<n>.md` beside the brief
+with its bounded outcome and proof inside the item's existing authority. A changed outcome or
+boundary needs their amendment or new item; the script owns the resulting state transition.
 
-## Report it, and stop
-
-Report what it printed, verbatim in substance. Exit 3: committed here, NOT accepted by the
-remote — say so, and never call it pushed or safe. Exit 2: nothing changed. Exit 4: the chain
-escalated at admission — the item's `log.md` carries the reason, and that turn asks them to
-rule, so give it in the shape AGENTS.md fixes for a turn that asks them to rule; what the brief
-needs is theirs to work out, never yours to propose. Otherwise stop: no elaborating, ranking,
-estimating, or raising it later unasked.
+Return the command's actual outcome under AGENTS.md's update contract. An escalated admission
+owes its recorded cause and missing authority. Do not propose a brief amendment unasked or
+revive parked work.

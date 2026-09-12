@@ -1,43 +1,32 @@
 ---
 name: remit-status
-description: 'Show what work exists in this repository''s .remit/ work location, and rehydrate one item so the practitioner can pick it up. Use whenever they ask where things stand, in whatever words — "where are we", "what''s on?", "what''s the lowdown?", "anything waiting on me?" — or asks for parked work, or to be caught up on one item: "where did we leave X", "brief me on X", "catch me up on X".'
+description: 'Show the board or catch the practitioner up on an item: current outcome, state, blocker and decision owed. Use for "where are we", "what is on", "anything waiting on me", parked work, "where did we leave X", "brief me on X" or "catch me up on X".'
 ---
 
 # Status
 
-The practitioner has been away and is carrying none of this in their head. Give them the calm
-view, from what is written and what is shipped. Nothing here starts, ranks or revives work.
+Read the current work surface; nothing here starts, ranks or revives work.
 
 ```sh
-sh "$(git rev-parse --show-toplevel)/bin/remit" list            # the board
-sh "$(git rev-parse --show-toplevel)/bin/remit" list --parked   # when they ask for the rest
+sh "$(git rev-parse --show-toplevel)/bin/remit" list
+sh "$(git rev-parse --show-toplevel)/bin/remit" list --parked
 ```
 
-Report the rows verbatim in substance and add nothing — no view on which matters more, no
-suggestion of where to begin. If it says there are no active items, say so and stop. A warning
-on the error channel is passed on word for word.
+For a board request, return the rows with their facts and order intact, then stop. Use
+`--parked` when asked for parked work. If no active items exist, say so. Pass on a warning
+from the error channel in its own words.
 
-## Rehydrate the item they pick
+## Rehydrate
 
-Rehydration is reading, not reconstruction: the item — brief with its header, `log.md` whole,
-the current phase file where one is named — then what the brief links to, then the current
-code and the pull requests that put it there. Tell them briefly, in their terms: why the work
-exists, its stage and how far it may go without them, its boundary, what is actually in the
-code today, what evidence exists that it works, every finding still without a disposition, and
-where it stopped and why.
+Read the item's brief and header, whole log, named current phase, linked authority, current
+code and relevant pull requests. Use the locations the mechanism establishes.
 
-Where the material does not establish something, say that — "the item does not say". Never
-fill a gap with a plausible reconstruction, and never claim to recall an earlier session. An
-item they name that is absent may be closed: closed work is archived at
-`.remit/work-items/.archive/<slug>/`, deliberately out of every listing — say so, read it only
-if they ask, and report it as history, never as current behaviour.
+Return the current outcome, stage, where it stopped and the decision owed. Include material
+uncertainty, failed proof and findings that affect the next decision. Do not recount history
+or every standing finding by default; do not imply omitted findings were resolved. Expand
+findings and evidence on request, with record references and the limits of the proof.
 
-Where the item is waiting on them — escalated, or stopped where only they can take it further —
-end the rehydration with what they are waiting to rule on, in the shape AGENTS.md fixes for a turn
-that asks them to rule. Where nothing is waiting on them, end where the reading ends.
+Where the record does not establish a fact, say it is unknown. If a named item is absent, it
+may be archived; read the archive only when asked and describe it as history.
 
-## Then stop
-
-You are reporting, not recording. Exit 3 from any command here means committed locally and NOT
-accepted by the remote — say so. The board asks them nothing: do not compare items, recommend
-where to begin, propose work, or move anything.
+Follow AGENTS.md's update and decision contract. Reporting authorises no state change.
