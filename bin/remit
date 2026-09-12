@@ -378,21 +378,21 @@
 #                 a code fence, below this script's provenance.
 #   evaluate      a verdict. Parsed line by line:
 #
-#         Verdict: PASS | PASS WITH FINDINGS | FAIL      (required, first wins;
-#                       prose after the verdict word is kept, not read)
+#         Verdict: PASS | PASS WITH FINDINGS | FAIL | BLOCKED (exactly one;
+#                       a legacy spaced em-dash explanation is permitted;
+#                       quoted/fenced examples are not control directives)
 #         Must-fix: <text>                (zero or more; a FAIL with none — and no
-#                       applied `fix:` citation — has its `Finding:` lines
-#                       promoted to the must-fix by the mechanism, once, where
-#                       the author is a builder; with no findings either, or
-#                       after a promoted round, it is a FAIL with nothing to act
+#                       applied `fix:` citation — is a FAIL with nothing to act
 #                       on: the item stops, ACTIVE, for the practitioner.
 #                       Markdown emphasis around any of these line shapes is
 #                       stripped before the line is read.)
 #         Finding: <text>                 (zero or more)
-#         Ask: <text>                     (zero to four, read only in a FAIL and
+#         Ask: <text>                     (zero to four, read in FAIL/BLOCKED and
 #                       only following a `Finding:`, `Must-fix:`, `fix:` or
 #                       another `Ask:` line. ANY question stops the item for the
 #                       practitioner, whatever else the verdict carries.)
+#         BLOCKED carries Findings/Asks, no Must-fix or rubric effects. It waits
+#                       active and retries evaluation without commissioning repair.
 #         Back to: research               (zero or one, and ONLY at the gate into
 #                       `refined` where the authority carries a `**Research:**`
 #                       line: the must-fix is against `research.md`, and this is
@@ -475,7 +475,6 @@
 #   ## amended — <what changed> — <date>
 #   ## resumed — <label> — <date>  (a run going back in where the record left
 #                                   off, or picking a crashed chain up)
-#   ## promoted — <date>          (a FAIL's findings became its must-fix)
 #   ## stopped — <reason> — <date>
 #   ## escalated — <reason> — <date>
 #   ## closed — <date>
@@ -567,23 +566,23 @@
 # THE DELIVERY SEAM
 # ==============================================================================
 #
-# After a `build` invoke has authored the worktree, `resume` stages everything,
-# commits with the authorship and committing-session trailers, pushes
-# `work/<slug>`, and puts the delivery in that branch's pull request — `gh pr
-# create --draft` when it has none, `gh pr edit` when it already has one, this
-# delivery's section added ON TOP of the body already there, which is copied
-# through byte for byte; where `gh pr edit` fails, the same body over REST,
-# `gh api -X PATCH repos/{owner}/{repo}/pulls/<n>`. The builder's returned text
-# is fenced below the provenance, in a fence longer than any run of backticks in
-# it, so nothing it contains can render as this script's own record. THE SEAM
-# EXISTS ONCE, here; `t/unit/repro-pr-body-second-delivery.sh` asserts it.
+# After a `build` invoke has authored the worktree, `resume` constructs a scratch
+# index, creates a neutral local candidate and durably records `next=publish`
+# before an external write. It validates every newly reachable commit against
+# forbidden paths and known private fingerprints, freezes destination state,
+# then pushes that exact SHA without force. A new draft PR receives only the
+# candidate-bound `publication.md` or neutral mechanics. Later deliveries never
+# rewrite title/body: each receives one full-SHA marker comment, after a complete
+# marker lookup. Raw returns remain private record evidence. THE SEAM EXISTS
+# ONCE, here; `t/unit/repro-pr-body-second-delivery.sh` asserts it.
 #
 # The build worktree is `<repo>-remit-worktrees/<slug>` — a SIBLING of the
 # primary worktree — on branch `work/<slug>`, branched from the base branch. It
 # sits outside every working tree, so it is never committed by accident, and
 # outside `.git/`, which a seat's guard may refuse to write. `REMIT_WORKTREE_DIR`
-# overrides the parent. A `work/<slug>` that is already checked out anywhere is
-# USED where it is, never refused and never duplicated.
+# overrides the parent. Dedicated legacy branches remain `work/<slug>`; new
+# shadow branches are opaque `work/r-<random>`. A recorded branch already checked
+# out anywhere is USED where it is, never refused and never duplicated.
 #
 # DELIVERY ENDS AT THE PULL REQUEST, and the LAST thing this script does to one
 # is flip it out of draft:
@@ -673,14 +672,9 @@
 #     wrong, never defended as theirs — THE OUTER LOOP below bounds it. A
 #     question may be answered again; the latest line stands, nothing above it
 #     is edited, and the record names what each answer superseded.
-#   * A FAIL'S FINDINGS ARE ITS MUST-FIX WHEN IT NAMES NONE — ONCE. Where the
-#     author is a builder (gates 2 and 3) and a FAIL carries findings and no
-#     must-fix text, the mechanism promotes the findings to the must-fix, says
-#     so on the record (`## promoted`), and runs one builder round on them.
-#   * A FAIL WITH NOTHING TO ACT ON — no must-fix text, and either no findings
-#     or findings that were already promoted once — stops for them: the item
-#     stays where it is, ACTIVE, the findings on the record, no further round.
-#     At gate 1 a finding on the brief is theirs and is never promoted.
+#   * A FAIL WITH NOTHING TO ACT ON — no must-fix text and no applied `fix:`
+#     citation — stops for them: the item stays where it is, ACTIVE, with its
+#     findings on the record and no further round.
 #
 # THE ONE EXCEPTION — `research.md` HAS AN AUTHOR. It is MACHINE-AUTHORED,
 # exactly as a build is. So, ONLY where the authority carries a `**Research:**`
@@ -740,34 +734,23 @@
 # AN EVALUATOR IS RAISED WHERE THE THING IT JUDGES IS ON DISK:
 #
 #   into `refined`   the BRIEF, and nothing built yet: the primary worktree.
-#   into `accepted`  the DELIVERY: the item's own worktree — THE SAME PATH THE
-#   into `closed`    build used, `build_worktree`/`worktree_path` below, on
-#                    `work/<slug>`. There is no second resolver.
+#   into `accepted`  the DELIVERY: a fresh independent checkout of the exact
+#   into `closed`    full candidate recorded by the publication checkpoint.
 #
-# The briefing NAMES the delivered commit — `recorded_delivery` reads it off the
-# last `## delivery —` entry, the record being the authority on what was
-# delivered — and states that the delivered tree IS the files at that path.
-# WHERE THE TREE CANNOT BE OPENED — no `work/<slug>`, or a worktree git refuses
-# — the raise still happens, in the primary worktree, with the commit unnamed
-# and the briefing saying which tree it stands in.
+# A delivery evaluation never falls back to the builder's worktree or the
+# primary tree. `remit-snapshot` locally exports the recorded full commit into a
+# new owned root, builds an independent inspection repository with no original
+# remote or object alternates, and places only selected authority/rubric/proof
+# inputs beside it. Missing or ambiguous local candidate objects BLOCK instead
+# of fetching or substituting another tree.
 #
-# AND WHATEVER IT IS ASKED TO JUDGE, IT CAN READ: at every gate, the item's kept
-# run output AND the item's own artefacts are on disk in the worktree the raise
-# stands in, at `.remit/work-items/<slug>/`, and they are the record's current
-# copies. `runs_seed` and `item_seed` below hold that up, in both modes:
-#
-#   personal-records mode  the item folder is in the records clone, outside the
-#                          repository, and a seat scoped to its worktree cannot
-#                          open it. Both seeds COPY IN.
-#   all-in mode            the item folder is committed, so it is already checked
-#                          out in `work/<slug>` — as the SNAPSHOT that branch was
-#                          cut from, never refreshed. Both seeds still run, and
-#                          what they replace is a stale file. A copy already
-#                          identical to the record's is left untouched.
-#
-# The runs copy stays (its home ignores itself); the item copy is REMOVED again
-# the moment the raise returns, because a tracked artefact cannot be ignored out
-# of the next `git add -A`.
+# The delivery evaluator receives the current authority, its gate rubric and
+# explicitly selected proof under `inputs/`; private publication declarations,
+# unrelated items and prior evaluator prose are not copied and do not enter the
+# independent object database. It may write only `scratch/` and `results/`.
+# After the whole owned process lifetime is quiescent, source, inputs and Git
+# controls are audited byte-for-byte. Native execution provides this audit and
+# lifecycle boundary, not a hostile-code read-containment boundary.
 #
 # ==============================================================================
 # THE AUTHORITY LOCK — STOP, AMENDMENT AND THE PHASE QUEUE
@@ -866,6 +849,8 @@ set -u
 
 ME=remit
 TAB=$(printf '\t')
+NL='
+'
 
 usage() {
 	cat >&2 <<'EOF'
@@ -1665,13 +1650,205 @@ require_title() { # $1 file
 		die "$1 has no '# Title' heading — the header has nowhere to go"
 }
 
-# The pull request's title is the brief's own — the practitioner's words, not
-# the slug. Falls back to the slug where the brief has no heading a raise could
-# be started from, which `require_title` refuses before a chain runs anyway.
-pr_title() {
-	_pt=$(nocr "$brief" | sed -n 's/^# //p' | sed -n 1p)
-	[ -n "$_pt" ] || _pt=$slug
-	printf '%s: %s\n' "$slug" "$_pt"
+# Delivery publication is deliberately separate from the item's private record.
+# These values are set once per run and all GitHub calls below go through
+# `gh_pr`, so an explicit fork destination can never accidentally fall back to
+# origin for one half of an operation.
+DELIVERY_REMOTE=''
+DELIVERY_REPOSITORY=''
+DELIVERY_BASE=''
+DELIVERY_EXPLICIT=no
+DELIVERY_BRANCH=''
+DELIVERY_OPAQUE_ID=''
+DELIVERY_HAS_REMOTE=no
+
+delivery_destination() {
+	[ -n "$DELIVERY_REMOTE" ] && return 0
+	DELIVERY_REMOTE=origin
+	DELIVERY_BASE=$BASE
+	DELIVERY_REPOSITORY=''
+	DELIVERY_EXPLICIT=no
+	[ -f "$SETTINGSFILE" ] || return 0
+	command -v jq >/dev/null 2>&1 || die "cannot read delivery settings without jq"
+	_dkind=$(jq -er 'if has("delivery") then (.delivery | type) else "absent" end' "$SETTINGSFILE" 2>/dev/null) ||
+		die "cannot read the delivery settings in $SETTINGS_REL"
+	[ "$_dkind" = absent ] && return 0
+	[ "$_dkind" = object ] || die "delivery settings must be an object with push_remote, repository and base"
+	_dcount=$(jq -r '[.delivery.push_remote, .delivery.repository, .delivery.base] | map(type == "string" and length > 0) | map(select(.)) | length' "$SETTINGSFILE" 2>/dev/null) ||
+		die "cannot read the delivery settings in $SETTINGS_REL"
+	[ "$_dcount" = 3 ] || die "delivery settings name push_remote, repository and base together, or name none of them"
+	DELIVERY_REMOTE=$(jq -er '.delivery.push_remote' "$SETTINGSFILE")
+	DELIVERY_REPOSITORY=$(jq -er '.delivery.repository' "$SETTINGSFILE")
+	DELIVERY_BASE=$(jq -er '.delivery.base' "$SETTINGSFILE")
+	case "$DELIVERY_REPOSITORY" in */*) ;; *) die "delivery.repository must be owner/repository" ;; esac
+	case "$DELIVERY_REPOSITORY" in *[!A-Za-z0-9._/-]* | */*/* | /* | */ | '') die "delivery.repository must be owner/repository" ;; esac
+	git -C "$root" check-ref-format --branch "$DELIVERY_BASE" >/dev/null 2>&1 ||
+		die "delivery.base is not a branch name"
+	git -C "$root" remote get-url "$DELIVERY_REMOTE" >/dev/null 2>&1 ||
+		die "delivery.push_remote '$DELIVERY_REMOTE' is not a configured Git remote"
+	DELIVERY_EXPLICIT=yes
+}
+
+gh_pr() { # every public PR operation, always with the configured repository
+	if [ -n "$DELIVERY_REPOSITORY" ]; then
+		gh "$@" --repo "$DELIVERY_REPOSITORY"
+	else
+		gh "$@"
+	fi
+}
+
+# The delivery branch is private record metadata in shadow mode. Existing work
+# branches are never renamed: a legacy branch is recorded as such and retained.
+delivery_branch() { printf '%s\n' "$DELIVERY_BRANCH"; }
+
+random_hex_128() {
+	[ -r /dev/urandom ] && command -v od >/dev/null 2>&1 ||
+		die "cannot act: no OS cryptographic random source for publication identity"
+	_rh=$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')
+	case "$_rh" in
+	????????????????????????????????) case "$_rh" in *[!0-9a-f]*) die "cannot act: OS cryptographic random source returned invalid bytes" ;; esac ;;
+	*) die "cannot act: OS cryptographic random source did not return 128 bits" ;;
+	esac
+	printf '%s\n' "$_rh"
+}
+
+delivery_branch_prepare() {
+	[ -n "$DELIVERY_BRANCH" ] && return 0
+	delivery_destination
+	_dmeta="$item/.delivery.json"
+	if [ -f "$_dmeta" ]; then
+		command -v jq >/dev/null 2>&1 || die "cannot read delivery metadata without jq"
+		DELIVERY_BRANCH=$(jq -er 'select(.schema == 1 and (.branch | type == "string") and (.branch | test("^work/(r-[0-9a-f]{32}|[A-Za-z0-9._/-]+)$")) and (.id | type == "string") and (.id | test("^r-[0-9a-f]{32}$"))) | .branch' "$_dmeta" 2>/dev/null) ||
+			die "cannot act: invalid delivery branch metadata"
+		DELIVERY_OPAQUE_ID=$(jq -er '.id' "$_dmeta")
+		return 0
+	fi
+	_legacy="work/$slug"
+	_remote_legacy=no
+	if git -C "$root" remote get-url "$DELIVERY_REMOTE" >/dev/null 2>&1 &&
+		git -C "$root" ls-remote --exit-code "$DELIVERY_REMOTE" "refs/heads/$_legacy" >/dev/null 2>&1; then
+		_remote_legacy=yes
+	fi
+	if [ -z "$RECORDS_REMOTE" ] || git -C "$root" show-ref --verify --quiet "refs/heads/$_legacy" ||
+		git -C "$root" show-ref --verify --quiet "refs/remotes/$DELIVERY_REMOTE/$_legacy" || [ "$_remote_legacy" = yes ]; then
+		DELIVERY_BRANCH=$_legacy
+		_dlegacy=true
+		git -C "$root" show-ref --verify --quiet "refs/heads/$_legacy" || [ -z "$RECORDS_REMOTE" ] ||
+			say "warning: retaining legacy delivery branch identity; any existing public branch or PR exposure remains."
+	else
+		_dhex=$(random_hex_128)
+		DELIVERY_BRANCH="work/r-$_dhex"
+		_dlegacy=false
+	fi
+	DELIVERY_OPAQUE_ID="r-$(random_hex_128)"
+	jq -n --arg branch "$DELIVERY_BRANCH" --arg id "$DELIVERY_OPAQUE_ID" --argjson legacy "$_dlegacy" \
+		'{schema:1,branch:$branch,id:$id,legacy:$legacy}' >"$_dmeta" || die "cannot save delivery branch metadata"
+	commit_step "remit: $slug record private delivery branch" ".remit/work-items/$slug" || die "cannot make delivery branch metadata durable"
+}
+
+delivery_id() {
+	printf '%s\n' "$DELIVERY_OPAQUE_ID"
+}
+
+delivery_forbidden_path() { # $1 repository-relative product path
+	case "$1" in */publication.md | */.publication.json | */.delivery.json | */.evaluation-retry.json | */runs/*) return 0 ;; esac
+	if [ -n "$RECORDS_REMOTE" ]; then
+		case "$1" in .remit/work-items/* | .remit/settings.local.json | .remit/.install/* | .remit/rules/*) return 0 ;; esac
+		_dm_manifest="$root/.remit/.install/manifest"
+		if [ -f "$_dm_manifest" ] && awk -v p="$1" '($1 == "file" || $1 == "block") && $3 == p { found=1 } END { exit !found }' "$_dm_manifest"; then
+			return 0
+		fi
+	fi
+	return 1
+}
+
+# The optional declaration is private authority even in a dedicated install.
+# It is never part of an ordinary record commit. If an earlier version already
+# tracked it, publication stops: deleting it now would not retract its history.
+publication_primary_safe() {
+	[ "$rec_root" = "$root" ] || return 0
+	_pp="$item_rel/publication.md"
+	if git -C "$root" log --all --format=%H -- "$_pp" 2>/dev/null | grep -q .; then
+		return 1
+	fi
+	git -C "$root" remote get-url origin >/dev/null 2>&1 || return 0
+	git -C "$root" ls-remote origin >"$WORK/publication-primary-refs" 2>/dev/null || return 1
+	while IFS=' 	' read -r _psha _pref; do
+		[ -n "$_psha" ] || continue
+		git -C "$root" cat-file -e "$_psha^{commit}" 2>/dev/null || return 1
+		git -C "$root" rev-list "$_psha" -- "$_pp" 2>/dev/null | grep -q . && return 1
+	done <"$WORK/publication-primary-refs"
+	return 0
+}
+
+publication_digest() {
+	[ -f "$item/publication.md" ] || { printf 'absent\n'; return 0; }
+	git -C "$root" hash-object -- "$item/publication.md"
+}
+
+# Build fingerprints only from inputs this coordinator knows are private. Full
+# file object ids catch binary/exact copies; long lines catch excerpts. Machine
+# checkpoint files are deliberately excluded from the private input set.
+delivery_private_fingerprints() {
+	: >"$WORK/private-hashes"
+	: >"$WORK/private-lines"
+	{
+		[ -f "$LOCALSETTINGS" ] && printf '%s\n' "$LOCALSETTINGS"
+		find "$item" -type f ! -name .delivery.json ! -name .publication.json ! -name .evaluation-retry.json -print 2>/dev/null
+	} | while IFS= read -r _pf; do
+		[ -f "$_pf" ] || continue
+		git -C "$root" hash-object -- "$_pf" >>"$WORK/private-hashes" 2>/dev/null || return 1
+		LC_ALL=C awk 'length($0) >= 32 { print }' "$_pf" >>"$WORK/private-lines" 2>/dev/null || return 1
+		nocr "$_pf" | LC_ALL=C awk 'length($0) >= 32 { print }' >>"$WORK/private-lines" 2>/dev/null || return 1
+	done || return 1
+	sort -u "$WORK/private-hashes" -o "$WORK/private-hashes"
+	sort -u "$WORK/private-lines" -o "$WORK/private-lines"
+}
+
+# Compare every object newly reachable at the frozen destination. This scans
+# ancestor commits too, so deleting a private file in the final tree is not an
+# escape. The refs file is supplied by the caller and revalidated before push.
+delivery_outgoing_safe() { # $1 full candidate SHA  $2 frozen ls-remote output
+	_candidate=$1 _refs=$2
+	awk 'NF >= 2 { print $1 }' "$_refs" | sort -u >"$WORK/delivery-ref-shas"
+	if [ -s "$WORK/delivery-ref-shas" ]; then
+		git -C "$root" rev-list "$_candidate" --not $(cat "$WORK/delivery-ref-shas") >"$WORK/delivery-outgoing" 2>/dev/null || return 1
+	else
+		git -C "$root" rev-list "$_candidate" >"$WORK/delivery-outgoing" 2>/dev/null || return 1
+	fi
+	while IFS= read -r _dc; do
+		# A merge can introduce a path only relative to one parent. Without -m,
+		# diff-tree emits no per-parent path set and that path disappears from
+		# this boundary, including a path removed while resolving the merge.
+		git -C "$root" diff-tree --root -m --no-commit-id --name-only -r "$_dc" >"$WORK/delivery-paths" || return 1
+		while IFS= read -r _dp; do
+			case "$_dp" in '"'* | -* | *'\'*) return 1 ;; esac
+			delivery_forbidden_path "$_dp" && return 1
+		done <"$WORK/delivery-paths"
+	done <"$WORK/delivery-outgoing"
+	delivery_private_fingerprints || return 1
+	git -C "$root" rev-list --objects "$_candidate" --not $(cat "$WORK/delivery-ref-shas" 2>/dev/null) >"$WORK/delivery-objects" 2>/dev/null || return 1
+	while IFS=' ' read -r _oid _oname; do
+		[ -n "$_oid" ] || continue
+		_otype=$(git -C "$root" cat-file -t "$_oid" 2>/dev/null) || return 1
+		case "$_otype" in
+		blob)
+			grep -qxF "$_oid" "$WORK/private-hashes" 2>/dev/null && return 1
+			if [ -s "$WORK/private-lines" ]; then
+				git -C "$root" cat-file blob "$_oid" >"$WORK/public-blob" 2>/dev/null || return 1
+				LC_ALL=C grep -F -f "$WORK/private-lines" "$WORK/public-blob" >/dev/null 2>&1 && return 1
+			fi
+			;;
+		commit)
+			if [ -s "$WORK/private-lines" ]; then
+				git -C "$root" cat-file commit "$_oid" >"$WORK/public-meta" 2>/dev/null || return 1
+				printf '%s\n' "$_oname" >>"$WORK/public-meta"
+				LC_ALL=C grep -F -f "$WORK/private-lines" "$WORK/public-meta" >/dev/null 2>&1 && return 1
+			fi
+			;;
+		esac
+	done <"$WORK/delivery-objects"
+	return 0
 }
 
 # Re-emit the whole script-owned header as one block directly under the title.
@@ -1874,7 +2051,8 @@ lock_drop() {
 MARKER_SWEPT=no
 
 # THE ITEM FOLDER IS RECORD, NOT SCRATCH. What it holds is known: `brief.md`,
-# `log.md`, `research.md`, the phase files (any `*.md` at the top) and `runs/`.
+# `log.md`, `research.md`, the phase files (any `*.md` at the top), `runs/`,
+# and the machine-owned `.evaluation-retry.json` checkpoint.
 # Anything else under it is NOT record: left where it is, UNSTAGED, never
 # deleted, and the run says what it left and where, once. The archive the same.
 record_only() { # $@ the pathspecs about to be committed
@@ -1887,18 +2065,26 @@ record_only() { # $@ the pathspecs about to be committed
 		for _ro_f in $(git -C "$CIN_ROOT" diff --cached --name-only -- "$_ro_p" 2>/dev/null); do
 			_ro_rel=${_ro_f#"$_ro_p"/}
 			[ "$_ro_rel" = "$_ro_f" ] && continue
+			# publication.md is private publishing authority, not an ordinary
+			# dedicated record. A shadow record lives in its separate private
+			# repository and may retain it there.
+			if [ "$rec_root" = "$root" ] && [ "$_ro_rel" = publication.md ]; then
+				git -C "$CIN_ROOT" reset -q -- "$_ro_f" 2>/dev/null
+				_ro_left="${_ro_left:+$_ro_left }$_ro_f"
+				continue
+			fi
 			case "$_ro_rel" in
 			*/*)
 				case "$_ro_rel" in runs/*) continue ;; esac
 				;;
-			*.md | "$marker_name") continue ;;
+			*.md | .evaluation-retry.json | .delivery.json | .publication.json | "$marker_name") continue ;;
 			esac
 			git -C "$CIN_ROOT" reset -q -- "$_ro_f" 2>/dev/null
 			_ro_left="${_ro_left:+$_ro_left }$_ro_f"
 		done
 	done
 	[ -n "$_ro_left" ] &&
-		printf '%s: not record, left unstaged — a work item holds brief.md, log.md, research.md, its phase files and runs/, and nothing else: %s\n' "$ME" "$_ro_left" >&2
+		printf '%s: not record, left unstaged — a work item holds brief.md, log.md, research.md, its phase files, runs/ and its evaluation retry checkpoint: %s\n' "$ME" "$_ro_left" >&2
 	return 0
 }
 markers_untrack() {
@@ -2260,6 +2446,11 @@ list_items() { # $1 active|parked
 
 INVOKE=${REMIT_INVOKE:-}
 [ -n "$INVOKE" ] || INVOKE="$root/bin/remit-invoke"
+SNAPSHOT=${REMIT_SNAPSHOT:-}
+if [ -z "$SNAPSHOT" ]; then
+	_self_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P) || die "cannot locate remit-snapshot beside $0"
+	SNAPSHOT="$_self_dir/remit-snapshot"
+fi
 
 # Which file is this item's authority: the brief, or the phase it points at. The
 # pointer is read by `phase_pointer`, once, for this and for the queue both.
@@ -2741,11 +2932,13 @@ pr_from_record() {
 AT_GATE=''
 AT_ROUND=1
 AT_AWAITING=no
+AT_PUBLISH=no
 
 resume_point() { # $1 the gate the item's stage will run
 	AT_GATE=''
 	AT_ROUND=1
 	AT_AWAITING=no
+	AT_PUBLISH=no
 	case "$1" in accepted | closed) ;; *) return 0 ;; esac
 	[ -f "$log" ] || return 0
 	# kind, then the gate the last verdict was into, then its round.
@@ -2776,6 +2969,53 @@ resume_point() { # $1 the gate the item's stage will run
 	# leaves this gate at its first round either way.
 	[ "$_rgate" = "$1" ] && [ "$_rround" -gt 0 ] && AT_ROUND=$((_rround + 1))
 	[ "$_rkind" = delivery ] && AT_AWAITING=yes
+	# A publication checkpoint is newer and more precise than the free-text
+	# delivery history. It is a trusted machine-owned file, not reconstructed
+	# from legacy log headings.
+	publication_checkpoint_load
+	_pcl=$?
+	if [ "$_pcl" = 2 ]; then
+		escalate "cannot act: invalid publication checkpoint"
+	elif [ "$_pcl" = 0 ] && [ "$PC_NEXT" = publish ]; then
+		[ "$PC_GATE" = "$1" ] || escalate "cannot act: publication checkpoint names the wrong gate"
+		AT_GATE=$1
+		AT_ROUND=$PC_ROUND
+		AT_AWAITING=yes
+		AT_PUBLISH=yes
+	fi
+	# The new retry action is a machine-owned file, never interpreted out of
+	# legacy raw-return prose. Keep the old reader only for old handoffs.
+	_retry_file="$item/.evaluation-retry.json"
+	_retry_round=''
+	if [ -f "$_retry_file" ]; then
+		jq -e 'type == "object" and .schema == 1 and
+			(.next == "legacy" or (.next == "evaluate" and
+			(.gate == "refined" or .gate == "accepted" or .gate == "closed") and
+			(.candidate | type == "string") and
+			(.round | type == "number" and . >= 1 and . == floor)))' \
+			"$_retry_file" >/dev/null 2>&1 || escalate "cannot act: invalid evaluation retry"
+		_rp_candidate=$(exact_candidate 2>/dev/null) || _rp_candidate=''
+		_retry_round=$(jq -er --arg gate "$1" --arg candidate "$_rp_candidate" '
+			select(.schema == 1 and .next == "evaluate" and .gate == $gate and .candidate == $candidate)
+			| .round | select(type == "number" and . >= 1 and . == floor)
+		' "$_retry_file" 2>/dev/null) || _retry_round=''
+	else
+		# Old raw-return records cannot authenticate a stop reason. For every
+		# old verdict handoff choose evaluation, never reconstruct a repair
+		# instruction by interpreting that prose. A new FAIL can supply it.
+		case "$_rkind" in
+		verdict)
+			if [ "$_rgate" = "$1" ]; then
+				_retry_round=$_rround
+				[ "$_retry_round" -gt 0 ] || _retry_round=1
+			fi
+			;;
+		esac
+	fi
+	if [ -n "$_retry_round" ]; then
+		AT_AWAITING=yes
+		AT_ROUND=$_retry_round
+	fi
 	return 0
 }
 
@@ -2784,8 +3024,13 @@ resume_point() { # $1 the gate the item's stage will run
 resume_point_note() {
 	[ -n "$AT_GATE" ] || return 0
 	if [ "$AT_AWAITING" = yes ]; then
-		printf 'a delivery is on the branch with no verdict on it, so round %s at the gate into %s is EVALUATED, not rebuilt' \
-			"$AT_ROUND" "$AT_GATE"
+		if [ "$AT_PUBLISH" = yes ]; then
+			printf 'candidate %s awaits publication, so round %s at the gate into %s resumes that exact candidate without rebuilding' \
+				"$PC_CANDIDATE" "$AT_ROUND" "$AT_GATE"
+		else
+			printf 'a delivery awaits evaluation, so round %s at the gate into %s is EVALUATED, not rebuilt' \
+				"$AT_ROUND" "$AT_GATE"
+		fi
 		return 0
 	fi
 	[ "$AT_ROUND" -gt 1 ] || return 0
@@ -2802,6 +3047,11 @@ resume_point_note() {
 PR_DRAFT_NOTE=''
 pr_to_draft() {
 	PR_DRAFT_NOTE=''
+	delivery_destination
+	if ! delivery_destination_matches; then
+		PR_DRAFT_NOTE='the configured delivery destination changed, so the pull request was NOT changed'
+		return 0
+	fi
 	_pn=$(recorded_pr)
 	if [ -z "$_pn" ]; then
 		PR_DRAFT_NOTE='no pull request is recorded for this item, so there was none to put back to draft'
@@ -2811,7 +3061,7 @@ pr_to_draft() {
 		PR_DRAFT_NOTE="\`gh\` is not on this PATH, so pull request #$_pn was NOT put back to draft"
 		return 0
 	fi
-	if out=$(cd "$root" && gh pr ready "$_pn" --undo 2>&1); then
+	if out=$(cd "$root" && gh_pr pr ready "$_pn" --undo 2>&1); then
 		PR_DRAFT_NOTE="pull request #$_pn is back to draft"
 		return 0
 	fi
@@ -2908,15 +3158,443 @@ raise_log_keep() { # $1 role  $2 the working tree the raise ran in
 	return 0
 }
 
+# The delivery evaluator's workspace is not a worktree.  It is a fresh export
+# of the durable candidate, with selected inputs beside it and an independent
+# local Git repository.  These globals exist only across one exact invoke.
+EXACT_MODE=no
+EXACT_OUT='' EXACT_RUN_ID='' EXACT_SOURCE='' EXACT_INPUTS=''
+EXACT_SCRATCH='' EXACT_RESULTS='' EXACT_BASELINE='' EXACT_EVIDENCE=''
+# These names are a private coordinator-to-exact-worker interface, never user
+# configuration.  Do not let a caller's environment introduce that interface
+# into ordinary research, build or refinement raises.
+unset REMIT_EXACT_EVALUATION REMIT_EXACT_INPUTS REMIT_EXACT_SCRATCH \
+	REMIT_EXACT_RESULTS REMIT_EXACT_COMPLETION REMIT_EXACT_RUN_ID
+
+exact_candidate() { # full local commit, authoritative checkpoint first
+	publication_checkpoint_load
+	_ec=$?
+	if [ "$_ec" = 0 ]; then
+		[ "$PC_NEXT" = evaluate ] && [ "$PC_PHASE" = published ] || return 1
+		printf '%s\n' "$PC_CANDIDATE"
+		return 0
+	fi
+	[ "$_ec" = 1 ] || return 1
+	_ep=$(recorded_delivery)
+	case "$_ep" in '' | *[!0-9a-fA-F]*) return 1 ;; esac
+	# rev-parse refuses an ambiguous abbreviation.  No fetch and no branch name
+	# is tried; this is the one local legacy migration allowed here.
+	_ecfull=$(git -C "$root" rev-parse --verify "$_ep^{commit}" 2>/dev/null) || return 1
+	case "$_ecfull" in ????????????????????????????????????????) printf '%s\n' "$_ecfull" ;; *) return 1 ;; esac
+}
+
+exact_portable_rel() { # one unambiguous spelling on POSIX and Windows
+	_epr=$1
+	case "$_epr" in '' | /* | . | .. | */ | *//* | ../* | */../* | */.. | */./* | */. | *"$TAB"* | *"$NL"* | *\\*) return 1 ;; esac
+	while :; do
+		case "$_epr" in */*) _epc=${_epr%%/*}; _epr=${_epr#*/} ;; *) _epc=$_epr; _epr='' ;; esac
+		case "$_epc" in *:* | *. | *' ') return 1 ;; esac
+		_epbase=${_epc%%.*}
+		case "$_epbase" in
+		[Cc][Oo][Nn] | [Pp][Rr][Nn] | [Aa][Uu][Xx] | [Nn][Uu][Ll] | [Cc][Oo][Mm][1-9] | [Ll][Pp][Tt][1-9] | [Gg][Ii][Tt]~[0-9]*) return 1 ;;
+		esac
+		[ -n "$_epr" ] || break
+	done
+	return 0
+}
+
+exact_input_add() { # source, relative target
+	[ -f "$1" ] && [ ! -L "$1" ] || return 1
+	case "$1" in *"$TAB"* | *"$NL"* | *\\*) return 1 ;; esac
+	exact_portable_rel "$2" || return 1
+	while IFS="$TAB" read -r _eia_source _eia_target; do
+		[ "$_eia_target" != "$2" ] || return 1
+	done <"$WORK/exact-inputs.tsv"
+	printf '%s\t%s\n' "$1" "$2" >>"$WORK/exact-inputs.tsv"
+}
+
+exact_prepare_evidence() { # candidate; preserve why setup failed even after safe cleanup
+	_epe_candidate=$1
+	EXACT_EVIDENCE="$runs/evaluations/$EXACT_RUN_ID"
+	ensure_dir "$runs/evaluations" && mkdir "$EXACT_EVIDENCE" || return 1
+	for _epe in "$WORK/exact-inputs.json" "$WORK/exact-exclude.json" "$WORK/exact-prepare.err"; do
+		[ -f "$_epe" ] && [ ! -L "$_epe" ] && cp -P "$_epe" "$EXACT_EVIDENCE/${_epe##*/}" || :
+	done
+	printf '%s\n' prepare-failed >"$EXACT_EVIDENCE/outcome"
+	jq -n --arg run_id "$EXACT_RUN_ID" --arg candidate "$_epe_candidate" \
+		'{schema:1,run_id:$run_id,candidate:$candidate,state:"prepare-failed"}' >"$EXACT_EVIDENCE/prepare.json"
+}
+
+exact_prepare_dispose() { # candidate; remove safely or retain an atomic locator
+	_epd_candidate=$1
+	_epd_locator="$runs/.evaluation-snapshot.json"
+	if sh "$SNAPSHOT" cleanup --out "$EXACT_OUT" --run-id "$EXACT_RUN_ID" >/dev/null 2>"$WORK/exact-cleanup.err"; then
+		rm -f "$_epd_locator"
+		return 0
+	fi
+	_epd_tmp="$_epd_locator.retain-$$"
+	jq -n --arg run_id "$EXACT_RUN_ID" --arg out "$EXACT_OUT" --arg candidate "$_epd_candidate" --arg gate "$GATE" \
+		'{schema:1,run_id:$run_id,out:$out,candidate:$candidate,gate:$gate,state:"prepare-failed"}' >"$_epd_tmp" &&
+		mv "$_epd_tmp" "$_epd_locator" || return 1
+	return 0
+}
+
+exact_prepare() { # candidate -> descriptor globals; 2 means BLOCKED
+	_candidate=$1
+	[ -x "$SNAPSHOT" ] || [ -f "$SNAPSHOT" ] || return 2
+	runs_open_at "$runs" || return 2
+	_locator="$runs/.evaluation-snapshot.json"
+	if [ -e "$_locator" ] || [ -L "$_locator" ]; then
+		if [ -f "$_locator" ] && [ ! -L "$_locator" ] &&
+			jq -e --arg candidate "$_candidate" --arg gate "$GATE" \
+			'.schema == 1 and .state == "prepared" and .candidate == $candidate and .gate == $gate
+			 and (.run_id | type == "string" and length > 0) and (.out | type == "string" and length > 0)' \
+			"$_locator" >/dev/null 2>&1; then
+			say "$ME: the prior exact evaluation remains at $(jq -r .out "$_locator"); it must reach a proved completion before another evaluator can be raised"
+		else
+			say "$ME: the retained exact-evaluation locator is invalid or belongs to another candidate/gate; it was not overwritten"
+		fi
+		return 2
+	fi
+	_snap_parent="$runs/.evaluation-snapshots"
+	ensure_dir "$_snap_parent" || return 2
+	_seed="$(date -u +%Y%m%dT%H%M%S%N 2>/dev/null)-$$-$ROUND-$slug"
+	_nonce=$(printf '%s' "$_seed" | git hash-object --stdin 2>/dev/null) || return 2
+	EXACT_RUN_ID="eval-$_nonce"
+	EXACT_OUT="$_snap_parent/$EXACT_RUN_ID"
+	[ ! -e "$EXACT_OUT" ] && [ ! -L "$EXACT_OUT" ] || return 2
+	: >"$WORK/exact-inputs.tsv"
+	exact_input_add "$AUTHORITY" authority/current.md || return 2
+	exact_input_add "$(gate_file "$GATE")" "rubric/$GATE.md" || return 2
+	[ ! -f "$item/research.md" ] || exact_input_add "$item/research.md" item/research.md || return 2
+	_phase=$(phase_pointer)
+	[ -z "$_phase" ] || exact_input_add "$item/$_phase" "item/$_phase" || return 2
+	if [ -s "$WORK/mustfix" ]; then
+		exact_input_add "$WORK/mustfix" retry/must-fix.txt || return 2
+	fi
+	if [ "$GATE" = closed ] && [ -f "$log" ]; then
+		# Closing receives the machine decision/disposition projection, never prior
+		# evaluators' quoted prose or the conductor transcript whole.
+		nocr "$log" | awk '/^- finding [0-9]+ disposition: / || /^- ruling: / || /^- licence: / || /^- gate: / || /^- verdict: /' >"$WORK/closing-decisions.txt"
+		exact_input_add "$WORK/closing-decisions.txt" item/decisions.txt || return 2
+	fi
+	# Item-scoped proof is selected, but an earlier evaluator's raise log is not
+	# an input to an independent judgement.
+	if [ -d "$runs" ]; then
+		for _pf in "$runs"/*; do
+			[ -f "$_pf" ] && [ ! -L "$_pf" ] || continue
+			case "${_pf##*/}" in raise-evaluate-*) continue ;; esac
+			exact_input_add "$_pf" "proof/${_pf##*/}" || return 2
+		done
+	fi
+	jq -Rn '[inputs | select(length > 0) | split("\t") | {source:.[0],path:.[1]}] | {schema:1,inputs:.}' \
+		<"$WORK/exact-inputs.tsv" >"$WORK/exact-inputs.json" || return 2
+	# Private records and the installer's coordinator payload never enter the
+	# exported tree or its independent object database.  A malformed installed
+	# path blocks preparation instead of weakening the exclusion.
+	printf '%s\n' .remit >"$WORK/exact-exclusions.list"
+	_install_manifest="$root/.remit/.install/manifest"
+	if [ -f "$_install_manifest" ] && [ ! -L "$_install_manifest" ]; then
+		sed -n 's/^file [0-9a-f][0-9a-f]* //p' "$_install_manifest" | while IFS= read -r _installed_path; do
+			exact_portable_rel "$_installed_path" || exit 2
+			printf '%s\n' "$_installed_path"
+		done >>"$WORK/exact-exclusions.list" || return 2
+	fi
+	jq -Rn '[inputs | select(length > 0)] | unique | {schema:1,exclude:.}' \
+		<"$WORK/exact-exclusions.list" >"$WORK/exact-exclude.json" || return 2
+	sh "$SNAPSHOT" prepare --repo "$root" --candidate "$_candidate" \
+		--exclude "$WORK/exact-exclude.json" --inputs "$WORK/exact-inputs.json" \
+		--out "$EXACT_OUT" --run-id "$EXACT_RUN_ID" --coordinator-pid "$$" \
+		>"$WORK/exact-descriptor.json" 2>"$WORK/exact-prepare.err"
+	_ep_rc=$?
+	if [ "$_ep_rc" != 0 ]; then
+		exact_prepare_evidence "$_candidate" || :
+		if [ -d "$EXACT_OUT" ] && [ -f "$EXACT_OUT/.remit-owner.json" ]; then
+			exact_prepare_dispose "$_candidate" || :
+		fi
+		return 2
+	fi
+	if ! jq -e --arg candidate "$_candidate" --arg out "$EXACT_OUT" '
+		.schema == 1 and .candidate == $candidate and .out == $out
+		and .source == ($out + "/source") and .inputs == ($out + "/inputs")
+		and .scratch == ($out + "/scratch") and .results == ($out + "/results")
+		and (.baseline_oid | type == "string" and test("^[0-9a-f]{40}$"))
+	' "$WORK/exact-descriptor.json" >/dev/null 2>&1; then
+		exact_prepare_dispose "$_candidate" || :
+		return 2
+	fi
+	EXACT_SOURCE="$EXACT_OUT/source"
+	EXACT_INPUTS="$EXACT_OUT/inputs"
+	EXACT_SCRATCH="$EXACT_OUT/scratch"
+	EXACT_RESULTS="$EXACT_OUT/results"
+	EXACT_BASELINE=$(jq -er .baseline_oid "$WORK/exact-descriptor.json") || {
+		exact_prepare_dispose "$_candidate" || :
+		return 2
+	}
+	if ! cp -P "$WORK/exact-descriptor.json" "$EXACT_OUT/coordinator/descriptor.json"; then
+		exact_prepare_dispose "$_candidate" || :
+		return 2
+	fi
+	_descriptor_oid=$(git -C "$root" hash-object --no-filters "$WORK/exact-descriptor.json") || {
+		exact_prepare_dispose "$_candidate" || :
+		return 2
+	}
+	_baseline_manifest_oid=$(git -C "$root" hash-object --no-filters "$EXACT_OUT/audit-baseline.json") || {
+		exact_prepare_dispose "$_candidate" || :
+		return 2
+	}
+	_locator_tmp="$_locator.tmp"
+	if ! jq -n --arg run_id "$EXACT_RUN_ID" --arg out "$EXACT_OUT" --arg candidate "$_candidate" --arg gate "$GATE" \
+		--arg source "$EXACT_SOURCE" --arg inputs "$EXACT_INPUTS" --arg scratch "$EXACT_SCRATCH" --arg results "$EXACT_RESULTS" \
+		--arg baseline_oid "$EXACT_BASELINE" --arg descriptor_oid "$_descriptor_oid" --arg baseline_manifest_oid "$_baseline_manifest_oid" \
+		--arg completion "$EXACT_OUT/coordinator/completion.json" --arg returned "$EXACT_OUT/coordinator/return" \
+		--arg stderr "$EXACT_OUT/coordinator/invoke.err" --arg provenance "$EXACT_OUT/coordinator/provenance" \
+		'{schema:1,run_id:$run_id,out:$out,candidate:$candidate,gate:$gate,state:"prepared",
+		 source:$source,inputs:$inputs,scratch:$scratch,results:$results,baseline_oid:$baseline_oid,
+		 descriptor_oid:$descriptor_oid,baseline_manifest_oid:$baseline_manifest_oid,
+		 completion:$completion,return:$returned,stderr:$stderr,provenance:$provenance}' >"$_locator_tmp" ||
+		! mv "$_locator_tmp" "$_locator"; then
+		rm -f "$_locator_tmp" 2>/dev/null || :
+		exact_prepare_dispose "$_candidate" || :
+		return 2
+	fi
+	EXACT_MODE=yes
+	return 0
+}
+
+exact_recover() { # candidate; 0 recovered, 1 no locator, 3 blocked, 4 invalid
+	_er_candidate=$1
+	_er_locator="$runs/.evaluation-snapshot.json"
+	[ -e "$_er_locator" ] || [ -L "$_er_locator" ] || return 1
+	EXACT_RECOVER_STOP='the retained exact-evaluation locator is invalid; it was not overwritten'
+	[ -f "$_er_locator" ] && [ ! -L "$_er_locator" ] || return 4
+	jq -e --arg candidate "$_er_candidate" --arg gate "$GATE" '
+		type == "object" and ((keys | sort) == ["baseline_manifest_oid","baseline_oid","candidate","completion","descriptor_oid","gate","inputs","out","provenance","results","return","run_id","schema","scratch","source","state","stderr"])
+		and .schema == 1 and .state == "prepared" and .candidate == $candidate and .gate == $gate
+		and all(.run_id,.out,.source,.inputs,.scratch,.results,.completion,.return,.stderr,.provenance; type == "string" and length > 0)
+		and all(.baseline_oid,.descriptor_oid,.baseline_manifest_oid; type == "string" and test("^[0-9a-f]{40}$"))
+	' "$_er_locator" >/dev/null 2>&1 || return 4
+	EXACT_RUN_ID=$(jq -r .run_id "$_er_locator")
+	case "$EXACT_RUN_ID" in *[!A-Za-z0-9_.-]* | '' | .* | *..) return 4 ;; esac
+	EXACT_OUT=$(jq -r .out "$_er_locator")
+	_er_expected="$runs/.evaluation-snapshots/$EXACT_RUN_ID"
+	[ "$EXACT_OUT" = "$_er_expected" ] || return 4
+	EXACT_SOURCE=$(jq -r .source "$_er_locator")
+	EXACT_INPUTS=$(jq -r .inputs "$_er_locator")
+	EXACT_SCRATCH=$(jq -r .scratch "$_er_locator")
+	EXACT_RESULTS=$(jq -r .results "$_er_locator")
+	EXACT_BASELINE=$(jq -r .baseline_oid "$_er_locator")
+	[ "$EXACT_SOURCE" = "$EXACT_OUT/source" ] && [ "$EXACT_INPUTS" = "$EXACT_OUT/inputs" ] &&
+		[ "$EXACT_SCRATCH" = "$EXACT_OUT/scratch" ] && [ "$EXACT_RESULTS" = "$EXACT_OUT/results" ] || return 4
+	_er_completion=$(jq -r .completion "$_er_locator")
+	_er_return=$(jq -r .return "$_er_locator")
+	_er_stderr=$(jq -r .stderr "$_er_locator")
+	_er_prov=$(jq -r .provenance "$_er_locator")
+	[ "$_er_completion" = "$EXACT_OUT/coordinator/completion.json" ] &&
+		[ "$_er_return" = "$EXACT_OUT/coordinator/return" ] &&
+		[ "$_er_stderr" = "$EXACT_OUT/coordinator/invoke.err" ] &&
+		[ "$_er_prov" = "$EXACT_OUT/coordinator/provenance" ] || return 4
+	sh "$SNAPSHOT" validate-owned --out "$EXACT_OUT" --run-id "$EXACT_RUN_ID" >/dev/null 2>"$WORK/exact-recover-owner.err" || return 4
+	_er_descriptor="$EXACT_OUT/coordinator/descriptor.json"
+	[ -f "$_er_descriptor" ] && [ ! -L "$_er_descriptor" ] || return 4
+	[ "$(git -C "$root" hash-object --no-filters "$_er_descriptor" 2>/dev/null)" = "$(jq -r .descriptor_oid "$_er_locator")" ] || return 4
+	[ -f "$EXACT_OUT/audit-baseline.json" ] && [ ! -L "$EXACT_OUT/audit-baseline.json" ] || return 4
+	[ "$(git -C "$root" hash-object --no-filters "$EXACT_OUT/audit-baseline.json" 2>/dev/null)" = "$(jq -r .baseline_manifest_oid "$_er_locator")" ] || return 4
+	jq -e --arg candidate "$_er_candidate" --arg out "$EXACT_OUT" '
+		.schema == 1 and .candidate == $candidate and .out == $out
+		and .source == ($out + "/source") and .inputs == ($out + "/inputs")
+		and .scratch == ($out + "/scratch") and .results == ($out + "/results")
+		and (.baseline_oid | type == "string" and test("^[0-9a-f]{40}$"))
+	' "$_er_descriptor" >/dev/null 2>&1 || return 4
+	jq -e --arg source "$EXACT_SOURCE" --arg inputs "$EXACT_INPUTS" --arg scratch "$EXACT_SCRATCH" \
+		--arg results "$EXACT_RESULTS" --arg baseline "$EXACT_BASELINE" \
+		'.source == $source and .inputs == $inputs and .scratch == $scratch and .results == $results and .baseline_oid == $baseline' \
+		"$_er_descriptor" >/dev/null 2>&1 || return 4
+	EXACT_MODE=yes
+	if [ ! -e "$_er_completion" ] && [ ! -L "$_er_completion" ]; then
+		EXACT_RECOVER_STOP='the retained evaluator process lifetime has not reached a proved completion; no second evaluator was raised'
+		return 3
+	fi
+	[ -f "$_er_completion" ] && [ ! -L "$_er_completion" ] || { EXACT_RECOVER_STOP='the retained evaluator completion record is not a regular file'; return 4; }
+	case "$(uname -s 2>/dev/null || :)" in MSYS* | MINGW* | CYGWIN*) _er_method=windows-job ;; *) _er_method=linux-pid-namespace ;; esac
+	jq -e --arg id "$EXACT_RUN_ID" --arg method "$_er_method" \
+		'.schema == 1 and .state == "reaped" and .run_id == $id and .method == $method' "$_er_completion" >/dev/null 2>&1 || {
+		EXACT_RECOVER_STOP='the retained evaluator completion record is invalid'
+		return 4
+	}
+	for _er_file in "$_er_return" "$_er_stderr" "$_er_prov"; do
+		[ -f "$_er_file" ] && [ ! -L "$_er_file" ] || { EXACT_RECOVER_STOP='the completed retained evaluation is missing coordinator evidence'; return 4; }
+	done
+	cp -P "$_er_descriptor" "$WORK/exact-descriptor.json" &&
+		cp -P "$_er_return" "$WORK/verdict" && cp -P "$_er_stderr" "$WORK/invoke.err" &&
+		cp -P "$_er_prov" "$WORK/prov" && cp -P "$_er_completion" "$WORK/exact-completion.json" || {
+		EXACT_RECOVER_STOP='the completed retained evaluation could not be restored'; return 3;
+	}
+	_audit_scratch="$WORK/audit-$EXACT_RUN_ID"
+	sh "$SNAPSHOT" audit --out "$EXACT_OUT" --baseline-oid "$EXACT_BASELINE" --scratch "$_audit_scratch" \
+		>"$WORK/exact-audit.out" 2>"$WORK/exact-audit.err"
+	_er_audit=$?
+	exact_audit_summary || :
+	# Outcome names describe the audit, not the coordinator attempt.  A normal
+	# run interrupted after this atomic harvest and a recovery of that run must
+	# validate the same finalized evidence record.
+	exact_harvest "$([ "$_er_audit" = 0 ] && printf clean || printf invalid)"
+	_er_harvest=$?
+	if [ "${REMIT_TEST_STOP_AFTER_EXACT_HARVEST:-}" = "$EXACT_RUN_ID" ] || [ "${REMIT_TEST_STOP_AFTER_EXACT_HARVEST:-}" = yes ]; then
+		EXACT_RECOVER_STOP='test interruption after exact evidence harvest'
+		return 3
+	fi
+	if [ "$_er_audit" = 4 ]; then
+		exact_retry_write || { EXACT_RECOVER_STOP='the invalid recovered evaluation retry could not be retained'; return 3; }
+		if [ "$_er_harvest" != 0 ]; then
+			EXACT_RECOVER_STOP='the invalid recovered evaluation evidence could not be finalized; the owned snapshot was retained'
+			return 4
+		fi
+		exact_cleanup || :
+		return 4
+	fi
+	if [ "$_er_harvest" = 2 ] || [ "$_er_harvest" = 4 ]; then
+		EXACT_RECOVER_STOP='the recovered evaluator results or finalized evidence failed integrity validation; the owned snapshot was retained'
+		return 4
+	fi
+	if [ "$_er_audit" != 0 ] || [ "$_er_harvest" != 0 ]; then
+		EXACT_RECOVER_STOP='the completed retained evaluation failed audit or safe evidence harvest'
+		[ "$_er_harvest" != 0 ] || exact_cleanup || :
+		return 3
+	fi
+	exact_cleanup || { EXACT_RECOVER_STOP='the recovered owned evaluation snapshot could not be safely cleaned up'; return 3; }
+	return 0
+}
+
+exact_retry_write() {
+	jq -n --arg gate "$GATE" --arg candidate "$EVAL_DELIVERY" --argjson round "$ROUND" \
+		'{schema:1,next:"evaluate",gate:$gate,candidate:$candidate,round:$round}' \
+		>"$item/.evaluation-retry.json.tmp" && mv "$item/.evaluation-retry.json.tmp" "$item/.evaluation-retry.json"
+}
+
+exact_audit_summary() { # retain bounded current manifests and their baseline diff
+	_eas_dir="$WORK/audit-$EXACT_RUN_ID"
+	: >"$WORK/exact-audit-diff.txt"
+	for _eas_name in source inputs git_raw git; do
+		case "$_eas_name" in
+		source) _eas_current=source.current ;;
+		inputs) _eas_current=inputs.current ;;
+		git_raw) _eas_current=git.raw.current ;;
+		git) _eas_current=git.current ;;
+		esac
+		[ -f "$_eas_dir/$_eas_current" ] && [ ! -L "$_eas_dir/$_eas_current" ] || continue
+		jq -j --arg key "$_eas_name" '.[$key]' "$EXACT_OUT/audit-baseline.json" >"$WORK/exact-$_eas_name.expected" 2>/dev/null || continue
+		{
+			printf '%s\n' "--- baseline/$_eas_name" "+++ current/$_eas_name"
+			diff -u "$WORK/exact-$_eas_name.expected" "$_eas_dir/$_eas_current" 2>/dev/null | sed -n '3,$p' || :
+		} | awk 'NR <= 200 { print substr($0,1,1000) }' >>"$WORK/exact-audit-diff.txt"
+	done
+}
+
+exact_evidence_valid() { # evidence directory, expected outcome
+	_eev_dir=$1 _eev_state=$2
+	[ -d "$_eev_dir" ] && [ ! -L "$_eev_dir" ] || return 1
+	[ -f "$_eev_dir/finalized.json" ] && [ ! -L "$_eev_dir/finalized.json" ] &&
+		[ -f "$_eev_dir/evidence.manifest" ] && [ ! -L "$_eev_dir/evidence.manifest" ] || return 1
+	_eev_manifest_oid=$(git -C "$root" hash-object --no-filters "$_eev_dir/evidence.manifest" 2>/dev/null) || return 1
+	jq -e --arg run "$EXACT_RUN_ID" --arg candidate "$EVAL_DELIVERY" --arg outcome "$_eev_state" --arg manifest "$_eev_manifest_oid" '
+		.schema == 1 and .state == "finalized" and .run_id == $run and .candidate == $candidate
+		and .outcome == $outcome and .manifest_oid == $manifest
+	' "$_eev_dir/finalized.json" >/dev/null 2>&1 || return 1
+	[ -z "$(find "$_eev_dir" -type l -print -quit 2>/dev/null)" ] || return 1
+	_eev_listed=$(wc -l <"$_eev_dir/evidence.manifest" | tr -d ' ')
+	_eev_actual=$(find "$_eev_dir" -type f -print | wc -l | tr -d ' ')
+	[ "$_eev_actual" = "$((_eev_listed + 2))" ] || return 1
+	while IFS="$TAB" read -r _eev_size _eev_oid _eev_rel; do
+		[ -n "$_eev_rel" ] && exact_portable_rel "$_eev_rel" || return 1
+		_eev_file="$_eev_dir/$_eev_rel"
+		[ -f "$_eev_file" ] && [ ! -L "$_eev_file" ] || return 1
+		[ "$(wc -c <"$_eev_file" | tr -d ' ')" = "$_eev_size" ] || return 1
+		[ "$(git -C "$root" hash-object --no-filters "$_eev_file" 2>/dev/null)" = "$_eev_oid" ] || return 1
+	done <"$_eev_dir/evidence.manifest"
+}
+
+exact_harvest() { # outcome label; bounded, regular, no-follow, atomic evidence
+	_eh_state=$1
+	EXACT_EVIDENCE="$runs/evaluations/$EXACT_RUN_ID"
+	ensure_dir "$runs/evaluations" || return 1
+	if [ -e "$EXACT_EVIDENCE" ] || [ -L "$EXACT_EVIDENCE" ]; then
+		exact_evidence_valid "$EXACT_EVIDENCE" "$_eh_state" && return 0
+		# A path already published under this run id purports to be finalized.
+		# If its manifest, identity or outcome no longer validates, that is
+		# durable-evidence integrity failure, not a transient inability to copy.
+		return 4
+	fi
+	_eh_tmp="$runs/evaluations/.harvest-$EXACT_RUN_ID-$$"
+	[ ! -e "$_eh_tmp" ] && [ ! -L "$_eh_tmp" ] && mkdir "$_eh_tmp" || return 1
+	for _eh in "$WORK/exact-descriptor.json" "$EXACT_OUT/audit-baseline.json" "$WORK/exact-audit.err" "$WORK/verdict" "$WORK/invoke.err" "$WORK/prov"; do
+		[ -f "$_eh" ] && [ ! -L "$_eh" ] || continue
+		cp -P "$_eh" "$_eh_tmp/${_eh##*/}" || return 1
+	done
+	for _eh in "$WORK/audit-$EXACT_RUN_ID/source.current" "$WORK/audit-$EXACT_RUN_ID/inputs.current" \
+		"$WORK/audit-$EXACT_RUN_ID/git.raw.current" "$WORK/audit-$EXACT_RUN_ID/git.current" "$WORK/exact-audit-diff.txt"; do
+		[ -f "$_eh" ] && [ ! -L "$_eh" ] || continue
+		cp -P "$_eh" "$_eh_tmp/${_eh##*/}" || return 1
+	done
+	printf '%s\n' "$_eh_state" >"$_eh_tmp/outcome" || return 1
+	_total=0
+	if [ -d "$EXACT_RESULTS" ] && [ ! -L "$EXACT_RESULTS" ]; then
+		sh "$SNAPSHOT" validate-results --out "$EXACT_OUT" >"$WORK/exact-results-check.out" 2>"$WORK/exact-results-check.err" || return 2
+		find "$EXACT_RESULTS" -type f -print | while IFS= read -r _rf; do
+			[ -f "$_rf" ] && [ ! -L "$_rf" ] || exit 2
+			_rel=${_rf#"$EXACT_RESULTS"/}
+			exact_portable_rel "$_rel" || exit 2
+			_sz=$(wc -c <"$_rf" | tr -d ' ') || exit 2
+			[ "$_sz" -le 16777216 ] || { printf '%s\n' "$_rel" >>"$_eh_tmp/unretained-oversize"; exit 3; }
+			printf '%s\t%s\t%s\n' "$_sz" "$(hash_of "$_rf")" "$_rel"
+		done >"$WORK/exact-results.manifest"
+		_eh_rc=$?
+		[ "$_eh_rc" = 0 ] || return "$_eh_rc"
+		_total=$(awk -F"$TAB" '{n += $1} END {print n+0}' "$WORK/exact-results.manifest")
+		[ "$_total" -le 67108864 ] || { cp "$WORK/exact-results.manifest" "$_eh_tmp/unretained-oversize"; return 3; }
+		while IFS="$TAB" read -r _sz _hash _rel; do
+			[ -n "$_rel" ] || continue
+			ensure_dir "$_eh_tmp/results/$(dirname "$_rel")" || return 1
+			cp -P "$EXACT_RESULTS/$_rel" "$_eh_tmp/results/$_rel" || return 1
+		done <"$WORK/exact-results.manifest"
+		cp "$WORK/exact-results.manifest" "$_eh_tmp/results.manifest" || return 1
+	fi
+	find "$_eh_tmp" -type f ! -name evidence.manifest -print | LC_ALL=C sort | while IFS= read -r _eh_file; do
+		_eh_rel=${_eh_file#"$_eh_tmp"/}
+		exact_portable_rel "$_eh_rel" || exit 2
+		printf '%s\t%s\t%s\n' "$(wc -c <"$_eh_file" | tr -d ' ')" \
+			"$(git -C "$root" hash-object --no-filters "$_eh_file")" "$_eh_rel"
+	done >"$_eh_tmp/evidence.manifest" || return 1
+	_eh_manifest_oid=$(git -C "$root" hash-object --no-filters "$_eh_tmp/evidence.manifest") || return 1
+	jq -n --arg run "$EXACT_RUN_ID" --arg candidate "$EVAL_DELIVERY" --arg outcome "$_eh_state" --arg manifest "$_eh_manifest_oid" \
+		'{schema:1,state:"finalized",run_id:$run,candidate:$candidate,outcome:$outcome,manifest_oid:$manifest}' \
+		>"$_eh_tmp/finalized.json" || return 1
+	mv "$_eh_tmp" "$EXACT_EVIDENCE" || return 1
+	exact_evidence_valid "$EXACT_EVIDENCE" "$_eh_state"
+}
+
+exact_cleanup() {
+	[ -n "$EXACT_OUT" ] || return 0
+	sh "$SNAPSHOT" cleanup --out "$EXACT_OUT" --run-id "$EXACT_RUN_ID" >"$WORK/exact-cleanup.out" 2>"$WORK/exact-cleanup.err" || return 1
+	rm -f "$runs/.evaluation-snapshot.json"
+	EXACT_MODE=no
+	return 0
+}
+
 # Runs the seam. Its stdout lands in $2 and its provenance in $WORK/prov.
 invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	_role=$1 _out=$2 _wt=$3
 	_mf=${4:-}
+	_auth=$AUTHORITY
 	: >"$WORK/prov"
 	# The gate's own file, WHOLE, to the gate's own evaluator, and to nobody else.
 	_rub=''
 	if [ "$_role" = evaluate ] && [ -n "$GATE" ] && [ -f "$(gate_file "$GATE")" ]; then
 		_rub=$(gate_file "$GATE")
+	fi
+	if [ "$EXACT_MODE" = yes ]; then
+		_auth="$EXACT_INPUTS/authority/current.md"
+		_rub="$EXACT_INPUTS/rubric/$GATE.md"
+		[ ! -f "$EXACT_INPUTS/retry/must-fix.txt" ] || _mf="$EXACT_INPUTS/retry/must-fix.txt"
 	fi
 	# And the `fix` section of the gate the work is HEADING INTO — the bar, and
 	# nothing else from that file — to the roles that author. Derived here into
@@ -2946,7 +3624,9 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	# KEPT-OUTPUT HOME is opened before the raise; one that cannot be opened is SAID
 	# and the raise still runs, told it has nowhere to keep output.
 	_runs=''
-	if runs_open "$_wt"; then
+	if [ "$EXACT_MODE" = yes ]; then
+		_runs=$EXACT_RESULTS
+	elif runs_open "$_wt"; then
 		_runs=$(runs_home "$_wt")
 		# A ROLE THAT JUDGES is shown ALL that was kept, somewhere it can open —
 		# `runs_seed` and `item_seed`.
@@ -2961,19 +3641,52 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	# The clock is read immediately before and after the raise: the wall clock they
 	# waited through.
 	_t0=$(secs)
-	REMIT_ITEM="$item" \
+	_completion="$WORK/exact-completion.json"
+	_seam_out=$_out
+	_invoke_err="$WORK/invoke.err"
+	_provenance="$WORK/prov"
+	if [ "$EXACT_MODE" = yes ]; then
+		_completion="$EXACT_OUT/coordinator/completion.json"
+		_seam_out="$EXACT_OUT/coordinator/return"
+		_invoke_err="$EXACT_OUT/coordinator/invoke.err"
+		_provenance="$EXACT_OUT/coordinator/provenance"
+	fi
+	rm -f "$_completion" "$_seam_out" "$_invoke_err" "$_provenance"
+	if [ "$EXACT_MODE" = yes ]; then
+		REMIT_ITEM="$([ "$EXACT_MODE" = yes ] || printf '%s' "$item")" \
 		REMIT_RUNS="$_runs" \
 		REMIT_RUNS_NAMING="$(runs_naming)" \
-		REMIT_AUTHORITY="$AUTHORITY" \
+		REMIT_AUTHORITY="$_auth" \
 		REMIT_RUBRICS="$_rub" \
 		REMIT_STANDARDS="$_std" \
 		REMIT_SETTINGS="$SETTINGSFILE" \
-		REMIT_PROVENANCE="$WORK/prov" \
+		REMIT_PROVENANCE="$_provenance" \
 		REMIT_ROUND="$ROUND" \
 		REMIT_DELIVERY="${EVAL_DELIVERY:-}" \
 		REMIT_RESEARCH_AUTHOR="${RESEARCH_AUTHOR:-}" \
 		REMIT_MUSTFIX="$_mf" \
-		sh "$INVOKE" "$_role" "$slug" "$_wt" $(seat_args "$_role") >"$_out" 2>"$WORK/invoke.err" </dev/null &
+		REMIT_EXACT_EVALUATION=1 \
+		REMIT_EXACT_INPUTS="$EXACT_INPUTS" \
+		REMIT_EXACT_SCRATCH="$EXACT_SCRATCH" \
+		REMIT_EXACT_RESULTS="$EXACT_RESULTS" \
+		REMIT_EXACT_COMPLETION="$_completion" \
+		REMIT_EXACT_RUN_ID="$EXACT_RUN_ID" \
+		sh "$INVOKE" "$_role" "$slug" "$_wt" $(seat_args "$_role") >"$_seam_out" 2>"$_invoke_err" </dev/null &
+	else
+		REMIT_ITEM="$item" \
+		REMIT_RUNS="$_runs" \
+		REMIT_RUNS_NAMING="$(runs_naming)" \
+		REMIT_AUTHORITY="$_auth" \
+		REMIT_RUBRICS="$_rub" \
+		REMIT_STANDARDS="$_std" \
+		REMIT_SETTINGS="$SETTINGSFILE" \
+		REMIT_PROVENANCE="$_provenance" \
+		REMIT_ROUND="$ROUND" \
+		REMIT_DELIVERY="${EVAL_DELIVERY:-}" \
+		REMIT_RESEARCH_AUTHOR="${RESEARCH_AUTHOR:-}" \
+		REMIT_MUSTFIX="$_mf" \
+		sh "$INVOKE" "$_role" "$slug" "$_wt" $(seat_args "$_role") >"$_seam_out" 2>"$_invoke_err" </dev/null &
+	fi
 	RAISE_PID=$!
 	mark_raise "$RAISE_PID"
 	wait "$RAISE_PID"
@@ -2983,18 +3696,29 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	# WHAT THE RAISE KEPT COMES HOME FIRST, before the kill check below, which does
 	# not return; the raise's own log is written into that home first so one harvest
 	# carries it — for EVERY raise, including one the seam refused.
-	raise_log_keep "$_role" "$_wt"
-	runs_harvest "$_wt"
+	if [ "$EXACT_MODE" != yes ]; then
+		raise_log_keep "$_role" "$_wt"
+		runs_harvest "$_wt"
+	fi
 	# AND THE SEEDED ARTEFACTS COME BACK OUT here, the last point every road out of a
 	# raise passes through: nothing seeded is on disk when the next `git add -A`
 	# runs.
-	item_unseed "$_wt"
+	[ "$EXACT_MODE" = yes ] || item_unseed "$_wt"
 	# A raise ENDED by their `stop` is not a raise that FAILED: `stop` removes the
 	# marker BEFORE it signals, so this tells them apart without a signal number.
 	marker_is_ours || chain_ended
 	mark_raise ''
 	# It ran to completion: past the kill check above, and the seam exited zero.
 	# That is the whole of what earns a `- raise:` line, and a refusal earns none.
+	if [ "$EXACT_MODE" = yes ]; then
+		[ ! -f "$_seam_out" ] || cp -P "$_seam_out" "$_out" || _irc=2
+		[ ! -f "$_invoke_err" ] || cp -P "$_invoke_err" "$WORK/invoke.err" || _irc=2
+		[ ! -f "$_provenance" ] || cp -P "$_provenance" "$WORK/prov" || _irc=2
+		[ ! -f "$_completion" ] || cp -P "$_completion" "$WORK/exact-completion.json" || _irc=2
+		case "$(uname -s 2>/dev/null || :)" in MSYS* | MINGW* | CYGWIN*) _expected_lifecycle=windows-job ;; *) _expected_lifecycle=linux-pid-namespace ;; esac
+		jq -e --arg id "$EXACT_RUN_ID" --arg method "$_expected_lifecycle" \
+			'.schema == 1 and .state == "reaped" and .run_id == $id and .method == $method' "$_completion" >/dev/null 2>&1 || _irc=2
+	fi
 	[ "$_irc" = 0 ] && raise_line "$_role" "$_t0" "$_t1"
 	# Exit 8 is the seam's idle bound — a silent CLI it ended — recorded as
 	# `stalled: <what the seam said>`; every other non-zero exit is `cannot act:
@@ -3009,7 +3733,7 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	fi
 	if [ "$_irc" != 0 ]; then
 		printf '%s: the seam refused `%s` (exit %s):\n' "$ME" "$_role" "$_irc" >&2
-		sed 's/^/    /' "$WORK/invoke.err" >&2
+		[ ! -f "$WORK/invoke.err" ] || sed 's/^/    /' "$WORK/invoke.err" >&2
 	fi
 	return $_irc
 }
@@ -3133,217 +3857,347 @@ escalate() { # $1 reason
 # the delivery seam — the one place a builder's tree becomes a pull request
 # ==============================================================================
 
-# The composed body, moved OUT of this run's scratch so that the remedy a failure
-# prints names a file that is still there after the run exits. A remedy pointing
-# at a path the exit trap has just removed is not a remedy.
-# It sets KEPT_BODY and KEPT_NOTE rather than printing, because a `$(...)` around
-# it would set them in a subshell and the caller would name a path it never got.
-KEPT_BODY=''
-KEPT_NOTE=''
-keep_pr_body() {
-	KEPT_BODY="${TMPDIR:-/tmp}/remit-$slug-pr-body-$SHA.md"
-	if cp "$WORK/pr-body" "$KEPT_BODY" 2>/dev/null; then
-		KEPT_NOTE="The body it should carry — this delivery on top, every earlier one kept beneath — is composed at $KEPT_BODY: apply it with: gh pr edit $PR_NUM --body-file $KEPT_BODY — or, where gh pr edit fails on this host, with: gh api -X PATCH repos/{owner}/{repo}/pulls/$PR_NUM -F body=@$KEPT_BODY"
-	else
-		KEPT_BODY=''
-		KEPT_NOTE="The body it should carry was composed and could NOT be kept anywhere a later command could read it, so there is no file to point you at"
-	fi
+# Publication state is a trusted machine-owned locator. It is never reconstructed
+# by scanning historical free text. New returns are quoted, but old logs may not
+# have attributable append boundaries, so absence of this locator means absence.
+publication_checkpoint_load() {
+	_pc="$item/.publication.json"
+	[ -f "$_pc" ] || return 1
+	jq -e 'type == "object" and .schema == 1 and
+		(.gate == "accepted" or .gate == "closed") and
+		(.candidate | type == "string" and test("^[0-9a-f]{40}$")) and
+		(.parent | type == "string" and test("^[0-9a-f]{40}$")) and
+		(.round | type == "number" and . >= 1 and . == floor) and
+		(.next == "publish" or .next == "evaluate") and
+		(.phase == "candidate" or .phase == "pushed" or .phase == "published") and
+		((.phase == "published" and .next == "evaluate") or
+		 ((.phase == "candidate" or .phase == "pushed") and .next == "publish")) and
+		(.authority | type == "string") and (.declaration | type == "string") and
+		(.branch | type == "string") and (.push_remote | type == "string") and
+		(.repository | type == "string") and (.base | type == "string") and
+		(.files | type == "number" and . >= 0 and . == floor) and
+		((has("pr_number") | not) or (.pr_number | type == "number" and . >= 1 and . == floor)) and
+		((has("pr_url") | not) or (.pr_url | type == "string"))' "$_pc" >/dev/null 2>&1 ||
+		return 2
+	PC_GATE=$(jq -r .gate "$_pc")
+	PC_CANDIDATE=$(jq -r .candidate "$_pc")
+	PC_PARENT=$(jq -r .parent "$_pc")
+	PC_ROUND=$(jq -r .round "$_pc")
+	PC_NEXT=$(jq -r .next "$_pc")
+	PC_PHASE=$(jq -r .phase "$_pc")
+	PC_AUTHORITY=$(jq -r .authority "$_pc")
+	PC_DECLARATION=$(jq -r .declaration "$_pc")
+	PC_BRANCH=$(jq -r .branch "$_pc")
+	PC_REMOTE=$(jq -r .push_remote "$_pc")
+	PC_REPOSITORY=$(jq -r .repository "$_pc")
+	PC_BASE=$(jq -r .base "$_pc")
+	PC_FILES=$(jq -r .files "$_pc")
+	PC_PR_NUM=$(jq -r '.pr_number // ""' "$_pc")
+	PC_PR_URL=$(jq -r '.pr_url // ""' "$_pc")
+	return 0
 }
 
-# Returns 0 delivered and the pull request carries it; 1 NOT delivered, DELIVER_ERR
-# says why and nothing is on the branch that the record should name; 2 delivered,
-# no `gh` on this host; 3 DELIVERED — committed and pushed — and the pull request
-# step failed, DELIVER_ERR saying how. The caller records 2 and 3 as deliveries.
-deliver() { # $1 worktree  $2 file holding the builder's returned text
-	_wt=$1 _final=$2
-	_branch="work/$slug"
+publication_checkpoint_save() { # phase next [pr number] [pr url] — no commit
+	_pcs_phase=$1 _pcs_next=$2 _pcs_num=${3:-} _pcs_url=${4:-}
+	jq -n --arg gate "$PC_GATE" --arg candidate "$PC_CANDIDATE" --arg parent "$PC_PARENT" \
+		--argjson round "$PC_ROUND" --arg next "$_pcs_next" --arg phase "$_pcs_phase" \
+		--arg authority "$PC_AUTHORITY" --arg declaration "$PC_DECLARATION" \
+		--arg branch "$PC_BRANCH" --arg push_remote "$PC_REMOTE" --arg repository "$PC_REPOSITORY" \
+		--arg base "$PC_BASE" --argjson files "$PC_FILES" --arg pr_number "$_pcs_num" --arg pr_url "$_pcs_url" \
+		'{schema:1,gate:$gate,candidate:$candidate,parent:$parent,round:$round,next:$next,
+		phase:$phase,authority:$authority,declaration:$declaration,branch:$branch,
+		push_remote:$push_remote,repository:$repository,base:$base,files:$files}
+		+ (if $pr_number == "" then {} else {pr_number:($pr_number|tonumber),pr_url:$pr_url} end)' \
+		>"$item/.publication.json.tmp" && mv "$item/.publication.json.tmp" "$item/.publication.json"
+}
 
-	git -C "$_wt" add -A || { DELIVER_ERR="could not stage the authored tree"; return 1; }
-	if git -C "$_wt" diff --cached --quiet; then
-		DELIVER_ERR="the build changed nothing — an empty stage is not a delivery"
+publication_checkpoint_commit() { # message; fail closed if record push failed
+	commit_and_push "$1" ".remit/work-items/$slug"
+	_pcc=$?
+	[ "$_pcc" = 3 ] && PUSH_FAILED=yes
+	[ "$_pcc" = 0 ] || return 1
+	return 0
+}
+
+delivery_destination_bind() {
+	_dm="$item/.delivery.json"
+	_old=$(jq -c '.destination // empty' "$_dm" 2>/dev/null) || return 1
+	_new=$(jq -nc --arg push_remote "$DELIVERY_REMOTE" --arg repository "$DELIVERY_REPOSITORY" --arg base "$DELIVERY_BASE" \
+		'{push_remote:$push_remote,repository:$repository,base:$base}') || return 1
+	if [ -n "$_old" ]; then
+		[ "$_old" = "$_new" ] || return 1
+		return 0
+	fi
+	jq --argjson destination "$_new" '. + {destination:$destination}' "$_dm" >"$_dm.tmp" && mv "$_dm.tmp" "$_dm" || return 1
+	publication_checkpoint_commit "remit: $slug bind delivery destination" || return 1
+}
+
+delivery_destination_matches() {
+	_dm="$item/.delivery.json"
+	[ -f "$_dm" ] || return 0
+	_old=$(jq -c '.destination // empty' "$_dm" 2>/dev/null) || return 1
+	[ -n "$_old" ] || return 0
+	_new=$(jq -nc --arg push_remote "$DELIVERY_REMOTE" --arg repository "$DELIVERY_REPOSITORY" --arg base "$DELIVERY_BASE" \
+		'{push_remote:$push_remote,repository:$repository,base:$base}') || return 1
+	[ "$_old" = "$_new" ]
+}
+
+publication_body() {
+	PUB_TITLE=''
+	_p="$item/publication.md"
+	if [ ! -f "$_p" ]; then
+		printf '# Delivery %s\n\n- Commit: `%s`\n- Files changed: %s\n- Evaluation: pending\n\n<!-- remit-delivery:%s -->\n' \
+			"$(delivery_id)" "$CANDIDATE_SHA" "$DELIVERY_FILES" "$CANDIDATE_SHA"
+		return 0
+	fi
+	[ "$(wc -c <"$_p" | tr -d ' ')" -le 65536 ] || return 1
+	od -An -v -tx1 "$_p" 2>/dev/null | grep -Eq '(^| )00( |$)' && return 1
+	PUB_TITLE=$(sed -n '1s/^# //p' "$_p")
+	[ -n "$PUB_TITLE" ] && [ "${#PUB_TITLE}" -le 120 ] || return 1
+	[ "$(sed -n '2s/^\*\*Candidate:\*\* \([0-9a-f]\{40\}\)$/\1/p' "$_p")" = "$CANDIDATE_SHA" ] || return 1
+	awk '
+		/^# / { top++; if (NR != 1) bad=1 }
+		NR > 2 && n == 0 && $0 !~ /^[[:space:]]*$/ && $0 != "## Summary" { bad=1 }
+		/^## / {
+			n++
+			want = (n == 1 ? "## Summary" : n == 2 ? "## Verification" : n == 3 ? "## Limitations" : "")
+			if ($0 != want) bad=1
+		}
+		/^\*\*Candidate:\*\* / { cand++; if (NR != 2) bad=1 }
+		END { exit !(top == 1 && cand == 1 && n == 3 && !bad) }
+	' "$_p" || return 1
+	cat "$_p"
+	printf '\n<!-- remit-delivery:%s -->\n' "$CANDIDATE_SHA"
+}
+
+delivery_pr_lookup() { # worktree; complete failure is never "none"
+	_dpl_wt=$1
+	PR_NUM='' PR_URL='' PR_DRAFT='' PR_HEAD='' PR_BASE=''
+	if ! existing=$(cd "$_dpl_wt" && gh_pr pr list --head "$DELIVERY_BRANCH" --state open --limit 2 \
+		--json number,url,isDraft,headRefOid,baseRefName \
+		--jq '.[] | [.number,.url,.isDraft,.headRefOid,.baseRefName] | @tsv' 2>"$WORK/pr-lookup.err"); then
+		DELIVER_ERR="existing pull request lookup failed: $(tr '\n' ' ' <"$WORK/pr-lookup.err")"
 		return 1
 	fi
-	# THE DELIVERY'S SIZE IS READ BEFORE IT IS COMMITTED: files added and bytes
-	# staged, counted from the index and recorded on the delivery entry. Past
-	# REMIT_DELIVERY_FILES (2000) or REMIT_DELIVERY_MB (100) the delivery stops as
-	# `cannot act` with both numbers, before a commit exists.
-	DELIVERY_FILES=$(git -C "$_wt" diff --cached --name-only --diff-filter=A | wc -l | tr -d ' ')
-	DELIVERY_BYTES=$(git -C "$_wt" diff --cached --name-only --diff-filter=AM -z | (cd "$_wt" && xargs -0 wc -c 2>/dev/null) | awk 'END { print ($1 + 0) }')
+	_dpl_count=$(printf '%s\n' "$existing" | grep -c .)
+	[ "$_dpl_count" -le 1 ] || { DELIVER_ERR="more than one open pull request names the delivery branch"; return 1; }
+	existing=$(printf '%s\n' "$existing" | sed -n 1p)
+	[ -n "$existing" ] || return 0
+	PR_NUM=$(printf '%s\n' "$existing" | cut -f1)
+	PR_URL=$(printf '%s\n' "$existing" | cut -f2)
+	PR_DRAFT=$(printf '%s\n' "$existing" | cut -f3)
+	PR_HEAD=$(printf '%s\n' "$existing" | cut -f4)
+	PR_BASE=$(printf '%s\n' "$existing" | cut -f5)
+	case "$PR_NUM" in '' | *[!0-9]*) DELIVER_ERR="existing pull request lookup returned an invalid identity"; return 1 ;; esac
+	if [ "$PR_DRAFT" != true ]; then
+		DELIVER_ERR="the existing pull request is ready, not draft; refusing a new candidate"
+		return 1
+	fi
+	[ "$PR_BASE" = "$DELIVERY_BASE" ] || { DELIVER_ERR="the existing pull request targets a different base branch"; return 1; }
+	return 0
+}
+
+delivery_comments_have_marker() {
+	_dcm_repo='repos/{owner}/{repo}'
+	[ -z "$DELIVERY_REPOSITORY" ] || _dcm_repo="repos/$DELIVERY_REPOSITORY"
+	if ! (cd "$root" && gh api --paginate "$_dcm_repo/issues/$PR_NUM/comments" --jq '.[].body') >"$WORK/pr-comments" 2>"$WORK/pr-comments.err"; then
+		DELIVER_ERR="pull request comment lookup failed: $(tr '\n' ' ' <"$WORK/pr-comments.err")"
+		return 2
+	fi
+	grep -qF "<!-- remit-delivery:$CANDIDATE_SHA -->" "$WORK/pr-comments"
+}
+
+prepare_delivery_candidate() { # worktree
+	_pdc_wt=$1
+	delivery_branch_prepare
+	delivery_destination
+	publication_primary_safe || { DELIVER_ERR="publication authority was already tracked or its primary history is unknown; publication.md is never shipped"; return 1; }
+	delivery_destination_bind || { DELIVER_ERR="delivery destination changed or could not be made durable"; return 1; }
+	git -C "$_pdc_wt" diff --cached --quiet || { DELIVER_ERR="refusing unexplained changes already staged before delivery"; return 1; }
+	_parent=$(git -C "$_pdc_wt" rev-parse HEAD) || { DELIVER_ERR="cannot resolve the candidate parent"; return 1; }
+	_pidx="$WORK/delivery.index"
+	rm -f "$_pidx"
+	GIT_INDEX_FILE="$_pidx" git -C "$_pdc_wt" read-tree "$_parent" || { DELIVER_ERR="could not create the coordinator's candidate index"; return 1; }
+	GIT_INDEX_FILE="$_pidx" git -C "$_pdc_wt" add -A || { DELIVER_ERR="could not stage the authored tree in coordinator scratch"; return 1; }
+	GIT_INDEX_FILE="$_pidx" git -C "$_pdc_wt" diff --cached --name-only >"$WORK/delivery-staged" || return 1
+	while IFS= read -r _sp; do
+		case "$_sp" in '"'* | -* | *'\'*) DELIVER_ERR="refusing an unsafe candidate path spelling"; return 1 ;; esac
+		delivery_forbidden_path "$_sp" && { DELIVER_ERR="refusing a private record, checkpoint or publication path in the candidate"; return 1; }
+	done <"$WORK/delivery-staged"
+	GIT_INDEX_FILE="$_pidx" git -C "$_pdc_wt" diff --cached --quiet && { DELIVER_ERR="the build changed nothing — an empty stage is not a delivery"; return 1; }
+	DELIVERY_FILES=$(GIT_INDEX_FILE="$_pidx" git -C "$_pdc_wt" diff --cached --name-only | wc -l | tr -d ' ')
+	DELIVERY_BYTES=$(GIT_INDEX_FILE="$_pidx" git -C "$_pdc_wt" diff --cached --name-only --diff-filter=AM -z | (cd "$_pdc_wt" && xargs -0 wc -c 2>/dev/null) | awk 'END { print ($1 + 0) }')
 	DELIVERY_MB=$(( (DELIVERY_BYTES + 524288) / 1048576 ))
-	_dfc=${REMIT_DELIVERY_FILES:-2000}
-	_dmc=${REMIT_DELIVERY_MB:-100}
+	_dfc=${REMIT_DELIVERY_FILES:-2000} _dmc=${REMIT_DELIVERY_MB:-100}
 	if [ "$DELIVERY_FILES" -gt "$_dfc" ] || [ "$DELIVERY_MB" -gt "$_dmc" ]; then
-		git -C "$_wt" reset -q 2>/dev/null
-		DELIVER_ERR="delivery too large: $DELIVERY_FILES files added, $DELIVERY_MB MB staged — past the ceiling of $_dfc files / $_dmc MB (REMIT_DELIVERY_FILES / REMIT_DELIVERY_MB). Nothing was committed; the tree is as the builder left it at $_wt, for a reader to see what grew"
+		DELIVER_ERR="delivery too large: $DELIVERY_FILES files changed, $DELIVERY_MB MB staged — past the ceiling of $_dfc files / $_dmc MB"
 		return 1
 	fi
+	_tree=$(GIT_INDEX_FILE="$_pidx" git -C "$_pdc_wt" write-tree) || { DELIVER_ERR="could not write the candidate tree"; return 1; }
+	CANDIDATE_SHA=$(printf 'Delivery %s\n' "$(delivery_id)" | git -C "$_pdc_wt" commit-tree "$_tree" -p "$_parent") || { DELIVER_ERR="could not create the neutral candidate commit"; return 1; }
+	git -C "$_pdc_wt" update-ref "refs/heads/$DELIVERY_BRANCH" "$CANDIDATE_SHA" "$_parent" || { DELIVER_ERR="delivery branch changed while the candidate was prepared"; return 1; }
+	git -C "$_pdc_wt" reset -q --mixed "$CANDIDATE_SHA" || { DELIVER_ERR="could not align the candidate worktree index"; return 1; }
+	PC_GATE=$GATE PC_CANDIDATE=$CANDIDATE_SHA PC_PARENT=$_parent PC_ROUND=$ROUND PC_NEXT=publish PC_PHASE=candidate
+	PC_AUTHORITY=$AUTHORITY_HASH PC_DECLARATION=$(publication_digest) PC_BRANCH=$DELIVERY_BRANCH
+	PC_REMOTE=$DELIVERY_REMOTE PC_REPOSITORY=$DELIVERY_REPOSITORY PC_BASE=$DELIVERY_BASE PC_FILES=$DELIVERY_FILES
+	publication_checkpoint_save candidate publish || { DELIVER_ERR="could not save the candidate checkpoint"; return 1; }
+	publication_checkpoint_commit "remit: $slug checkpoint candidate ${CANDIDATE_SHA}" || { DELIVER_ERR="candidate checkpoint is not durable at the record destination"; return 1; }
+	SHA=$(git -C "$_pdc_wt" rev-parse --short "$CANDIDATE_SHA")
+	say "commit: $SHA on $DELIVERY_BRANCH; publication checkpoint is durable."
+	return 0
+}
 
-	_model=$(prov model)
-	_session=$(prov session)
-	_harness=$(prov harness)
-	{
-		printf '%s: delivery from the build role\n\n' "$slug"
-		printf 'Tree authored by %s in %s; git mechanics performed by %s from the\n' \
-			"${_model:-a model the invoke did not name}" \
-			"${_harness:-a harness the invoke did not name}" "$ME"
-		printf 'resuming session. The builder did not run git.\n\n'
-		[ -n "$_model" ] || printf 'No authoring model was reported by the invoke — absent, never invented.\n'
-		[ -n "$_session" ] || printf 'No session was reported by the invoke — absent, never invented.\n'
-		[ -n "$_model" ] && printf 'Co-Authored-By: %s <noreply@anthropic.com>\n' "$_model"
-		[ -n "$_session" ] && printf 'Claude-Session: %s\n' "$_session"
-	} >"$WORK/commit-message"
-
-	if ! out=$(git -C "$_wt" commit -q -F "$WORK/commit-message" 2>&1); then
-		DELIVER_ERR="commit failed: $(printf '%s' "$out" | tr '\n' ' ')"
-		return 1
+publish_delivery_candidate() { # worktree; checkpoint must exist
+	_pbc_wt=$1
+	publication_checkpoint_load; _pcl=$?
+	[ "$_pcl" = 0 ] || { DELIVER_ERR="missing or invalid publication checkpoint"; return 3; }
+	[ "$PC_NEXT" = publish ] || { DELIVER_ERR="publication checkpoint does not name publication as the next action"; return 3; }
+	git -C "$root" cat-file -e "$PC_CANDIDATE^{commit}" 2>/dev/null || { DELIVER_ERR="the checkpoint candidate is unavailable locally"; return 3; }
+	delivery_branch_prepare
+	delivery_destination
+	[ "$PC_GATE" = "$GATE" ] && [ "$PC_AUTHORITY" = "$AUTHORITY_HASH" ] && [ "$PC_BRANCH" = "$DELIVERY_BRANCH" ] &&
+		[ "$PC_REMOTE" = "$DELIVERY_REMOTE" ] && [ "$PC_REPOSITORY" = "$DELIVERY_REPOSITORY" ] && [ "$PC_BASE" = "$DELIVERY_BASE" ] ||
+		{ DELIVER_ERR="publication authority, branch or destination changed after candidate checkpoint"; return 3; }
+	CANDIDATE_SHA=$PC_CANDIDATE DELIVERY_FILES=$PC_FILES ROUND=$PC_ROUND
+	SHA=$(git -C "$root" rev-parse --short "$CANDIDATE_SHA")
+	publication_primary_safe || { DELIVER_ERR="publication authority was already tracked or its primary history is unknown; publication.md is never shipped"; return 3; }
+	_newdecl=$(publication_digest)
+	publication_body >"$WORK/pr-publication" || { DELIVER_ERR="publication declaration is invalid or is not bound to candidate $CANDIDATE_SHA"; return 3; }
+	if [ "$PC_DECLARATION" != "$_newdecl" ]; then
+		PC_DECLARATION=$_newdecl
+		publication_checkpoint_save "$PC_PHASE" publish "$PC_PR_NUM" "$PC_PR_URL" || { DELIVER_ERR="could not lock publication declaration"; return 3; }
+		publication_checkpoint_commit "remit: $slug bind publication ${CANDIDATE_SHA}" || { DELIVER_ERR="publication declaration lock is not durable"; return 3; }
 	fi
-	SHA=$(git -C "$_wt" rev-parse --short HEAD)
-	say "commit: $SHA on $_branch."
 
-	# Nothing reads the delivery's paths. A rubric is a criterion a fresh context
-	# judges, not a glob this script matches, and the diff is the evaluator's to
-	# read in the worktree it is given.
-
-	if git -C "$_wt" remote get-url origin >/dev/null 2>&1; then
-		if ! out=$(git -C "$_wt" push -u origin "HEAD:refs/heads/$_branch" 2>&1); then
-			DELIVER_ERR="push failed — committed locally as $SHA, NOT accepted by the remote: $(printf '%s' "$out" | tr '\n' ' ')"
-			return 1
+	DELIVERY_HAS_REMOTE=no
+	if git -C "$root" remote get-url "$DELIVERY_REMOTE" >/dev/null 2>&1; then
+		DELIVERY_HAS_REMOTE=yes
+		git -C "$root" ls-remote "$DELIVERY_REMOTE" >"$WORK/delivery-refs.before" 2>/dev/null || { DELIVER_ERR="destination refs could not be read"; return 3; }
+		_remote_branch=$(awk -v r="refs/heads/$DELIVERY_BRANCH" '$2 == r { print $1; exit }' "$WORK/delivery-refs.before")
+		_remote_base=$(awk -v r="refs/heads/$DELIVERY_BASE" '$2 == r { print $1; exit }' "$WORK/delivery-refs.before")
+		# On a retry the destination branch may already name this candidate. Scan
+		# it against the branch tip recorded before it (the checkpoint parent),
+		# not against itself, or an external write between push and checkpoint
+		# would make every unsafe object disappear from the outgoing set.
+		awk -v r="refs/heads/$DELIVERY_BRANCH" -v c="$CANDIDATE_SHA" -v p="$PC_PARENT" \
+			'{ if ($2 == r && $1 == c) print p, $2; else print }' "$WORK/delivery-refs.before" >"$WORK/delivery-refs.scan"
+		delivery_outgoing_safe "$CANDIDATE_SHA" "$WORK/delivery-refs.scan" || { DELIVER_ERR="candidate outgoing history contains a forbidden path or known private content"; return 3; }
+		[ -n "$_remote_base" ] || { DELIVER_ERR="destination base branch is absent"; return 3; }
+		if [ "$PC_PHASE" = candidate ]; then
+			if [ "$_remote_branch" = "$CANDIDATE_SHA" ]; then PC_PHASE=pushed
+			elif [ -n "$_remote_branch" ] && [ "$_remote_branch" != "$PC_PARENT" ]; then DELIVER_ERR="destination branch changed after candidate checkpoint"; return 3
+			elif [ -z "$_remote_branch" ] && [ -n "$(recorded_delivery)" ]; then DELIVER_ERR="an existing delivery branch disappeared at the destination"; return 3
+			fi
+		else
+			[ "$_remote_branch" = "$CANDIDATE_SHA" ] || { DELIVER_ERR="published candidate no longer matches the destination branch"; return 3; }
 		fi
-		say "push: $_branch accepted by origin."
 	else
-		say "push: no remote configured — the delivery is durable on this machine only."
+		: >"$WORK/delivery-refs.before"
+		[ "$PC_PHASE" = candidate ] || [ "$PC_PHASE" = pushed ] || { DELIVER_ERR="invalid local publication phase"; return 3; }
+	fi
+
+	# Existing PR identity/draft/base/head are validated before a new SHA moves.
+	PR_NUM='' PR_URL=''
+	if command -v gh >/dev/null 2>&1; then
+		delivery_pr_lookup "$_pbc_wt" || return 3
+		_recorded_pr=$(recorded_pr)
+		[ -z "$_recorded_pr" ] || [ "$PR_NUM" = "$_recorded_pr" ] || { DELIVER_ERR="the recorded pull request is not the open pull request for the delivery branch"; return 3; }
+		if [ -n "$PR_NUM" ] && [ -n "$PR_HEAD" ] && [ "$PR_HEAD" != "$_remote_branch" ]; then DELIVER_ERR="pull request head differs from the frozen destination branch"; return 3; fi
+	elif [ "$DELIVERY_HAS_REMOTE" = yes ] || [ -n "$(recorded_pr)" ]; then
+		DELIVER_ERR="gh is unavailable, so existing pull request state cannot be ruled out or validated before push"
+		return 3
+	fi
+
+	if [ "$DELIVERY_HAS_REMOTE" = yes ] && [ "$PC_PHASE" = candidate ]; then
+		git -C "$root" ls-remote "$DELIVERY_REMOTE" >"$WORK/delivery-refs.now" 2>/dev/null || { DELIVER_ERR="destination refs could not be revalidated"; return 3; }
+		cmp -s "$WORK/delivery-refs.before" "$WORK/delivery-refs.now" || { DELIVER_ERR="destination refs changed during publication validation"; return 3; }
+		[ "$(publication_digest)" = "$PC_DECLARATION" ] || { DELIVER_ERR="publication declaration changed during destination validation"; return 3; }
+		if ! out=$(REMIT_PUBLICATION_CANDIDATE="$CANDIDATE_SHA" \
+			REMIT_PUBLICATION_REF="refs/heads/$DELIVERY_BRANCH" \
+			git -C "$root" push "$DELIVERY_REMOTE" "$CANDIDATE_SHA:refs/heads/$DELIVERY_BRANCH" 2>&1); then
+			DELIVER_ERR="candidate push was rejected: $(printf '%s' "$out" | tr '\n' ' ')"
+			return 3
+		fi
+		git -C "$root" ls-remote "$DELIVERY_REMOTE" "refs/heads/$DELIVERY_BRANCH" >"$WORK/delivery-branch.after" 2>/dev/null || { DELIVER_ERR="candidate push could not be confirmed"; return 3; }
+		[ "$(awk 'NR == 1 { print $1 }' "$WORK/delivery-branch.after")" = "$CANDIDATE_SHA" ] || { DELIVER_ERR="destination did not retain the exact candidate"; return 3; }
+		PC_PHASE=pushed
+		publication_checkpoint_save pushed publish "$PC_PR_NUM" "$PC_PR_URL" || { DELIVER_ERR="could not checkpoint the candidate push"; return 3; }
+		publication_checkpoint_commit "remit: $slug checkpoint pushed ${CANDIDATE_SHA}" || { DELIVER_ERR="push happened but its checkpoint is not durable"; return 3; }
+		say "push: $DELIVERY_BRANCH accepted the exact checkpoint candidate."
+	elif [ "$DELIVERY_HAS_REMOTE" = no ] && [ "$PC_PHASE" = candidate ]; then
+		PC_PHASE=pushed
+		publication_checkpoint_save pushed publish || return 3
+		publication_checkpoint_commit "remit: $slug checkpoint local delivery ${CANDIDATE_SHA}" || { DELIVER_ERR="local delivery checkpoint is not durable"; return 3; }
+		say "push: no remote configured — the checkpoint candidate is durable on this machine only."
 	fi
 
 	if ! command -v gh >/dev/null 2>&1; then
-		PR_URL=''
-		PR_NUM=''
-		return 2
-	fi
-
-	# The fence is longer than the longest run of backticks in the builder's
-	# text, so a fence of its own cannot close ours and escape into this
-	# script's record.
-	ticks=$(grep -o '`\{1,\}' "$_final" 2>/dev/null | awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }')
-	[ -n "$ticks" ] || ticks=0
-	fence_len=$((ticks + 1))
-	[ "$fence_len" -ge 3 ] || fence_len=3
-	FENCE=$(awk -v n="$fence_len" 'BEGIN { s = ""; while (length(s) < n) s = s "`"; print s }')
-
-	# Does this branch already have a pull request? Asked before anything is
-	# composed, because the answer decides whether this delivery opens one or is
-	# added to the one that is there. A lookup that FAILS is not read as "there
-	# is none": it is said out loud.
-	PR_NUM='' PR_URL='' PR_DRAFT=''
-	if existing=$(cd "$_wt" && gh pr list --head "$_branch" --state open --limit 1 \
-		--json number,url,isDraft --jq '.[] | "\(.number) \(.url) \(.isDraft)"' 2>"$WORK/pr-lookup.err"); then
-		existing=$(printf '%s\n' "$existing" | sed -n 1p)
-		PR_NUM=$(printf '%s\n' "$existing" | awk '{print $1}')
-		PR_URL=$(printf '%s\n' "$existing" | awk '{print $2}')
-		PR_DRAFT=$(printf '%s\n' "$existing" | awk '{print $3}')
-		case "$PR_NUM" in '' | *[!0-9]*) PR_NUM='' PR_URL='' PR_DRAFT='' ;; esac
-	else
-		say "note: the existing-pull-request lookup FAILED, so whether $_branch already has one is unknown here: $(tr '\n' ' ' <"$WORK/pr-lookup.err")"
-	fi
-
-	if [ -n "$PR_NUM" ]; then
-		if [ "$PR_DRAFT" = false ]; then
-			_dstate="It is NOT a draft — an earlier delivery took it ready — and this delivery does not put it back."
-		else
-			_dstate="It is a draft."
-		fi
-		say "pull request: #$PR_NUM already exists for $_branch — this delivery goes on top of its body, and the record already there is kept beneath it. $_dstate"
-		if ! (cd "$_wt" && gh pr view "$PR_NUM" --json body --jq .body) >"$WORK/pr-body-existing" 2>"$WORK/pr-body-existing.err"; then
-			DELIVER_ERR="the existing pull request body could not be read back, and a body this script never read is never replaced — that would delete the earlier delivery's record: $(tr '\n' ' ' <"$WORK/pr-body-existing.err")"
+		PR_NUM='' PR_URL=''
+		if [ "$DELIVERY_HAS_REMOTE" = yes ]; then
+			DELIVER_ERR="candidate is pushed and checkpointed, but gh is unavailable; resume will publish the same candidate"
 			return 3
 		fi
-		{
-			delivery_section update
-			printf '\n---\n\n'
-			cat "$WORK/pr-body-existing"
-		} >"$WORK/pr-body"
-		# TWO ROADS TO THE BODY. `gh pr edit` first; where it refuses, the same
-		# body over REST, which does not depend on the GraphQL schema the gh
-		# binary was built against.
-		_edited=''
-		if out=$(cd "$_wt" && gh pr edit "$PR_NUM" --body-file "$WORK/pr-body" 2>&1); then
-			_edited='gh pr edit'
-		else
-			_edit_err=$(printf '%s' "$out" | tr '\n' ' ')
-			if out=$(cd "$_wt" && gh api -X PATCH "repos/{owner}/{repo}/pulls/$PR_NUM" -F "body=@$WORK/pr-body" 2>&1); then
-				_edited='REST'
-				say "pull request: gh pr edit refused ($_edit_err) — the body of #$PR_NUM was written over REST instead."
-			else
-				keep_pr_body
-				DELIVER_ERR="gh pr edit failed, and so did the REST route — the delivery IS on the branch, and the body of #$PR_NUM still describes an EARLIER delivery. $KEPT_NOTE — gh pr edit: $_edit_err — gh api: $(printf '%s' "$out" | tr '\n' ' ')"
+		return 0
+	fi
+	[ "$(publication_digest)" = "$PC_DECLARATION" ] || { DELIVER_ERR="publication declaration changed before the public write"; return 3; }
+	# Reconcile a PR created between preflight and push, or by a previous attempt.
+	delivery_pr_lookup "$_pbc_wt" || return 3
+	if [ -n "$PR_NUM" ] && [ -n "$PR_HEAD" ] && [ "$PR_HEAD" != "$CANDIDATE_SHA" ]; then
+		DELIVER_ERR="pull request head does not name the pushed checkpoint candidate"
+		return 3
+	fi
+	_recorded_pr=$(recorded_pr)
+	if [ -n "$_recorded_pr" ]; then
+		[ "$PR_NUM" = "$_recorded_pr" ] || { DELIVER_ERR="the recorded pull request is no longer the open draft for this branch"; return 3; }
+		delivery_comments_have_marker
+		_dcm=$?
+		[ "$_dcm" = 2 ] && return 3
+		if [ "$_dcm" != 0 ]; then
+			if ! out=$(cd "$_pbc_wt" && gh_pr pr comment "$PR_NUM" --body-file "$WORK/pr-publication" 2>&1); then
+				DELIVER_ERR="pull request comment failed after the candidate push: $(printf '%s' "$out" | tr '\n' ' ')"
 				return 3
 			fi
+			delivery_comments_have_marker || { DELIVER_ERR="pull request comment write could not be verified"; return 3; }
 		fi
-		if verify=$( (cd "$_wt" && gh pr view "$PR_NUM" --json body --jq .body) 2>/dev/null ); then
-			if ! printf '%s\n' "$verify" | grep -qF -- "- Commit: $SHA"; then
-				keep_pr_body
-				DELIVER_ERR="$_edited reported success, but the body read back afterwards does not record commit $SHA. $KEPT_NOTE"
-				return 3
-			fi
-			say "pull request: #$PR_NUM updated, and read back — its body now records commit $SHA."
-		else
-			say "note: #$PR_NUM was updated and its body could not be read back to confirm it, so the update is UNCONFIRMED here. Said, not assumed."
+		say "pull request: #$PR_NUM retained its existing title and body; the candidate has one marked public comment."
+		say "warning: existing pull request text may predate this boundary and remains publicly exposed; publication does not rewrite or recopy it."
+	elif [ -n "$PR_NUM" ]; then
+		# A create may have succeeded before its checkpoint. Only its exact marker
+		# proves ownership; otherwise this is an ambiguous external race.
+		if ! (cd "$_pbc_wt" && gh_pr pr view "$PR_NUM" --json body --jq .body) >"$WORK/pr-existing-body" 2>"$WORK/pr-existing-body.err"; then
+			DELIVER_ERR="new pull request body could not be reconciled"
+			return 3
 		fi
+		grep -qF "<!-- remit-delivery:$CANDIDATE_SHA -->" "$WORK/pr-existing-body" || { DELIVER_ERR="an unowned pull request appeared for the delivery branch"; return 3; }
 	else
-		# Nothing exists yet, so this one is opened as a draft and the section
-		# says so because that is what is about to be true.
-		PR_DRAFT=true
-		delivery_section create >"$WORK/pr-body"
-		if ! out=$(cd "$_wt" && gh pr create --draft --base "$BASE" --head "$_branch" \
-			--title "$(pr_title)" --body-file "$WORK/pr-body" 2>&1); then
-			DELIVER_ERR="gh pr create failed — committed as $SHA and pushed, but no pull request was opened: $(printf '%s' "$out" | tr '\n' ' ')"
+		if ! out=$(cd "$_pbc_wt" && gh_pr pr create --draft --base "$DELIVERY_BASE" --head "$DELIVERY_BRANCH" \
+			--title "${PUB_TITLE:-Delivery $(delivery_id)}" --body-file "$WORK/pr-publication" 2>&1); then
+			DELIVER_ERR="candidate is pushed; pull request create failed and resume will retry this candidate: $(printf '%s' "$out" | tr '\n' ' ')"
 			return 3
 		fi
 		PR_URL=$(printf '%s\n' "$out" | sed -n 's|.*\(https://[^ ]*\).*|\1|p' | sed -n 1p)
 		PR_NUM=$(printf '%s\n' "$PR_URL" | sed -n 's|.*/\([0-9][0-9]*\)$|\1|p')
+		case "$PR_NUM" in '' | *[!0-9]*) DELIVER_ERR="pull request create returned no durable identity"; return 3 ;; esac
+		if ! (cd "$_pbc_wt" && gh_pr pr view "$PR_NUM" --json body --jq .body) >"$WORK/pr-created-body" 2>"$WORK/pr-created-body.err" ||
+			! grep -qF "<!-- remit-delivery:$CANDIDATE_SHA -->" "$WORK/pr-created-body"; then
+			DELIVER_ERR="pull request create could not be verified against its candidate marker"
+			return 3
+		fi
 		say "pull request: opened as a draft — $PR_URL"
 	fi
+	[ "$(publication_digest)" = "$PC_DECLARATION" ] || { DELIVER_ERR="publication declaration changed during the public write"; return 3; }
 	return 0
 }
 
-# This script's provenance is written FIRST inside each section, so nothing the
-# builder writes can render above it; the builder's words go LAST, inside the
-# fence, so a `---` or a copied heading in them renders as the literal characters
-# it is rather than as document structure.
-delivery_section() { # $1 create|update
-	if [ "$1" = update ]; then
-		printf '## This pull request now carries a later delivery\n\n'
-		printf 'The branch has been delivered to again. What it carries now is the delivery\n'
-		printf 'recorded immediately below — commit `%s`. Everything past the divider that\n' "$SHA"
-		printf 'closes this section is the record of the deliveries before it, kept exactly as\n'
-		printf 'it was written: this script adds a delivery on top, and never edits or removes\n'
-		printf 'one that is already here. Where a section further down names a different\n'
-		printf 'commit, this one supersedes it.\n\n'
-	fi
-	printf '## Provenance — recorded by the mechanism, not by the builder\n\n'
-	printf 'The working tree is the builder'"'"'s authorship. Branch, commit, push and this\n'
-	printf 'pull request are `%s`'"'"'s mechanics, performed by the resuming session: the\n' "$ME"
-	printf 'builder never ran git.\n\n'
-	printf -- '- Item: %s (stage %s, until %s)\n' "$slug" "$(hdr "$brief" Stage)" "$(hdr "$brief" Until | sed 's/^$/none/')"
-	printf -- '- Harness: %s\n' "${_harness:-not reported by the invoke — absent, never invented}"
-	printf -- '- Model: %s\n' "${_model:-not reported by the invoke — absent, never invented}"
-	printf -- '- Session: %s\n' "${_session:-not reported by the invoke — absent, never invented}"
-	printf -- '- Commit: %s\n' "$SHA"
-	printf -- '- Round: %s\n' "$ROUND"
-	if [ "$PR_DRAFT" = false ]; then
-		printf '\nThis pull request is NOT a draft: an earlier delivery on this branch passed its\n'
-		printf 'gate and `%s` flipped it ready. THIS delivery arrives unverified like any other,\n' "$ME"
-		printf 'and the verdict on it is the one below this section when it is written.\n'
-	else
-		printf '\nThis pull request is a draft: this delivery arrives unverified, and only a\n'
-		printf 'recorded passing verdict takes it out of draft.\n'
-	fi
-	printf '\n## What the builder returned\n\n'
-	printf 'Everything below is the builder'"'"'s own text, reproduced verbatim and unedited.\n'
-	printf 'It is quoted, not endorsed, and nothing in it is this script'"'"'s record of what\n'
-	printf 'ran — that record is the section above, which no builder can write.\n\n'
-	printf '%s\n' "$FENCE"
-	cat "$FINALTEXT"
-	printf '%s\n' "$FENCE"
+publication_finish_record() {
+	PC_PHASE=published PC_NEXT=evaluate PC_PR_NUM=$PR_NUM PC_PR_URL=$PR_URL
+	publication_checkpoint_save published evaluate "$PR_NUM" "$PR_URL" || return 1
+	{
+		printf 'Commit `%s` on `%s`%s\n\n' "$CANDIDATE_SHA" "$DELIVERY_BRANCH" "${PR_URL:+, pull request $PR_URL}"
+		printf -- '- delivery size: %s file(s) changed\n' "$DELIVERY_FILES"
+		printf -- '- checkpoint: schema 1, candidate `%s`, next `evaluate`\n' "$CANDIDATE_SHA"
+	} | log_append "delivery — ${PR_URL:-$CANDIDATE_SHA} — $(now)"
+	publication_checkpoint_commit "remit: $slug record published candidate $CANDIDATE_SHA"
 }
 
 # WHERE this item's build worktree is, decided in ONE place for the move that
@@ -3351,10 +4205,11 @@ delivery_section() { # $1 create|update
 # `resolve_dir`: this answers before the worktree exists, and the override was
 # typed in the shell's own namespace.
 worktree_path() {
+	_branch=$(delivery_branch)
 	# A checkout of `work/<slug>` that already exists is the worktree, wherever
 	# it is: git is asked, not the default.
 	_wpx=$(git -C "$root" worktree list --porcelain 2>/dev/null |
-		awk -v b="branch refs/heads/work/$slug" '/^worktree / { p = substr($0, 10) } $0 == b { print p; exit }')
+		awk -v b="branch refs/heads/$_branch" '/^worktree / { p = substr($0, 10) } $0 == b { print p; exit }')
 	if [ -n "$_wpx" ]; then
 		one_namespace "$_wpx"
 		return 0
@@ -3363,13 +4218,21 @@ worktree_path() {
 }
 
 build_worktree() {
+	delivery_branch_prepare
+	_branch=$(delivery_branch)
 	WT=$(worktree_path)
 	[ -e "$WT/.git" ] && return 0
 	ensure_dir "$(dirname "$WT")" || return 1
-	if git -C "$root" show-ref --verify --quiet "refs/heads/work/$slug"; then
-		git -C "$root" worktree add "$WT" "work/$slug" >/dev/null 2>&1 || return 1
+	if git -C "$root" show-ref --verify --quiet "refs/heads/$_branch"; then
+		git -C "$root" worktree add "$WT" "$_branch" >/dev/null 2>&1 || return 1
+	elif git -C "$root" show-ref --verify --quiet "refs/remotes/$DELIVERY_REMOTE/$_branch"; then
+		git -C "$root" worktree add "$WT" -b "$_branch" "refs/remotes/$DELIVERY_REMOTE/$_branch" >/dev/null 2>&1 || return 1
+	elif git -C "$root" remote get-url "$DELIVERY_REMOTE" >/dev/null 2>&1 &&
+		git -C "$root" ls-remote --exit-code "$DELIVERY_REMOTE" "refs/heads/$_branch" >/dev/null 2>&1; then
+		git -C "$root" fetch -q "$DELIVERY_REMOTE" "refs/heads/$_branch:refs/remotes/$DELIVERY_REMOTE/$_branch" >/dev/null 2>&1 || return 1
+		git -C "$root" worktree add "$WT" -b "$_branch" "refs/remotes/$DELIVERY_REMOTE/$_branch" >/dev/null 2>&1 || return 1
 	else
-		git -C "$root" worktree add "$WT" -b "work/$slug" "$BASE" >/dev/null 2>&1 || return 1
+		git -C "$root" worktree add "$WT" -b "$_branch" "$DELIVERY_BASE" >/dev/null 2>&1 || return 1
 	fi
 	return 0
 }
@@ -3932,6 +4795,10 @@ back in."
 run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the first evaluate
 	GATE=$1
 	STANDARDS_GATE=$1
+	_requested_gate=$1
+	_closing_revalidate=no
+	_closing_round=1
+	_closing_marker="$runs/.closing-revalidate.json"
 	_author=$2
 	_authornow=$3
 	# WHAT THE GATE'S EVALUATOR IS TOLD IT CAN REACH. It is one fact — whether
@@ -3944,6 +4811,7 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 	LOOP_STOP_DETAIL=''
 	LOOP_STOP_NOTE=''
 	ROUND=1
+	_publishnow=no
 	# THE RESUME POINT, consumed here and by nothing else. It belongs to ONE gate
 	# — the one the item's stage runs when the resume begins — so a later gate in
 	# the same run starts at its own first round, and a run that never reaches
@@ -3953,6 +4821,7 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 		if [ "$AT_AWAITING" = yes ]; then
 			# A delivery already on the branch is JUDGED, not built again.
 			_authornow=no
+			[ "$AT_PUBLISH" = yes ] && _publishnow=yes
 		elif [ "$ROUND" -gt 1 ]; then
 			# ANY round above the first authors, whatever the caller said. The
 			# closing gate's FIRST round judges the folder as it stands and
@@ -3963,6 +4832,7 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 		fi
 	fi
 	AT_GATE=''
+	AT_PUBLISH=no
 	# Whether a must-fix from the round BEFORE this one is in hand, which is not
 	# the same question as `ROUND > 1` once a round can be continued from the
 	# record: a continued round has a number above 1 and no must-fix behind it,
@@ -3970,11 +4840,38 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 	# sameness that is really two absences.
 	_prev=''
 	_have_prev=no
-	_promoted_prev=no
 	_seen_mf=''
 	: >"$WORK/mustfix"
+	if [ "$_requested_gate" = closed ] && [ -e "$_closing_marker" ]; then
+		_cr_candidate=$(exact_candidate 2>/dev/null) || _cr_candidate=''
+		if [ -f "$_closing_marker" ] && [ ! -L "$_closing_marker" ] &&
+			jq -e --arg candidate "$_cr_candidate" \
+			'.schema == 1 and .candidate == $candidate and (.closing_round | type == "number" and . >= 2 and . == floor)' \
+			"$_closing_marker" >/dev/null 2>&1; then
+			_closing_revalidate=yes
+			_closing_round=$(jq -r .closing_round "$_closing_marker")
+			GATE=accepted
+			STANDARDS_GATE=accepted
+			ROUND=1
+			_authornow=no
+		else
+			LOOP_STOP='cannot act: closing revalidation checkpoint is invalid or names another candidate'
+			return 1
+		fi
+	fi
 	while :; do
+		_built_this_round=no
 		chain_intact || { LOOP_STOP="authority changed"; return 1; }
+		if [ "$_publishnow" = yes ]; then
+			DELIVER_ERR=''
+			build_worktree || { LOOP_STOP="cannot act: could not prepare the delivery worktree"; return 1; }
+			publish_delivery_candidate "$WT"
+			_prc=$?
+			[ "$_prc" = 0 ] || { LOOP_STOP="cannot act: $DELIVER_ERR"; return 1; }
+			publication_finish_record || { LOOP_STOP="cannot act: published candidate record is not durable"; return 1; }
+			_publishnow=no
+			_built_this_round=yes
+		fi
 		if [ "$_author" = none ] || [ "$_authornow" != yes ]; then
 			# Nothing authors here: either this gate has no author at all, or
 			# what it judges is already on disk from an earlier step.
@@ -4009,10 +4906,20 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 				LOOP_STOP_NOTE=$DEPENDS_ON_NOTE
 				return 2
 			fi
+			if ! publication_primary_safe; then
+				LOOP_STOP="cannot act: publication authority was already tracked or its primary history is unknown"
+				return 1
+			fi
 			if ! build_worktree; then
 				LOOP_STOP="cannot act: could not prepare the build worktree"
 				return 1
 			fi
+			if ! git -C "$WT" diff --cached --quiet; then
+				LOOP_STOP="cannot act: unexplained changes were staged before the build"
+				return 1
+			fi
+			_build_publication_hash=$(publication_digest)
+			_build_head=$(git -C "$WT" rev-parse HEAD 2>/dev/null) || { LOOP_STOP="cannot act: could not freeze the build branch"; return 1; }
 			mark_step "build round $ROUND, at the gate into $GATE"
 			if ! invoke build "$WORK/final" "$WT" "$WORK/mustfix"; then
 				LOOP_STOP=${INVOKE_STOP:-"cannot act: remit-invoke"}
@@ -4021,70 +4928,172 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 			# The build took as long as it took. Nothing it authored is committed
 			# or delivered against an authority that changed while it ran.
 			chain_intact || { LOOP_STOP="authority changed"; return 1; }
+			[ "$(publication_digest)" = "$_build_publication_hash" ] || { LOOP_STOP="publication authority changed during the build"; return 1; }
+			[ "$(git -C "$WT" rev-parse HEAD 2>/dev/null)" = "$_build_head" ] || { LOOP_STOP="build changed the delivery branch identity"; return 1; }
 			DELIVER_ERR=''
-			FINALTEXT="$WORK/final"
-			deliver "$WT" "$WORK/final"
+			prepare_delivery_candidate "$WT" || { LOOP_STOP="cannot act: $DELIVER_ERR"; return 1; }
+			publish_delivery_candidate "$WT"
 			_drc=$?
-			if [ "$_drc" = 1 ]; then
-				LOOP_STOP="cannot act: $DELIVER_ERR"
-				return 1
+			[ "$_drc" = 0 ] || { LOOP_STOP="cannot act: $DELIVER_ERR"; return 1; }
+			publication_finish_record || { LOOP_STOP="cannot act: published candidate record is not durable"; return 1; }
+			_built_this_round=yes
+		fi
+		if [ "$_requested_gate" = closed ] && [ "$_built_this_round" = yes ] && { [ "$_closing_revalidate" = yes ] || { [ "$GATE" = closed ] && [ "$ROUND" -gt 1 ]; }; }; then
+			_cr_candidate=$(exact_candidate) || { LOOP_STOP='cannot act: repaired closing candidate is not recorded exactly'; return 1; }
+			if [ "$_closing_revalidate" != yes ]; then
+				_closing_revalidate=yes
+				_closing_round=$ROUND
+				ROUND=1
+				_prev=''
+				_have_prev=no
+				_seen_mf=''
 			fi
-			{
-				printf 'Commit `%s` on `work/%s`%s\n\n' "$SHA" "$slug" "${PR_URL:+, pull request $PR_URL}"
-				printf -- '- delivery size: %s file(s) added, %s MB staged\n' "${DELIVERY_FILES:-?}" "${DELIVERY_MB:-?}"
-				[ "$_drc" = 3 ] && printf -- '- pull request: NOT updated — %s\n' "$DELIVER_ERR"
-			} | log_append "delivery — ${PR_URL:-$SHA} — $(now)"
-			commit_step "remit: $slug record delivery $SHA" ".remit/work-items/$slug"
-			if [ "$_drc" = 2 ]; then
-				LOOP_STOP="cannot act: gh"
-				return 1
-			fi
-			if [ "$_drc" = 3 ]; then
-				LOOP_STOP="cannot act: $DELIVER_ERR"
-				return 1
-			fi
+			jq -n --arg candidate "$_cr_candidate" --argjson closing_round "$_closing_round" \
+				'{schema:1,candidate:$candidate,closing_round:$closing_round}' >"$_closing_marker.tmp" &&
+				mv "$_closing_marker.tmp" "$_closing_marker" || { LOOP_STOP='cannot act: retain accepted revalidation before closing'; return 1; }
+			GATE=accepted
+			STANDARDS_GATE=accepted
 		fi
 
-		# THE EVALUATOR IS RAISED WHERE THE DELIVERY IS — the law is WHERE AN
-		# EVALUATOR IS RAISED in this script's header, and this is only its code.
-		# The gate into `refined` judges the brief, before any worktree exists, so
-		# it is raised in the primary worktree; every gate after a delivery is
-		# raised in the ITEM'S OWN worktree, on `work/<slug>`, which is the only
-		# tree where the delivered files are on disk.
+		# Refinement judges current authority before a delivery exists.  Every
+		# delivery gate instead gets an independently exported exact candidate.
 		EVAL_DELIVERY=''
 		_evalwt=$root
 		if [ "$GATE" != refined ]; then
-			EVAL_DELIVERY=$(recorded_delivery)
-			if git -C "$root" show-ref --verify --quiet "refs/heads/work/$slug" && build_worktree; then
-				_evalwt=$WT
-			else
-				# No delivery branch, or a worktree that would not open. Said out
-				# loud and raised in the primary worktree anyway: an evaluation
-				# that runs on the record alone is worth more than none, and the
-				# briefing tells it which tree it is standing in either way.
-				EVAL_DELIVERY=''
-				say "the delivered tree could not be opened at $(worktree_path) — this evaluate is raised in $root and judges the record and the kept runs."
-			fi
+			EVAL_DELIVERY=$(exact_candidate) || EVAL_DELIVERY=''
 		fi
 		mark_step "evaluate round $ROUND, at the gate into $GATE"
-		if ! invoke evaluate "$WORK/verdict" "$_evalwt"; then
-			LOOP_STOP=${INVOKE_STOP:-"cannot act: remit-invoke"}
-			return 1
+		if [ "$GATE" = refined ]; then
+			if ! invoke evaluate "$WORK/verdict" "$_evalwt"; then
+				LOOP_STOP=${INVOKE_STOP:-"cannot act: remit-invoke"}
+				return 1
+			fi
+		else
+			_exact_block=''
+			if [ -z "$EVAL_DELIVERY" ]; then
+				_exact_block='the recorded delivery is missing or ambiguous locally; no fetch or tree fallback was used'
+			else
+				_exact_recovered=no
+				exact_recover "$EVAL_DELIVERY"
+				_errc=$?
+				case "$_errc" in
+				0) _exact_recovered=yes ;;
+				1)
+					if ! exact_prepare "$EVAL_DELIVERY"; then
+						_exact_block='the exact delivery snapshot or its selected inputs could not be prepared'
+					fi
+					;;
+				3) _exact_block=$EXACT_RECOVER_STOP ;;
+				4)
+					exact_retry_write || { LOOP_STOP='cannot act: retain invalid recovered evaluation retry'; return 1; }
+					LOOP_STOP="invalid exact evaluation recovered after interruption: ${EXACT_RECOVER_STOP:-candidate, inputs or durable evidence changed}"
+					return 1
+					;;
+				esac
+				if [ -z "$_exact_block" ] && [ "$_exact_recovered" != yes ]; then
+					invoke evaluate "$WORK/verdict" "$EXACT_SOURCE"
+					_eirc=$?
+					if ! jq -e --arg id "$EXACT_RUN_ID" '.schema == 1 and .state == "reaped" and .run_id == $id' "$WORK/exact-completion.json" >/dev/null 2>&1; then
+						_exact_block='the evaluator process lifetime was not proved complete; the private snapshot was retained and was not audited'
+						say "$ME: exact evaluation retained at $EXACT_OUT — no whole-process completion record"
+					else
+					_audit_scratch="$WORK/audit-$EXACT_RUN_ID"
+					sh "$SNAPSHOT" audit --out "$EXACT_OUT" --baseline-oid "$EXACT_BASELINE" --scratch "$_audit_scratch" \
+						>"$WORK/exact-audit.out" 2>"$WORK/exact-audit.err"
+					_arc=$?
+					exact_audit_summary || :
+					exact_harvest "$([ "$_arc" = 0 ] && printf clean || printf invalid)"
+					_hrc=$?
+					if [ "${REMIT_TEST_STOP_AFTER_EXACT_HARVEST:-}" = "$EXACT_RUN_ID" ] || [ "${REMIT_TEST_STOP_AFTER_EXACT_HARVEST:-}" = yes ]; then
+						LOOP_STOP='test interruption after exact evidence harvest'
+						return 1
+					fi
+					if [ "$_arc" = 4 ]; then
+						exact_retry_write || { LOOP_STOP='cannot act: retain evaluation retry'; return 1; }
+						if [ "$_hrc" = 0 ]; then
+							exact_cleanup || say "$ME: unsafe snapshot cleanup retained $EXACT_OUT"
+						else
+							say "$ME: invalid evaluation evidence could not be finalized; retained $EXACT_OUT"
+						fi
+						LOOP_STOP='invalid exact evaluation: candidate or selected inputs changed'
+						return 1
+					elif [ "$_arc" != 0 ]; then
+						_exact_block='the exact evaluation audit was unavailable'
+					elif [ "$_hrc" = 2 ] || [ "$_hrc" = 4 ]; then
+						exact_retry_write || { LOOP_STOP='cannot act: retain invalid evaluator output retry'; return 1; }
+						say "$ME: unsafe evaluator results retained at $EXACT_OUT"
+						LOOP_STOP='invalid exact evaluation output: results were not a bounded plain file tree'
+						return 1
+					elif [ "$_hrc" != 0 ]; then
+						_exact_block='evaluation proof was unsafe or exceeded the retained-output bound'
+					elif [ "$_eirc" != 0 ]; then
+						_exact_block='the evaluator execution did not produce a usable return'
+					fi
+					if [ -z "$_exact_block" ]; then
+						exact_cleanup || _exact_block='the owned evaluation snapshot could not be safely cleaned up'
+					else
+						exact_cleanup || say "$ME: unsafe snapshot cleanup retained $EXACT_OUT"
+					fi
+					fi
+				fi
+			fi
+			if [ -n "$_exact_block" ]; then
+				printf 'Verdict: BLOCKED\nFinding: %s\n' "$_exact_block" >"$WORK/verdict"
+			fi
 		fi
 		chain_intact || { LOOP_STOP="authority changed"; return 1; }
-		# A LINE WRITTEN IN EMPHASIS IS STILL THE LINE: `*`, `_` and backticks around a
+		# A LINE WRITTEN IN EMPHASIS IS STILL THE LINE: `*` and `_` around a
 		# parsed line shape are stripped before anything below reads it, and the
 		# verbatim copy the record carries is the normalised one.
 		nocr "$WORK/verdict" | sed \
-			-e 's/^[*_`]\{1,3\}\(Verdict\|Must-fix\|Finding\|Ask\|Back to\|fix\|hold\|promote\|accept\):[*_`]\{0,3\} */\1: /' \
-			-e '/^\(Verdict\|Must-fix\|Finding\|Ask\|Back to\|fix\|hold\|promote\|accept\): /s/[*_`]\{1,3\}$//' \
+			-e 's/^[*_]\{1,3\}\(Verdict\|Must-fix\|Finding\|Ask\|Back to\|fix\|hold\|promote\|accept\):[*_]\{0,3\} */\1: /' \
+			-e '/^\(Verdict\|Must-fix\|Finding\|Ask\|Back to\|fix\|hold\|promote\|accept\): /s/[*_]\{1,3\}$//' \
 			>"$WORK/verdict.plain" && mv "$WORK/verdict.plain" "$WORK/verdict"
-		_v=$(nocr "$WORK/verdict" | sed -n 's/^Verdict: *//p' | sed -n 1p)
+		# Examples are evidence, not control. Only unquoted, unfenced directives
+		# take part in the protocol. Keep the complete return in the record.
+		awk '
+			{
+				line = $0
+				indent = 0
+				while (substr(line, indent + 1, 1) == " ") indent++
+				if (indent <= 3) line = substr(line, indent + 1)
+				if (fence != "") {
+					closing = line
+					sub(/[ \t]*$/, "", closing)
+					if (substr(closing, 1, 1) == fence && closing !~ ("[^" fence "]") && length(closing) >= width) fence = ""
+					print ""; next
+				}
+				if (line ~ /^>/) { quoted = 1; print ""; next }
+				if (quoted) {
+					if (line ~ /^[ \t]*$/) quoted = 0
+					print ""; next
+				}
+				if (line ~ /^```/ || line ~ /^~~~/) {
+					fence = substr(line, 1, 1)
+					width = 0
+					while (substr(line, width + 1, 1) == fence) width++
+					print ""; next
+				}
+				print
+			}
+		' "$WORK/verdict" >"$WORK/verdict.control"
+		_vcount=$(grep -c '^Verdict:' "$WORK/verdict.control")
+		_v=$(sed -n 's/^Verdict: *//p' "$WORK/verdict.control" | sed 's/[ \t]*$//')
+		# Legacy returns may append an explanation after a spaced em dash.
+		# That delimiter is supported; arbitrary PASS*/FAIL* prefixes are not.
+		_v=${_v%% — *}
+		if [ "$_vcount" != 1 ]; then
+			[ -z "$EVAL_DELIVERY" ] || exact_retry_write || { LOOP_STOP="cannot act: retain evaluation retry"; return 1; }
+			LOOP_STOP="cannot act: verdict"
+			return 1
+		fi
 		case "$_v" in
-		FAIL*) V=FAIL ;;
-		"PASS WITH FINDINGS"*) V="PASS WITH FINDINGS" ;;
-		PASS*) V=PASS ;;
+		FAIL) V=FAIL ;;
+		"PASS WITH FINDINGS") V="PASS WITH FINDINGS" ;;
+		PASS) V=PASS ;;
+		BLOCKED) V=BLOCKED ;;
 		*)
+			[ -z "$EVAL_DELIVERY" ] || exact_retry_write || { LOOP_STOP="cannot act: retain evaluation retry"; return 1; }
 			LOOP_STOP="cannot act: verdict"
 			return 1
 			;;
@@ -4099,7 +5108,7 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 		_fix_ids=$(rubric_ids "$GATE" fix)
 
 		GATE_PROMOTE=''
-		for _cid in $(nocr "$WORK/verdict" | sed -n 's/^promote: *//p' | sed 's/:.*//'); do
+		for _cid in $(nocr "$WORK/verdict.control" | sed -n 's/^promote: *//p' | sed 's/:.*//'); do
 			case " $_promote_ids" in
 			*" $_cid "*)
 				GATE_PROMOTE=$_cid
@@ -4108,7 +5117,7 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 			esac
 		done
 		GATE_HOLD=''
-		for _cid in $(nocr "$WORK/verdict" | sed -n 's/^hold: *\([^:]*\).*/\1/p'); do
+		for _cid in $(nocr "$WORK/verdict.control" | sed -n 's/^hold: *\([^:]*\).*/\1/p'); do
 			case " $_hold_ids" in
 			*" $_cid "*)
 				GATE_HOLD=$_cid
@@ -4117,7 +5126,7 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 			esac
 		done
 		_fixid=''
-		for _cid in $(nocr "$WORK/verdict" | sed -n 's/^fix: *\([^:]*\).*/\1/p'); do
+		for _cid in $(nocr "$WORK/verdict.control" | sed -n 's/^fix: *\([^:]*\).*/\1/p'); do
 			case " $_fix_ids" in
 			*" $_cid "*)
 				_fixid=$_cid
@@ -4130,15 +5139,57 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 		# whatever the verdict line said it was.
 		V_EFF=$V
 		[ -n "$_fixid" ] && V_EFF=FAIL
+		_has_mustfix=no
+		grep -q '^Must-fix: .*[^[:space:]]' "$WORK/verdict.control" && _has_mustfix=yes
+		if [ "$V" = BLOCKED ] && grep -Eq '^(Must-fix|fix|hold|promote|accept):' "$WORK/verdict.control"; then
+			[ -z "$EVAL_DELIVERY" ] || exact_retry_write || { LOOP_STOP="cannot act: retain evaluation retry"; return 1; }
+			LOOP_STOP="cannot act: contradictory blocked verdict"
+			return 1
+		fi
+		if [ "$V" = BLOCKED ] && ! grep -q '^Finding: .*[^[:space:]]' "$WORK/verdict.control"; then
+			LOOP_STOP="cannot act: blocked verdict without evidence"
+			return 1
+		fi
+		[ "$_has_mustfix" = yes ] && V_EFF=FAIL
+		_asked=$(nocr "$WORK/verdict.control" | awk '
+			/^(Finding|Must-fix): / { anchored = 1; next }
+			/^fix: / { anchored = 1; next }
+			/^Ask: / {
+				if (anchored && substr($0, 6) ~ /[^[:space:]]/) {
+					if (n < 4) { n++; print "- question " n ": " substr($0, 6) }
+				} else anchored = 0
+				next
+			}
+			{ anchored = 0 }
+		')
+		if [ -n "$_asked" ] && [ "$V_EFF" != FAIL ] && [ "$V_EFF" != BLOCKED ]; then
+			LOOP_STOP="cannot act: passing verdict with an unresolved question"
+			return 1
+		fi
+		_retry_evaluate=no
+		if [ "$V" = BLOCKED ] || { [ "$V_EFF" = FAIL ] && { [ -n "$_asked" ] || { [ "$_has_mustfix" = no ] && [ -z "$_fixid" ]; }; }; }; then
+			_retry_evaluate=yes
+		fi
+		if [ "$_retry_evaluate" = yes ]; then
+			# Save before appending the verdict: a crash may cause re-evaluation,
+			# but must never manufacture a repair from an unfinished evaluation.
+			jq -n --arg gate "$GATE" --arg candidate "${EVAL_DELIVERY:-}" --argjson round "$ROUND" \
+				'{schema:1,next:"evaluate",gate:$gate,candidate:$candidate,round:$round}' \
+				>"$item/.evaluation-retry.json.tmp" &&
+				mv "$item/.evaluation-retry.json.tmp" "$item/.evaluation-retry.json" || {
+				LOOP_STOP="cannot act: retain evaluation retry"; return 1;
+			}
+		fi
 
 		_n=$(next_finding_no)
 		{
 			printf -- '- verdict: %s\n' "$V_EFF"
 			[ "$V_EFF" = "$V" ] ||
-				printf -- '- the verdict line returned `%s`; a `fix:` citation is a must-fix, so it is a FAIL and the loop runs\n' "$V"
+				printf -- '- the verdict line returned `%s`; a must-fix stands, so it is a FAIL and the loop runs\n' "$V"
 			printf -- '- gate: into %s, judged against %s\n' "$GATE" ".remit/rules/$GATE.md"
 			printf -- '- round: %s\n' "$ROUND"
-			nocr "$WORK/verdict" |
+			[ "$_retry_evaluate" = yes ] && printf -- '- retry: evaluate\n'
+			nocr "$WORK/verdict.control" |
 				awk -v start="$_n" -v pids=" $_promote_ids" -v aids=" $_accept_ids" \
 					-v hids=" $_hold_ids" -v fids=" $_fix_ids" '
 				function known(list, id) { return index(list, " " id " ") > 0 }
@@ -4178,18 +5229,46 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 					next
 				}
 			'
-			printf '\nReturned by the evaluate role, verbatim:\n\n'
-			cat "$WORK/verdict"
-		} | log_append "verdict — evaluate — into $GATE — $(git -C "$root" rev-parse --short HEAD) — $(now)"
+			printf '\nReturned by the evaluate role, quoted (untrusted evidence):\n\n'
+			# A return may contain record-looking headings. Quote every line so
+			# the resume reader can never treat that text as machine metadata.
+			sed 's/^/> /' "$WORK/verdict"
+		} | log_append "verdict — evaluate — into $GATE — $([ -n "$EVAL_DELIVERY" ] && printf 'delivery %s' "$EVAL_DELIVERY" || git -C "$root" rev-parse --short HEAD) — $(now)"
+		if [ "$_retry_evaluate" != yes ]; then
+			printf '{"schema":1,"next":"legacy"}\n' >"$item/.evaluation-retry.json.tmp" &&
+				mv "$item/.evaluation-retry.json.tmp" "$item/.evaluation-retry.json" || {
+				LOOP_STOP="cannot act: clear evaluation retry"; return 1;
+			}
+		fi
 		commit_step "remit: $slug verdict $V_EFF at the $GATE gate (round $ROUND)" ".remit/work-items/$slug"
 
-		[ "$V_EFF" != FAIL ] && return 0
+		if [ "$V_EFF" != FAIL ] && [ "$V_EFF" != BLOCKED ]; then
+			if [ "$_closing_revalidate" = yes ]; then
+				if [ -n "$GATE_HOLD" ]; then
+					LOOP_STOP="hold: $GATE_HOLD"
+					LOOP_STOP_NOTE="The accepted re-evaluation of the repaired closing candidate cited \`hold: $GATE_HOLD\`. The item remains accepted, the closing checkpoint is retained, and no closing evaluator was raised."
+					return 2
+				fi
+				rm -f "$_closing_marker" || { LOOP_STOP='cannot act: clear accepted revalidation before closing'; return 1; }
+				_closing_revalidate=no
+				GATE=closed
+				STANDARDS_GATE=closed
+				ROUND=$_closing_round
+				_authornow=no
+				_prev=''
+				_have_prev=no
+				_seen_mf=''
+				: >"$WORK/mustfix"
+				continue
+			fi
+			return 0
+		fi
 
 		# A `fix:` citation the gate file carries is must-fix text exactly as a
 		# `Must-fix:` line is, and is compared as such by the same-must-fix-twice
 		# stop. One it does not carry was NOT APPLIED above and is not must-fix
 		# text either — it raised nothing, so there is nothing to send back.
-		nocr "$WORK/verdict" | awk -v fids=" $_fix_ids" '
+		nocr "$WORK/verdict.control" | awk -v fids=" $_fix_ids" '
 			function idof(l, i) { i = l; sub(/:.*/, "", i); return i }
 			/^Must-fix: / { print substr($0, 11); next }
 			/^fix: / {
@@ -4208,16 +5287,6 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 		# ACTIVE, with the findings on the record.
 		# AN EVALUATOR MAY ASK — THE THREE GATES. Anchored: an `Ask:` counts only after
 		# a `Finding:`, `Must-fix:`, `fix:` or `Ask:` line, and four is the bound.
-		_asked=$(nocr "$WORK/verdict" | awk '
-			/^(Finding|Must-fix): / { anchored = 1; next }
-			/^fix: / { anchored = 1; next }
-			/^Ask: / {
-				if (anchored && n < 4) { n++; print "- question " n ": " substr($0, 6) }
-				anchored = 1
-				next
-			}
-			{ anchored = 0 }
-		')
 		if [ -n "$_asked" ]; then
 			_nq=$(printf '%s\n' "$_asked" | grep -c '^- question ')
 			_qs=questions
@@ -4233,25 +5302,14 @@ $_asked"
 			return 2
 		fi
 
-		# A FAIL'S FINDINGS ARE ITS MUST-FIX WHEN IT NAMES NONE — once, and only where
-		# the author is a builder: promoted by this script and said so on the record. A
-		# second findings-only FAIL after a promoted round is the stop.
-		_promoted_now=no
-		if [ -z "$_mf" ] && [ "$_author" = build ] && [ "$_promoted_prev" != yes ]; then
-			_findings=$(nocr "$WORK/verdict" | sed -n 's/^Finding: //p')
-			if [ -n "$_findings" ]; then
-				printf '%s\n' "$_findings" >"$WORK/mustfix"
-				_mf=$_findings
-				_promoted_now=yes
-				{
-					printf 'The verdict above failed the work and attached that to no `Must-fix:` line\n'
-					printf 'and no `fix:` citation. Its findings are promoted to the must-fix by the\n'
-					printf 'mechanism and go to a fresh builder as one round; a second such verdict\n'
-					printf 'after it stops for the practitioner.\n\n'
-					printf '%s\n' "$_findings" | sed 's/^/- must-fix: /'
-				} | log_append "promoted — the findings are the must-fix — round $ROUND — $(now)"
-				say "promoted: the verdict named findings and no must-fix; the findings go to a builder as the must-fix, once."
-			fi
+		if [ "$V_EFF" = BLOCKED ]; then
+			GATE_PROMOTE=''
+			GATE_HOLD=''
+			LOOP_STOP="evaluation blocked"
+			LOOP_STOP_DETAIL="evaluation blocked at the gate into $GATE"
+			LOOP_STOP_NOTE="The evaluation could not establish a verdict. Its evidence is recorded above.
+No repair was commissioned. Resume retries this evaluation of the same delivery."
+			return 2
 		fi
 
 		_mf_key="<$(printf '%s' "$_mf" | tr '\n' ' ')>"
@@ -4259,18 +5317,10 @@ $_asked"
 		if [ -z "$_mf" ]; then
 			LOOP_STOP_DETAIL="FAIL with nothing to act on at the gate into $GATE"
 			LOOP_STOP="FAIL with nothing to act on"
-			if [ "$_promoted_prev" = yes ]; then
-				LOOP_STOP_NOTE="The gate into \`$GATE\` returned FAIL with no \`Must-fix:\` line and no
-\`fix:\` citation the gate file carries, for the second time running: the findings of
-the first were handed to a fresh builder as the must-fix, and the gate still names
-nothing a builder can act on. No further round was run and nothing escalated: the
-findings are on the record above, and what to do with them is the practitioner's."
-			else
-				LOOP_STOP_NOTE="The gate into \`$GATE\` returned FAIL with no \`Must-fix:\` line and no
-\`fix:\` citation the gate file carries — and no findings either, so nothing a fresh
-author could be sent back to discharge. No round was run on an empty must-fix and
-nothing escalated: what to do with it is the practitioner's."
-			fi
+			LOOP_STOP_NOTE="The gate into \`$GATE\` returned FAIL with no \`Must-fix:\` line and no
+\`fix:\` citation the gate file carries. No round was run without an explicit
+repair, and nothing escalated: the findings are on the record above, and what to
+do with them is the practitioner's."
 			return 2
 		fi
 
@@ -4279,7 +5329,7 @@ nothing escalated: what to do with it is the practitioner's."
 		# a fresh context may author — and nothing else in the verdict routes
 		# anything. The first word is all that is read, so the evidence an
 		# evaluator writes after it costs nothing.
-		_backto=$(nocr "$WORK/verdict" | sed -n 's/^Back to: *//p' | sed -n 1p |
+		_backto=$(nocr "$WORK/verdict.control" | sed -n 's/^Back to: *//p' | sed -n 1p |
 			sed 's/[^A-Za-z-].*//' | tr 'A-Z' 'a-z')
 
 		# GATE 1 WITH NOBODY TO SEND IT TO: the must-fix goes on the record and the item
@@ -4339,7 +5389,6 @@ and nothing escalated; the must-fixes are on the record above.
 		_seen_mf="${_seen_mf}
 ${_mf_key}"
 		_prev=$_mf
-		_promoted_prev=$_promoted_now
 		_have_prev=yes
 		ROUND=$((ROUND + 1))
 	done
@@ -4848,7 +5897,6 @@ ROUND=1
 SHA=''
 PR_NUM=''
 PR_URL=''
-FINALTEXT=''
 # THE BASE IS THE REPOSITORY'S DEFAULT BRANCH, never whatever the primary
 # worktree has checked out: origin's HEAD; failing that `main`; failing that
 # `master`; only with none of those the current branch.
@@ -6179,7 +7227,9 @@ in the stage it is in, for the practitioner, whatever else was cited there."
 			if [ -n "$PR_NUM" ]; then
 				command -v gh >/dev/null 2>&1 || escalate "cannot act: gh"
 				build_worktree || escalate "cannot act: could not prepare the build worktree"
-				out=$(cd "$WT" && gh pr ready "$PR_NUM" 2>&1) ||
+				delivery_destination
+				delivery_destination_matches || escalate "cannot act: delivery destination changed"
+				out=$(cd "$WT" && gh_pr pr ready "$PR_NUM" 2>&1) ||
 					escalate "cannot act: gh pr ready — $(printf '%s' "$out" | tr '\n' ' ')"
 				say "pull request: #$PR_NUM is ready for review — a recorded passing verdict took it out of draft."
 			fi

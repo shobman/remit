@@ -1,0 +1,615 @@
+#!/bin/sh
+# remit-snapshot — prepare and audit one exact, local evaluation snapshot.
+#
+#   sh bin/remit-snapshot prepare --repo <repository> --candidate <full-commit>
+#       --exclude <trusted-exclusions.json> --inputs <trusted-inputs.json>
+#       --out <new-owned-directory> [--run-id <opaque-id>]
+#       [--coordinator-pid <positive-integer>]
+#
+#   sh bin/remit-snapshot audit --out <prepared-directory>
+#       --baseline-oid <oid printed by prepare> --scratch <fresh-caller-directory>
+#
+#   sh bin/remit-snapshot cleanup --out <prepared-directory> --run-id <opaque-id>
+#   sh bin/remit-snapshot validate-owned --out <prepared-directory> --run-id <opaque-id>
+#   sh bin/remit-snapshot validate-results --out <prepared-directory>
+#
+# `prepare` materialises the candidate's ordinary blobs in `out/source`, excluding
+# only paths in the coordinator-supplied exclusion file. It rejects symlinks,
+# gitlinks, LFS pointers, control/backslash paths, portable-unsafe path aliases,
+# and any mode other than 100644 or 100755. It creates an independent Git repository for local inspection; it
+# has no remote, hooks, alternates, original object database or host config.
+# Partial/promisor source repositories and missing candidate objects are refused:
+# preparation never fetches a blob.
+#
+# Inputs are coordinator-supplied regular files copied to `out/inputs`; they are
+# never overlaid onto source. `out/scratch` and `out/results` are the only output
+# roots a worker may use. The baseline is in `out/`, outside all four worker
+# roots. A native worker can still reach host paths: this helper DETECTS mutation;
+# it is not a containment boundary.
+#
+# `audit` compares source and inputs byte-for-byte by manifest and audits the
+# snapshot Git semantic index tree plus HEAD, refs, config, hooks, alternates and
+# grafts. It intentionally does not compare raw index bytes: harmless `git
+# status` may refresh a stat cache. `.gitignore` never affects the filesystem
+# manifest. Audit intermediates go only in a fresh caller-owned `--scratch`
+# directory outside `out`; the caller reaps processes and owns cleanup. This
+# helper removes a directory only through `cleanup`, after matching its ownership
+# record, canonical root and plain (non-link/reparse) tree.  Uncertain cleanup is
+# refused and the caller retains the locator.
+#
+# Exclusion schema: {"schema":1,"exclude":["relative/path", ...]}
+# Input schema:     {"schema":1,"inputs":[{"source":"/absolute/file",
+#                    "path":"relative/path"}, ...]}
+#
+# Exit 0: prepared/audit clean. Exit 2: unsupported or preparation precondition.
+# Exit 4: audit found mutation or an unsafe replacement. Stdout from prepare is a
+# single JSON descriptor; audit is silent when clean. `baseline_oid` is a SHA-1
+# object ID produced outside every repository, so it does not vary with the
+# caller's current worktree object format. On MSYS, path comparisons use the
+# final native path of each existing path (or existing parent for a fresh path),
+# and directory walks additionally refuse reparse points and NTFS ADS.
+
+set -u
+
+ME=remit-snapshot
+TAB=$(printf '\t')
+NL='
+'
+CR=$(printf '\r')
+
+die() { printf '%s: %s\n' "$ME" "$*" >&2; exit 2; }
+invalid() { printf '%s: evaluation snapshot invalid: %s\n' "$ME" "$*" >&2; exit 4; }
+
+usage() {
+	printf '%s\n' 'usage: remit-snapshot prepare --repo <repository> --candidate <full-commit> --exclude <trusted-exclusions.json> --inputs <trusted-inputs.json> --out <new-owned-directory> [--run-id <opaque-id>] [--coordinator-pid <positive-integer>]' >&2
+	printf '%s\n' '   or: remit-snapshot audit --out <prepared-directory> --baseline-oid <oid> --scratch <fresh-caller-directory>' >&2
+	printf '%s\n' '   or: remit-snapshot cleanup --out <prepared-directory> --run-id <opaque-id>' >&2
+	printf '%s\n' '   or: remit-snapshot validate-owned --out <prepared-directory> --run-id <opaque-id>' >&2
+	printf '%s\n' '   or: remit-snapshot validate-results --out <prepared-directory>' >&2
+	exit 2
+}
+
+command -v git >/dev/null 2>&1 || die "git is required"
+command -v jq >/dev/null 2>&1 || die "jq is required"
+command -v cmp >/dev/null 2>&1 || die "cmp is required"
+
+case "$(uname -s 2>/dev/null || :)" in
+MSYS* | MINGW*)
+	PATH_FAMILY=msys
+	command -v cygpath >/dev/null 2>&1 || die "MSYS path equivalence requires cygpath"
+	command -v pwsh.exe >/dev/null 2>&1 || die "Windows snapshot auditing requires PowerShell 7.2 or later (pwsh.exe)"
+	pwsh.exe -NoProfile -NonInteractive -Command 'if ($PSVersionTable.PSVersion -lt [version]"7.2") { exit 2 }' >/dev/null 2>&1 || die "Windows snapshot auditing requires PowerShell 7.2 or later for directory streams"
+	# Native jq.exe otherwise adds CR to newline-delimited paths at its output
+	# boundary. Keep data bytes intact; never strip CR from untrusted input paths.
+	jq() { command jq --binary "$@"; }
+	;;
+*) PATH_FAMILY=posix ;;
+esac
+
+# Task inputs and coordinator records may be allocated beneath a shared /tmp.
+# Directories and helper-created records start private; source file modes are
+# explicitly restored from the candidate below.
+umask 077
+
+# Git honours a broad ambient GIT_* namespace.  Every invocation uses this
+# minimal environment, so a caller's Git worktree, object database, index or
+# config cannot redirect candidate reads or snapshot writes.
+CLEAN_PATH=$PATH
+CLEAN_HOME=/nonexistent
+clean_git() {
+	env -i PATH="$CLEAN_PATH" HOME="$CLEAN_HOME" LC_ALL=C TZ=UTC \
+		GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 \
+		git "$@"
+}
+repo_git() { clean_git -C "$REPO" "$@"; }
+
+portable_components() { # refuse names whose Windows spelling has a different meaning
+	_pc=$1
+	while :; do
+		case "$_pc" in
+		*/*) _component=${_pc%%/*}; _pc=${_pc#*/} ;;
+		*) _component=$_pc; _pc='';;
+		esac
+		case "$_component" in *:* | *.) return 1 ;; *' ') return 1 ;; esac
+		_alias=$_component
+		while :; do
+			case "$_alias" in *.) _alias=${_alias%?} ;; *' ') _alias=${_alias%?} ;; *) break ;; esac
+		done
+		case "$_alias" in . | ..) return 1 ;; esac
+		_pc_base=${_alias%%.*}
+		case "$_pc_base" in
+		[Cc][Oo][Nn] | [Pp][Rr][Nn] | [Aa][Uu][Xx] | [Nn][Uu][Ll] | [Cc][Oo][Mm][1-9] | [Ll][Pp][Tt][1-9] | [Gg][Ii][Tt]~[0-9]*) return 1 ;;
+		esac
+		[ -n "$_pc" ] || break
+	done
+	return 0
+}
+
+absolute_path() { # raw spelling only: reject traversal before any MSYS mapping
+	_ap=$1
+	case "$_ap" in *"$TAB"* | *"$NL"* | *"$CR"* | *\\*) return 1 ;; esac
+	case "$PATH_FAMILY:$_ap" in
+	posix:/*) _ap_rest=${_ap#/} ;;
+	msys:/*) case "$_ap" in //*) return 1 ;; esac; _ap_rest=${_ap#/} ;;
+	msys:[A-Za-z]:/*) _ap_rest=${_ap#?:/} ;;
+	*) return 1 ;;
+	esac
+	[ -n "$_ap_rest" ] || return 0
+	case "$_ap_rest" in */ | *//* | . | .. | */./* | */../* | */. | */..) return 1 ;; esac
+	portable_components "$_ap_rest"
+}
+
+path_map() {
+	if [ "$PATH_FAMILY" = msys ]; then
+		_pm_win=$(cygpath -w -- "$1") || return 1
+		# GetFullPath alone preserves DOS 8.3 and drive-alias spellings. Resolve
+		# an existing path by handle so the comparison uses Windows' final path.
+		# A fresh owned path may have exactly one absent final component, so
+		# resolve its existing parent and append that leaf. Any lookup ambiguity
+		# or failure is unsafe.
+		env REMIT_SNAPSHOT_PATH="$_pm_win" pwsh.exe -NoProfile -NonInteractive -Command 'try { Add-Type -Namespace RemitSnapshot -Name NativePath -MemberDefinition "[DllImport(`"kernel32.dll`", CharSet=CharSet.Unicode, SetLastError=true)] public static extern IntPtr CreateFile(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template); [DllImport(`"kernel32.dll`", CharSet=CharSet.Unicode, SetLastError=true)] public static extern uint GetFinalPathNameByHandle(IntPtr handle, System.Text.StringBuilder path, uint size, uint flags); [DllImport(`"kernel32.dll`", SetLastError=true)] [return: MarshalAs(UnmanagedType.Bool)] public static extern bool CloseHandle(IntPtr handle);" -ErrorAction Stop; function Get-RemitFinalPath([string]$candidate) { $h=[RemitSnapshot.NativePath]::CreateFile($candidate,0,7,[IntPtr]::Zero,3,0x02000000,[IntPtr]::Zero); if ($h -eq [IntPtr](-1)) { throw "cannot open path" }; try { $b=[Text.StringBuilder]::new(32768); $n=[RemitSnapshot.NativePath]::GetFinalPathNameByHandle($h,$b,[uint32]$b.Capacity,0); if ($n -eq 0 -or $n -ge $b.Capacity) { throw "cannot resolve final path" }; return $b.ToString() } finally { [void][RemitSnapshot.NativePath]::CloseHandle($h) } }; $p=[IO.Path]::GetFullPath($env:REMIT_SNAPSHOT_PATH); if ([IO.File]::Exists($p) -or [IO.Directory]::Exists($p)) { $full=Get-RemitFinalPath $p } else { $parent=[IO.Path]::GetDirectoryName($p); $leaf=[IO.Path]::GetFileName($p); if ([string]::IsNullOrEmpty($parent) -or [string]::IsNullOrEmpty($leaf) -or ![IO.Directory]::Exists($parent)) { exit 2 }; $full=[IO.Path]::Combine((Get-RemitFinalPath $parent),$leaf) }; if ($full.StartsWith("\\?\UNC\",[StringComparison]::OrdinalIgnoreCase)) { $full="\\"+$full.Substring(8) } elseif ($full.StartsWith("\\?\",[StringComparison]::OrdinalIgnoreCase)) { $full=$full.Substring(4) }; [Console]::Out.Write($full.Replace([char]92,[char]47).ToLowerInvariant()); exit 0 } catch { exit 2 }' || return 1
+	else printf '%s\n' "$1"; fi
+}
+
+path_equal() {
+	_pe_a=$(path_map "$1") || return 1
+	_pe_b=$(path_map "$2") || return 1
+	[ "$_pe_a" = "$_pe_b" ]
+}
+
+not_link_like() { # MSYS must also reject NTFS junctions/reparse points
+	[ ! -L "$1" ] || return 1
+	[ "$PATH_FAMILY" = msys ] || return 0
+	_nl_win=$(cygpath -w -- "$1") || return 2
+	# Walk from the drive root, stopping at a reparse point BEFORE inspecting
+	# anything beneath it. An inspection error is not a successful plain path.
+	env REMIT_SNAPSHOT_PATH="$_nl_win" pwsh.exe -NoProfile -NonInteractive -Command 'try { $p=$env:REMIT_SNAPSHOT_PATH; $root=[IO.Path]::GetPathRoot($p); $cursor=$root; foreach ($part in $p.Substring($root.Length).Split([char]92)) { if ($part.Length -eq 0) { continue }; $cursor=[IO.Path]::Combine($cursor,$part); $i=Get-Item -LiteralPath $cursor -Force -ErrorAction Stop; if (($i.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 1 } }; exit 0 } catch { exit 2 }' >/dev/null 2>&1
+}
+
+plain_windows_tree() { # one no-follow walk; no per-file PowerShell processes
+	[ "$PATH_FAMILY" = msys ] || return 0
+	not_link_like "$1" || return 1
+	_pwt_win=$(cygpath -w -- "$1") || return 1
+	# NTFS streams are not separate entries returned by find/Directory.Enumerate.
+	# Refuse every non-default stream, including streams attached to directories.
+	env REMIT_SNAPSHOT_PATH="$_pwt_win" pwsh.exe -NoProfile -NonInteractive -Command 'try { $pending=New-Object "System.Collections.Generic.Stack[string]"; $pending.Push($env:REMIT_SNAPSHOT_PATH); while ($pending.Count -gt 0) { $p=$pending.Pop(); $a=[IO.File]::GetAttributes($p); if (($a -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 1 }; foreach ($s in @(Get-Item -LiteralPath $p -Stream * -Force -ErrorAction Stop)) { if ($s.Stream -ne ":`$DATA") { exit 1 } }; if (($a -band [IO.FileAttributes]::Directory) -ne 0) { foreach ($entry in [IO.Directory]::EnumerateFileSystemEntries($p)) { $pending.Push($entry) } } }; exit 0 } catch { exit 2 }' >/dev/null 2>&1
+}
+
+safe_rel() { # $1 must be a nonempty, ordinary relative path
+	case "$1" in
+	'' | /* | . | .. | */ | *//* | ../* | */../* | */.. | */./* | */. | *"$TAB"* | *"$NL"* | *"$CR"* | *\\*) return 1 ;;
+	esac
+	portable_components "$1"
+}
+
+safe_source_rel() { # reject Git metadata and its Windows spelling aliases
+	safe_rel "$1" || return 1
+	_ss=$1
+	while :; do
+		case "$_ss" in
+		*/*) _component=${_ss%%/*}; _ss=${_ss#*/} ;;
+		*) _component=$_ss; _ss='';;
+		esac
+		_alias=$_component
+		while :; do
+			case "$_alias" in *.) _alias=${_alias%?} ;; *' ') _alias=${_alias%?} ;; *) break ;; esac
+		done
+		case "$_alias" in .[Gg][Ii][Tt]) return 1 ;; esac
+		[ -n "$_ss" ] || break
+	done
+	return 0
+}
+
+hash_file() { # $1 regular file -> Git object id without writing an object
+	# --stdin under / prevents Git discovery of the caller's repository (whose
+	# SHA-1/SHA-256 format would otherwise change the baseline identity).
+	clean_git -C / hash-object --no-filters --stdin <"$1"
+}
+
+SOURCE=''
+SNAP_HOME=''
+snapshot_git() { # arguments to git -C "$SOURCE", with no user/system config
+	clean_git -C "$SOURCE" "$@"
+}
+snapshot_commit() { # commit identity is fixed without inheriting ambient GIT_*
+	env -i PATH="$CLEAN_PATH" HOME="$CLEAN_HOME" LC_ALL=C TZ=UTC \
+		GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 \
+		GIT_AUTHOR_NAME=remit GIT_AUTHOR_EMAIL=remit@invalid GIT_COMMITTER_NAME=remit GIT_COMMITTER_EMAIL=remit@invalid \
+		GIT_AUTHOR_DATE='@0 +0000' GIT_COMMITTER_DATE='@0 +0000' \
+		git -C "$SOURCE" commit-tree "$1"
+}
+
+canonical_input_file() { # absolute regular file with no symlink in its ancestry
+	_ci=$1
+	absolute_path "$_ci" || return 1
+	[ -f "$_ci" ] && not_link_like "$_ci" || return 1
+	_ci_dir=${_ci%/*}
+	_ci_base=${_ci##*/}
+	[ -n "$_ci_dir" ] && [ -n "$_ci_base" ] || return 1
+	_ci_real_dir=$(CDPATH= cd -P -- "$_ci_dir" && pwd -P) || return 1
+	not_link_like "$_ci_dir" || return 1
+	path_equal "$_ci" "$_ci_real_dir/$_ci_base"
+}
+
+new_owned_path() { # $1 path, $2 label: absolute with an existing physical parent
+	_np=$1
+	absolute_path "$_np" || return 1
+	_np_parent=${_np%/*}
+	_np_base=${_np##*/}
+	[ -n "$_np_parent" ] || _np_parent=/
+	safe_rel "$_np_base" || return 1
+	[ -d "$_np_parent" ] && not_link_like "$_np_parent" || return 1
+	_np_real_parent=$(CDPATH= cd -P -- "$_np_parent" && pwd -P) || return 1
+	path_equal "$_np_parent" "$_np_real_parent" || return 1
+	[ ! -e "$_np" ] && [ ! -L "$_np" ]
+}
+
+existing_owned_dir() { # $1 path, $2 label: direct, physical directory
+	_ed=$1
+	_ed_label=$2
+	absolute_path "$_ed" || invalid "$_ed_label must be an absolute canonical directory"
+	[ -d "$_ed" ] && not_link_like "$_ed" || invalid "$_ed_label is absent or a symlink"
+	_ed_parent=${_ed%/*}
+	_ed_base=${_ed##*/}
+	[ -n "$_ed_parent" ] || _ed_parent=/
+	safe_rel "$_ed_base" || invalid "$_ed_label has an unsafe final path component"
+	[ -d "$_ed_parent" ] && not_link_like "$_ed_parent" || invalid "$_ed_label parent is absent or a symlink"
+	_ed_real_parent=$(CDPATH= cd -P -- "$_ed_parent" && pwd -P) || invalid "could not resolve $_ed_label parent"
+	path_equal "$_ed_parent" "$_ed_real_parent" || invalid "$_ed_label parent contains a symlink"
+	_ed_real=$(CDPATH= cd -P -- "$_ed" && pwd -P) || invalid "could not resolve $_ed_label"
+	path_equal "$_ed" "$_ed_real" || invalid "$_ed_label is not its physical canonical path"
+}
+
+fs_manifest() { # $1 root; source is special because .git is audited separately
+	_mroot=$1
+	[ -d "$_mroot" ] && [ ! -L "$_mroot" ] || return 1
+	plain_windows_tree "$_mroot" || return 1
+	(
+		cd "$_mroot" || exit 1
+		if [ "$_mroot" = "$SOURCE" ]; then
+			find . -path './.git' -prune -o -print
+		else
+			find . -print
+		fi
+	) | LC_ALL=C sort | while IFS= read -r _mp; do
+		case "$_mp" in
+		.) printf 'd\t.\n' ;;
+		*)
+			_mrel=${_mp#./}
+			safe_rel "$_mrel" || { printf 'unsafe\t%s\n' "$_mp"; continue; }
+			_mabs="$_mroot/$_mrel"
+			if [ -L "$_mabs" ]; then
+				printf 'link\t%s\n' "$_mrel"
+			elif [ -d "$_mabs" ]; then
+				printf 'd\t%s\n' "$_mrel"
+			elif [ -f "$_mabs" ]; then
+				_mmode=100644
+				[ -x "$_mabs" ] && _mmode=100755
+				printf 'f\t%s\t%s\t%s\n' "$_mmode" "$(hash_file "$_mabs")" "$_mrel"
+			else
+				printf 'unsafe\t%s\n' "$_mrel"
+			fi
+			;;
+		esac
+	done
+}
+
+git_control_raw_manifest() { # never invokes Git: safe before trusting .git
+	[ -d "$SOURCE/.git" ] && [ ! -L "$SOURCE/.git" ] || return 1
+	plain_windows_tree "$SOURCE/.git" || return 1
+	find "$SOURCE/.git" -print | LC_ALL=C sort |
+	while IFS= read -r _gf; do
+		[ "$_gf" = "$SOURCE/.git" ] && { printf 'd\t.\n'; continue; }
+		_grel=${_gf#"$SOURCE/.git/"}
+		safe_rel "$_grel" || { printf 'unsafe\t%s\n' "$_gf"; continue; }
+		if [ -L "$_gf" ]; then
+			printf 'link\t%s\n' "$_grel"
+		elif [ -d "$_gf" ]; then
+			printf 'd\t%s\n' "$_grel"
+		elif [ -f "$_gf" ]; then
+			case "$_grel" in
+			index) printf 'index\tregular\n' ;;
+			*) printf 'f\t%s\t%s\n' "$(hash_file "$_gf")" "$_grel" ;;
+			esac
+		else
+			printf 'unsafe\t%s\n' "$_grel"
+		fi
+	done
+}
+
+git_semantic_manifest() { # raw manifest has already proved .git is baseline-safe
+	printf 'head\t%s\n' "$(snapshot_git rev-parse --verify HEAD 2>/dev/null || printf '<invalid>')"
+	printf 'index-tree\t%s\n' "$(snapshot_git write-tree 2>/dev/null || printf '<invalid>')"
+	snapshot_git show-ref --head -d 2>/dev/null | LC_ALL=C sort | sed 's/^/ref\t/'
+}
+
+excluded() { # $1 candidate path, exclusion paths are already safe
+	_ep=$1
+	while IFS= read -r _ex; do
+		[ -n "$_ex" ] || continue
+		[ "$_ep" = "$_ex" ] && return 0
+		case "$_ep" in "$_ex"/*) return 0 ;; esac
+	done <"$OUT/exclusions"
+	return 1
+}
+
+write_baseline() {
+	fs_manifest "$SOURCE" >"$OUT/source.manifest" || die "could not manifest snapshot source"
+	fs_manifest "$OUT/inputs" >"$OUT/inputs.manifest" || die "could not manifest snapshot inputs"
+	git_control_raw_manifest >"$OUT/git.raw.manifest" || die "could not inspect snapshot Git controls"
+	git_semantic_manifest >"$OUT/git.manifest" || die "could not manifest snapshot Git state"
+	jq -n \
+		--arg candidate "$FULL" --arg selected_tree "$SELECTED_TREE" --arg snapshot_head "$SNAPSHOT_HEAD" \
+		--rawfile source "$OUT/source.manifest" --rawfile inputs "$OUT/inputs.manifest" \
+		--rawfile git_raw "$OUT/git.raw.manifest" --rawfile git "$OUT/git.manifest" \
+		'{schema:1,candidate:$candidate,selected_tree:$selected_tree,snapshot_head:$snapshot_head,source:$source,inputs:$inputs,git_raw:$git_raw,git:$git}' \
+		>"$OUT/audit-baseline.json" || die "could not write audit baseline"
+	BASELINE_OID=$(hash_file "$OUT/audit-baseline.json") || die "could not hash audit baseline"
+	return 0
+}
+
+prepare() {
+	REPO='' CANDIDATE='' EXCLUDE='' INPUTS='' OUT='' RUN_ID='' COORDINATOR_PID=''
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--repo | --candidate | --exclude | --inputs | --out | --run-id | --coordinator-pid)
+			[ $# -ge 2 ] || usage
+			case "$1" in
+			--repo) REPO=$2 ;;
+			--candidate) CANDIDATE=$2 ;;
+			--exclude) EXCLUDE=$2 ;;
+			--inputs) INPUTS=$2 ;;
+			--out) OUT=$2 ;;
+			--run-id) RUN_ID=$2 ;;
+			--coordinator-pid) COORDINATOR_PID=$2 ;;
+			esac
+			shift 2
+			;;
+		*) usage ;;
+		esac
+	done
+	[ -n "$REPO" ] && [ -n "$CANDIDATE" ] && [ -n "$EXCLUDE" ] && [ -n "$INPUTS" ] && [ -n "$OUT" ] || usage
+	[ -n "$RUN_ID" ] || RUN_ID="standalone-$$"
+	[ -n "$COORDINATOR_PID" ] || COORDINATOR_PID=$$
+	case "$RUN_ID" in *[!A-Za-z0-9_.-]* | '' | .* | *..) die "unsafe --run-id" ;; esac
+	case "$COORDINATOR_PID" in *[!0-9]* | '' | 0) die "--coordinator-pid must be a positive integer" ;; esac
+	absolute_path "$REPO" || die "--repo must be an absolute canonical path"
+	[ -d "$REPO" ] && not_link_like "$REPO" || die "--repo is absent or a symlink/reparse point: $REPO"
+	_repo_real=$(CDPATH= cd -P -- "$REPO" && pwd -P) || die "could not resolve --repo"
+	path_equal "$REPO" "$_repo_real" || die "--repo is not its physical canonical path"
+	repo_git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "--repo is not a local Git worktree: $REPO"
+	new_owned_path "$OUT" --out || die "--out must be a fresh absolute path under an existing canonical non-symlink parent"
+	[ -f "$EXCLUDE" ] && [ ! -L "$EXCLUDE" ] || die "--exclude is not a regular trusted file: $EXCLUDE"
+	[ -f "$INPUTS" ] && [ ! -L "$INPUTS" ] || die "--inputs is not a regular trusted file: $INPUTS"
+
+	FULL=$(repo_git rev-parse --verify "${CANDIDATE}^{commit}" 2>/dev/null) ||
+		die "candidate '$CANDIDATE' is missing or ambiguous locally; no fetch or fallback is attempted"
+	[ "$FULL" = "$CANDIDATE" ] || die "candidate must be its full local commit ID, not '$CANDIDATE'"
+	FORMAT=$(repo_git rev-parse --show-object-format=storage 2>/dev/null) ||
+		die "this Git does not report its object format; cannot make an independent snapshot safely"
+	[ -z "$(repo_git config --get extensions.partialClone 2>/dev/null || :)" ] &&
+		[ -z "$(repo_git config --get-regexp '^remote\..*\.promisor$' 2>/dev/null || :)" ] ||
+		die "partial/promisor source repositories are unsupported; no lazy fetch is attempted"
+	_missing=$(repo_git rev-list --objects --missing=print "$FULL" 2>/dev/null) ||
+		die "could not prove all candidate objects are present locally"
+	case "$_missing" in '?'* | *"$NL"'?'*) die "candidate has missing objects; no lazy fetch is attempted" ;; esac
+
+	jq -e '
+		def safe_rel: type == "string" and length > 0 and (test("[[:cntrl:]\\\\]") | not)
+			and (startswith("/") | not) and (split("/") | all(.[]; length > 0 and . != "." and . != ".."));
+		type == "object" and (.schema == 1) and (.exclude | type == "array") and all(.exclude[]; safe_rel)
+	' "$EXCLUDE" >/dev/null ||
+		die "--exclude is not schema 1 with an exclude string array"
+	jq -e '
+		def safe_rel: type == "string" and length > 0 and (test("[[:cntrl:]\\\\]") | not)
+			and (startswith("/") | not) and (split("/") | all(.[]; length > 0 and . != "." and . != ".."));
+		def safe_absolute: type == "string" and length > 1 and (test("[[:cntrl:]\\\\]") | not);
+		type == "object" and (.schema == 1) and (.inputs | type == "array")
+		and all(.inputs[]; type == "object" and ((keys | sort) == ["path","source"])
+			and (.source | safe_absolute) and (.path | safe_rel))
+		and ([.inputs[].path] | unique | length) == (.inputs | length)
+		and (([.inputs[].path] | sort) as $paths
+			| all(range(0; ($paths | length) - 1); . as $i | ($paths[$i + 1] | startswith($paths[$i] + "/") | not)))
+	' "$INPUTS" >/dev/null ||
+		die "--inputs is not schema 1 with {source,path} entries"
+	# Paths were schema-validated to exclude controls, so newline-delimited jq
+	# output is safe here.  Validate the physical parent before creating any
+	# snapshot content; a symlinked authority path is never followed.
+	jq -r '.inputs[].source' "$INPUTS" |
+	(
+		while IFS= read -r _input_source; do
+			canonical_input_file "$_input_source" || exit 2
+		done
+	) || die "an input is not an absolute canonical non-symlink regular file"
+
+	mkdir -p "$OUT" "$OUT/source" "$OUT/inputs" "$OUT/scratch" "$OUT/results" "$OUT/coordinator" "$OUT/home" "$OUT/template" || die "could not create snapshot layout at $OUT"
+	_owned_root=$(CDPATH= cd -- "$OUT" && pwd -P) || die "could not resolve owned snapshot root"
+	jq -n --arg run_id "$RUN_ID" --argjson coordinator_pid "$COORDINATOR_PID" --arg root "$_owned_root" \
+		'{schema:1,run_id:$run_id,coordinator_pid:$coordinator_pid,canonical_root:$root}' \
+		>"$OUT/.remit-owner.json" || die "could not write snapshot ownership record"
+	SNAP_HOME="$OUT/home"
+	CLEAN_HOME=$SNAP_HOME
+	jq -r '.exclude[]' "$EXCLUDE" >"$OUT/exclusions" || die "could not read exclusions"
+	while IFS= read -r _ex; do safe_rel "$_ex" || die "unsupported exclusion path: $_ex"; done <"$OUT/exclusions"
+
+	# Raw NUL tree parsing happens in jq; paths that a POSIX-shell manifest cannot
+	# represent are refused before any candidate content is materialised.
+	repo_git ls-tree -r -z "$FULL" >"$OUT/entries.raw" || die "could not enumerate candidate tree locally"
+	jq -Rrs '
+		split("\u0000") | map(select(length > 0) | capture("^(?<mode>[0-7]+) (?<type>[^ ]+) (?<object>[0-9a-f]+)\\t(?<path>(?s:.*))$"))
+		| if all(.[]; (.type == "blob") and (.mode == "100644" or .mode == "100755") and (.path | test("[[:cntrl:]\\\\]") | not)) then . else error("unsupported tree entry") end
+	' "$OUT/entries.raw" >"$OUT/entries.json" 2>/dev/null || die "candidate contains an unsupported symlink, gitlink, mode, control-character or backslash path"
+	jq -r '.[] | [.mode,.type,.object,.path] | @tsv' "$OUT/entries.json" >"$OUT/entries.tsv" || die "could not render candidate entries"
+	# An empty candidate has no entries, but still needs a real selected-tree
+	# input for the independent inspection repository below.
+	: >"$OUT/selected.tsv" || die "could not initialise selected-tree list"
+
+	while IFS="$TAB" read -r _mode _type _oid _path; do
+		[ -n "$_path" ] || continue
+		safe_source_rel "$_path" || die "unsupported candidate path: $_path"
+		repo_git cat-file blob "$_oid" >"$OUT/candidate.blob" || die "could not read candidate blob $_path"
+		_first=$(sed -n '1p' "$OUT/candidate.blob") || die "could not inspect candidate blob $_path"
+		if [ "$_first" = 'version https://git-lfs.github.com/spec/v1' ]; then
+			rm -f "$OUT/candidate.blob" || die "could not discard unsupported LFS pointer"
+			die "candidate contains an unsupported LFS pointer: $_path"
+		fi
+		if excluded "$_path"; then
+			rm -f "$OUT/candidate.blob" || die "could not discard excluded blob"
+			continue
+		fi
+		mkdir -p "$OUT/source/$(dirname "$_path")" || die "could not create source parent for $_path"
+		cat "$OUT/candidate.blob" >"$OUT/source/$_path" || die "could not materialise $_path"
+		rm -f "$OUT/candidate.blob" || die "could not clear materialisation staging blob"
+		if [ "$_mode" = 100755 ]; then
+			chmod 755 "$OUT/source/$_path" || die "could not preserve executable mode for $_path"
+		else
+			chmod 644 "$OUT/source/$_path" || die "could not preserve regular mode for $_path"
+		fi
+		printf '%s\t%s\t%s\n' "$_mode" "$_oid" "$_path" >>"$OUT/selected.tsv"
+	done <"$OUT/entries.tsv"
+
+	# A new object database is seeded from raw candidate blobs, rather than `git
+	# add`, so an in-tree .gitattributes filter cannot alter snapshot identity.
+	SOURCE="$OUT/source"
+	snapshot_git init --quiet --object-format="$FORMAT" --template="$OUT/template" || die "could not initialise independent snapshot Git"
+	while IFS="$TAB" read -r _mode _oid _path; do
+		[ -n "$_path" ] || continue
+		_new_oid=$(snapshot_git hash-object -w --stdin <"$OUT/source/$_path") || die "could not import snapshot blob $_path"
+		[ "$_new_oid" = "$_oid" ] || die "snapshot imported blob identity differs for $_path"
+		snapshot_git update-index --add --cacheinfo "$_mode,$_new_oid,$_path" || die "could not index snapshot blob $_path"
+	done <"$OUT/selected.tsv"
+	SELECTED_TREE=$(snapshot_git write-tree) || die "could not write selected snapshot tree"
+	SNAPSHOT_HEAD=$(printf 'remit evaluation snapshot\n' | snapshot_commit "$SELECTED_TREE") || die "could not commit snapshot identity"
+	snapshot_git update-ref refs/heads/remit-snapshot "$SNAPSHOT_HEAD" || die "could not set snapshot ref"
+	snapshot_git symbolic-ref HEAD refs/heads/remit-snapshot || die "could not set snapshot HEAD"
+	[ -z "$(snapshot_git config --get-regexp '^remote\.' 2>/dev/null || :)" ] || die "independent snapshot unexpectedly has a remote"
+	[ ! -e "$SOURCE/.git/objects/info/alternates" ] || die "independent snapshot unexpectedly has alternates"
+
+	jq -r '.inputs[] | [.source,.path] | @tsv' "$INPUTS" >"$OUT/inputs.tsv" || die "could not read inputs"
+	while IFS="$TAB" read -r _in_source _in_path; do
+		[ -n "$_in_path" ] || continue
+		safe_rel "$_in_path" || die "unsupported input path: $_in_path"
+		canonical_input_file "$_in_source" || die "input changed or is not a canonical non-symlink regular file: $_in_source"
+		mkdir -p "$OUT/inputs/$(dirname "$_in_path")" || die "could not create input parent for $_in_path"
+		cp -P "$_in_source" "$OUT/inputs/$_in_path" || die "could not copy input $_in_path"
+	done <"$OUT/inputs.tsv"
+
+	write_baseline
+	jq -n --arg out "$OUT" --arg source "$OUT/source" --arg inputs "$OUT/inputs" \
+		--arg scratch "$OUT/scratch" --arg results "$OUT/results" --arg candidate "$FULL" \
+		--arg selected_tree "$SELECTED_TREE" --arg snapshot_head "$SNAPSHOT_HEAD" \
+		--arg baseline "$OUT/audit-baseline.json" --arg baseline_oid "$BASELINE_OID" \
+		'{schema:1,out:$out,source:$source,inputs:$inputs,scratch:$scratch,results:$results,candidate:$candidate,selected_tree:$selected_tree,snapshot_head:$snapshot_head,baseline:$baseline,baseline_oid:$baseline_oid}'
+}
+
+validate_owned() {
+	OUT='' RUN_ID=''
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--out | --run-id)
+			[ $# -ge 2 ] || usage
+			case "$1" in --out) OUT=$2 ;; --run-id) RUN_ID=$2 ;; esac
+			shift 2 ;;
+		*) usage ;;
+		esac
+	done
+	[ -n "$OUT" ] && [ -n "$RUN_ID" ] || usage
+	case "$RUN_ID" in *[!A-Za-z0-9_.-]* | '' | .* | *..) die "unsafe --run-id" ;; esac
+	existing_owned_dir "$OUT" --out
+	_owner="$OUT/.remit-owner.json"
+	[ -f "$_owner" ] && [ ! -L "$_owner" ] || die "owned snapshot has no plain ownership record"
+	_owner_root=$(CDPATH= cd -- "$OUT" && pwd -P) || die "cannot resolve owned snapshot root"
+	jq -e --arg id "$RUN_ID" --arg root "$_owner_root" \
+		'type == "object" and ((keys | sort) == ["canonical_root","coordinator_pid","run_id","schema"])
+		 and .schema == 1 and .run_id == $id and .canonical_root == $root
+		 and (.coordinator_pid | type) == "number" and .coordinator_pid > 0 and (.coordinator_pid | floor) == .coordinator_pid' \
+		"$_owner" >/dev/null || die "snapshot ownership record does not match this cleanup"
+}
+
+cleanup_owned() {
+	validate_owned "$@"
+	# Removal never follows a worker-created link or Windows reparse point.  An
+	# invalid tree is evidence and stays at the locator for explicit inspection.
+	plain_windows_tree "$OUT" || die "snapshot cleanup found a reparse point or could not inspect the tree; retained at $OUT"
+	if [ "$PATH_FAMILY" = msys ]; then
+		_out_win=$(cygpath -w -- "$OUT") || die "cannot map owned snapshot for cleanup"
+		env REMIT_SNAPSHOT_CLEAN="$_out_win" pwsh.exe -NoProfile -NonInteractive -Command 'try { Remove-Item -LiteralPath $env:REMIT_SNAPSHOT_CLEAN -Recurse -Force -ErrorAction Stop; if (Test-Path -LiteralPath $env:REMIT_SNAPSHOT_CLEAN) { exit 2 }; exit 0 } catch { exit 2 }' >/dev/null 2>&1 || die "could not remove owned snapshot; retained at $OUT"
+	else
+		find -P "$OUT" -type l -print -quit 2>/dev/null | grep -q . && die "snapshot cleanup found a symbolic link; retained at $OUT"
+		rm -rf -- "$OUT" || die "could not remove owned snapshot; retained at $OUT"
+	fi
+	[ ! -e "$OUT" ] || die "owned snapshot survived cleanup; retained at $OUT"
+}
+
+validate_results() {
+	OUT=''
+	[ "${1:-}" = --out ] && [ $# = 2 ] || usage
+	OUT=$2
+	existing_owned_dir "$OUT" --out
+	[ -d "$OUT/results" ] && [ ! -L "$OUT/results" ] || invalid "results root is absent or replaced"
+	plain_windows_tree "$OUT/results" || invalid "results contain a reparse point or could not be inspected"
+	# Default find traversal does not follow POSIX links.  Any link, device or
+	# other non-file node invalidates harvest before a byte is copied.
+	find "$OUT/results" ! -type d ! -type f -print -quit 2>/dev/null | grep -q . && invalid "results contain a link or unsupported node"
+	exit 0
+}
+
+audit() {
+	OUT='' EXPECTED='' AUDIT_SCRATCH=''
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--out | --baseline-oid | --scratch)
+			[ $# -ge 2 ] || usage
+			case "$1" in
+			--out) OUT=$2 ;;
+			--baseline-oid) EXPECTED=$2 ;;
+			--scratch) AUDIT_SCRATCH=$2 ;;
+			esac
+			shift 2
+			;;
+		*) usage ;;
+		esac
+	done
+	[ -n "$OUT" ] && [ -n "$EXPECTED" ] && [ -n "$AUDIT_SCRATCH" ] || usage
+	existing_owned_dir "$OUT" --out
+	new_owned_path "$AUDIT_SCRATCH" --scratch || invalid "--scratch must be a fresh absolute path under an existing canonical non-symlink parent"
+	_audit_out=$(path_map "$OUT") || invalid "cannot map --out"
+	_audit_scratch=$(path_map "$AUDIT_SCRATCH") || invalid "cannot map --scratch"
+	case "$_audit_scratch" in "$_audit_out" | "$_audit_out"/*) invalid "--scratch must be outside the prepared directory" ;; esac
+	mkdir "$AUDIT_SCRATCH" || invalid "could not allocate fresh audit scratch"
+	SOURCE="$OUT/source"
+	SNAP_HOME="$OUT/home"
+	CLEAN_HOME=$SNAP_HOME
+	[ -f "$OUT/audit-baseline.json" ] && [ ! -L "$OUT/audit-baseline.json" ] || invalid "external audit baseline is absent or replaced"
+	[ "$(hash_file "$OUT/audit-baseline.json")" = "$EXPECTED" ] || invalid "external audit baseline changed"
+	[ -d "$SOURCE" ] && [ ! -L "$SOURCE" ] && [ -d "$OUT/inputs" ] && [ ! -L "$OUT/inputs" ] || invalid "source or inputs were replaced"
+	# Do not let an altered config, hook, alternates file or symlink reach a Git
+	# process.  The hash-pinned baseline is read by jq, not Git, then compared before
+	# the semantic Git inspection below.
+	git_control_raw_manifest >"$AUDIT_SCRATCH/git.raw.current" || invalid "could not inspect snapshot Git controls"
+	jq -j '.git_raw' "$OUT/audit-baseline.json" >"$AUDIT_SCRATCH/git.raw.expected" || invalid "baseline cannot be read"
+	cmp -s "$AUDIT_SCRATCH/git.raw.expected" "$AUDIT_SCRATCH/git.raw.current" || invalid "snapshot Git controls changed"
+	fs_manifest "$SOURCE" >"$AUDIT_SCRATCH/source.current" || invalid "could not inspect source"
+	fs_manifest "$OUT/inputs" >"$AUDIT_SCRATCH/inputs.current" || invalid "could not inspect inputs"
+	git_semantic_manifest >"$AUDIT_SCRATCH/git.current" || invalid "could not inspect snapshot Git state"
+	_candidate=$(jq -r '.candidate' "$OUT/audit-baseline.json") || invalid "baseline cannot be read"
+	_tree=$(jq -r '.selected_tree' "$OUT/audit-baseline.json") || invalid "baseline cannot be read"
+	_head=$(jq -r '.snapshot_head' "$OUT/audit-baseline.json") || invalid "baseline cannot be read"
+	jq -n --arg candidate "$_candidate" --arg selected_tree "$_tree" --arg snapshot_head "$_head" \
+		--rawfile source "$AUDIT_SCRATCH/source.current" --rawfile inputs "$AUDIT_SCRATCH/inputs.current" \
+		--rawfile git_raw "$AUDIT_SCRATCH/git.raw.current" --rawfile git "$AUDIT_SCRATCH/git.current" \
+		'{schema:1,candidate:$candidate,selected_tree:$selected_tree,snapshot_head:$snapshot_head,source:$source,inputs:$inputs,git_raw:$git_raw,git:$git}' \
+		>"$AUDIT_SCRATCH/audit-current.json" || invalid "could not write current audit"
+	cmp -s "$OUT/audit-baseline.json" "$AUDIT_SCRATCH/audit-current.json" || invalid "source, inputs or snapshot Git state changed"
+	exit 0
+}
+
+[ $# -ge 1 ] || usage
+case "$1" in
+prepare) shift; prepare "$@" ;;
+audit) shift; audit "$@" ;;
+cleanup) shift; cleanup_owned "$@" ;;
+validate-owned) shift; validate_owned "$@" ;;
+validate-results) shift; validate_results "$@" ;;
+*) usage ;;
+esac

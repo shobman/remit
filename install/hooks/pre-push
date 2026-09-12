@@ -9,22 +9,26 @@
 #      worktree. Linked worktrees are builders' territory; builders deliver on
 #      work/* branches and never move main.
 #
-#   2. Commits newly introduced on work/* branches must carry both session
-#      trailers, so nothing anonymous lands: a Co-Authored-By: trailer naming
-#      the model that authored the commit, and a Claude-Session: trailer —
-#      required on all commits regardless of co-author (practitioner ruling).
-#      Only commits the pusher introduces are linted: commits already on any
-#      remote — an inherited mainline merged into the branch landed with the
-#      practitioner's authority through this hook's own main path — are not
-#      linted again.
+#   2. Commits newly introduced on work/* branches must either be the one exact
+#      neutral candidate handed to this hook by remit's coordinator, from the
+#      primary worktree, or carry the two legacy provenance trailers. The
+#      coordinator handoff is process-local and contains no model, session or
+#      private-item metadata. It is an accidental-publication guard, not a
+#      same-host security boundary. Only commits the pusher introduces are
+#      linted: commits already on any remote are not linted again.
 #
 # stdin: <local ref> SP <local sha1> SP <remote ref> SP <remote sha1> LF
 set -u
 
 zero=0000000000000000000000000000000000000000
 
-git_dir=$(CDPATH= cd -- "$(git rev-parse --git-dir)" && pwd -P)
-common_dir=$(CDPATH= cd -- "$(git rev-parse --git-common-dir)" && pwd -P)
+if ! git_dir_path=$(git rev-parse --git-dir) ||
+	! common_dir_path=$(git rev-parse --git-common-dir) ||
+	! git_dir=$(CDPATH= cd -- "$git_dir_path" && pwd -P) ||
+	! common_dir=$(CDPATH= cd -- "$common_dir_path" && pwd -P); then
+	printf 'remit pre-push: REFUSED — repository worktree identity could not be established.\n' >&2
+	exit 1
+fi
 if [ "$git_dir" = "$common_dir" ]; then primary=yes; else primary=no; fi
 
 fail=0
@@ -50,17 +54,50 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 		else
 			set -- "$local_sha" --not "$remote_sha" --remotes
 		fi
-		for commit in $(git rev-list "$@"); do
-			body=$(git log -1 --format=%B "$commit")
+		if ! commits=$(git rev-list "$@"); then
+			printf 'remit pre-push: REFUSED — could not enumerate commits introduced on %s.\n' "$remote_ref" >&2
+			fail=1
+			continue
+		fi
+		for commit in $commits; do
+			if ! body=$(git log -1 --format=%B "$commit") ||
+				! subject=$(git log -1 --format=%s "$commit"); then
+				printf 'remit pre-push: REFUSED — could not inspect commit %s on %s.\n' "$commit" "$remote_ref" >&2
+				fail=1
+				continue
+			fi
+			if [ "$primary" = yes ] &&
+				[ "${REMIT_PUBLICATION_CANDIDATE:-}" = "$local_sha" ] &&
+				[ "${REMIT_PUBLICATION_CANDIDATE:-}" = "$commit" ] &&
+				[ "${REMIT_PUBLICATION_REF:-}" = "$remote_ref" ]; then
+				case "$subject" in
+				"Delivery r-"????????????????????????????????)
+					_id=${subject#Delivery r-}
+					case "$_id" in *[!0-9a-f]*) ;; *) [ "$body" = "$subject" ] && continue ;; esac
+					;;
+				esac
+				printf 'remit pre-push: REFUSED — coordinator candidate %s does not have the neutral Delivery <opaque-id> subject.\n' \
+					"$commit" >&2
+				fail=1
+				continue
+			fi
+			case "$subject" in
+			"Delivery r-"????????????????????????????????)
+				printf 'remit pre-push: REFUSED — neutral candidate %s on %s was not handed off by remit from the primary worktree.\n' \
+					"$commit" "$remote_ref" >&2
+				fail=1
+				continue
+				;;
+			esac
 			if ! printf '%s\n' "$body" | grep -qi '^Co-Authored-By:'; then
 				printf 'remit pre-push: REFUSED — commit %s on %s has no Co-Authored-By: trailer; nothing anonymous lands on work/* branches.\n' \
-					"$(git rev-parse --short "$commit")" "$remote_ref" >&2
+					"$commit" "$remote_ref" >&2
 				fail=1
 				continue
 			fi
 			if ! printf '%s\n' "$body" | grep -qi '^Claude-Session:'; then
 				printf 'remit pre-push: REFUSED — commit %s on %s has no Claude-Session: trailer; the session trailer is required on all work/* commits.\n' \
-					"$(git rev-parse --short "$commit")" "$remote_ref" >&2
+					"$commit" "$remote_ref" >&2
 				fail=1
 			fi
 		done

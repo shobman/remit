@@ -12,6 +12,8 @@
 #   bin/remit-invoke               the one AI seam: a fresh context, in a named
 #                                  harness, with a briefing, in a worktree,
 #                                  returning its text
+#   bin/remit-snapshot             the exact-candidate snapshot, audit and owned
+#                                  cleanup helper used by delivery evaluation
 #   bin/remit-exposure             the exposure record — what the work put on the
 #                                  practitioner, in words, per session. Its own
 #                                  header states what it writes; the two settings
@@ -127,8 +129,8 @@
 #              remit does not overwrite it, and does not delete it
 #   removed    remit installed it, remit no longer ships it, and it is still
 #              exactly what remit put there
-#   pair       bin/remit and bin/remit-invoke ship as a pair: one kept and the
-#              other not is said on its own line
+#   pair       bin/remit, bin/remit-invoke and bin/remit-snapshot are one
+#              compatible set: a kept/current mixture is said on its own line
 # ONE FILE IS THE EXCEPTION, and it is deliberate: CONTRIBUTING.md is MANAGED.
 # A local edit to it is reported `restored` and put back to the payload on the
 # next upgrade, because what it describes is remit's own mechanic and a stale
@@ -476,6 +478,7 @@ CONTRIB_SRC="$SRC/CONTRIBUTING.md"
 
 [ -f "$SRC/bin/remit" ] || die "payload missing: $SRC/bin/remit"
 [ -f "$SRC/bin/remit-invoke" ] || die "payload missing: $SRC/bin/remit-invoke"
+[ -f "$SRC/bin/remit-snapshot" ] || die "payload missing: $SRC/bin/remit-snapshot"
 [ -f "$SRC/bin/remit-exposure" ] || die "payload missing: $SRC/bin/remit-exposure"
 [ -f "$ADAPTER" ] || die "payload missing: $ADAPTER"
 [ -f "$HOOK_SRC" ] || die "payload missing: $HOOK_SRC"
@@ -778,14 +781,16 @@ install_file "$SRC/bin/remit" "bin/remit"
 REMIT_OUTCOME=$OUTCOME
 install_file "$SRC/bin/remit-invoke" "bin/remit-invoke"
 SEAM_OUTCOME=$OUTCOME
-# bin/remit and bin/remit-invoke SHIP AS A PAIR: bin/remit raises through the
-# seam with this version's flags, and a seam from another version answers them
-# its own way. One kept and the other not leaves the two apart, and the report
-# says so on its own line rather than leaving it to the first chain.
-if [ "$SEAM_OUTCOME" = kept ] && [ "$REMIT_OUTCOME" != kept ]; then
-	report pair "bin/remit and bin/remit-invoke" "they ship as a pair, and this install leaves them apart: bin/remit-invoke is kept while bin/remit is v$VERSION's"
-elif [ "$REMIT_OUTCOME" = kept ] && [ "$SEAM_OUTCOME" != kept ]; then
-	report pair "bin/remit and bin/remit-invoke" "they ship as a pair, and this install leaves them apart: bin/remit is kept while bin/remit-invoke is v$VERSION's"
+install_file "$SRC/bin/remit-snapshot" "bin/remit-snapshot"
+SNAPSHOT_OUTCOME=$OUTCOME
+# The coordinator, seam and snapshot helper exchange versioned paths and
+# records.  A mixture of locally kept and this-version bytes is incompatible.
+_pair_kept=no _pair_current=no
+for _pair_outcome in "$REMIT_OUTCOME" "$SEAM_OUTCOME" "$SNAPSHOT_OUTCOME"; do
+	[ "$_pair_outcome" = kept ] && _pair_kept=yes || _pair_current=yes
+done
+if [ "$_pair_kept" = yes ] && [ "$_pair_current" = yes ]; then
+	report pair "bin/remit, bin/remit-invoke and bin/remit-snapshot" "the required set is mixed: remit=$REMIT_OUTCOME, invoke=$SEAM_OUTCOME, snapshot=$SNAPSHOT_OUTCOME"
 fi
 install_file "$SRC/bin/remit-exposure" "bin/remit-exposure"
 for s in $SKILLS; do
@@ -1465,7 +1470,7 @@ fi
 # There is no `git add` and no commit: a shadow install that staged anything
 # would have failed at the one thing it promises.
 if [ "$SHADOW" = yes ]; then
-	ex_paths='.remit/ bin/remit bin/remit-invoke bin/remit-exposure .claude/skills/ .agents/skills/ .pi/skills/ .github/hooks/remit-no-agent-tool.json CLAUDE.local.md AGENTS.local.md'
+	ex_paths='.remit/ bin/remit bin/remit-invoke bin/remit-snapshot bin/remit-exposure .claude/skills/ .agents/skills/ .pi/skills/ .github/hooks/remit-no-agent-tool.json CLAUDE.local.md AGENTS.local.md'
 	# Anything the manifest records that the fixed list above does not already
 	# cover — so a payload path added later is excluded without this line being
 	# remembered. ONLY the record types whose third column is a path in the

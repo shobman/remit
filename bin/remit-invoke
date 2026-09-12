@@ -724,6 +724,44 @@ REVIEW=${REMIT_REVIEW:-}
 PROVFILE=${REMIT_PROVENANCE:-}
 RUNS=${REMIT_RUNS:-}
 RUNS_NAMING=${REMIT_RUNS_NAMING:-}
+EXACT_EVALUATION=${REMIT_EXACT_EVALUATION:-}
+EXACT_INPUTS=${REMIT_EXACT_INPUTS:-}
+EXACT_SCRATCH=${REMIT_EXACT_SCRATCH:-}
+EXACT_RESULTS=${REMIT_EXACT_RESULTS:-}
+EXACT_COMPLETION=${REMIT_EXACT_COMPLETION:-}
+EXACT_RUN_ID=${REMIT_EXACT_RUN_ID:-}
+
+if [ -n "$EXACT_EVALUATION$EXACT_INPUTS$EXACT_SCRATCH$EXACT_RESULTS$EXACT_COMPLETION$EXACT_RUN_ID" ]; then
+	[ "$EXACT_EVALUATION" = 1 ] && [ "$ROLE" = evaluate ] &&
+		[ -n "$EXACT_INPUTS" ] && [ -n "$EXACT_SCRATCH" ] && [ -n "$EXACT_RESULTS" ] &&
+		[ -n "$EXACT_COMPLETION" ] && [ -n "$EXACT_RUN_ID" ] ||
+		die "exact evaluation is an evaluate-only all-or-none interface"
+	[ -d "$EXACT_INPUTS" ] && [ ! -L "$EXACT_INPUTS" ] && [ -d "$EXACT_SCRATCH" ] && [ ! -L "$EXACT_SCRATCH" ] && [ -d "$EXACT_RESULTS" ] && [ ! -L "$EXACT_RESULTS" ] || die "exact evaluation requires plain inputs, scratch and results directories"
+	case "$EXACT_RUN_ID" in *[!A-Za-z0-9_.-]* | '' | .* | *..) die "unsafe exact-evaluation run id" ;; esac
+	_exact_source=$(one_namespace "$(CDPATH= cd -P -- "$WT" && pwd -P)") || die "cannot resolve exact source"
+	_exact_out=$(one_namespace "$(CDPATH= cd -P -- "$WT/.." && pwd -P)") || die "cannot resolve exact owner"
+	_exact_inputs=$(one_namespace "$(CDPATH= cd -P -- "$EXACT_INPUTS" && pwd -P)") || die "cannot resolve exact inputs"
+	_exact_scratch=$(one_namespace "$(CDPATH= cd -P -- "$EXACT_SCRATCH" && pwd -P)") || die "cannot resolve exact scratch"
+	_exact_results=$(one_namespace "$(CDPATH= cd -P -- "$EXACT_RESULTS" && pwd -P)") || die "cannot resolve exact results"
+	[ "$_exact_source" = "$(one_namespace "$_exact_out/source")" ] &&
+		[ "$_exact_inputs" = "$(one_namespace "$_exact_out/inputs")" ] &&
+		[ "$_exact_scratch" = "$(one_namespace "$_exact_out/scratch")" ] &&
+		[ "$_exact_results" = "$(one_namespace "$_exact_out/results")" ] ||
+		die "exact source, inputs, scratch and results are not the fixed roots of one owner"
+	_exact_owner="$_exact_out/.remit-owner.json"
+	[ -f "$_exact_owner" ] && [ ! -L "$_exact_owner" ] &&
+		jq -e --arg id "$EXACT_RUN_ID" '.schema == 1 and .run_id == $id and (.canonical_root | type == "string")' "$_exact_owner" >/dev/null 2>&1 ||
+		die "exact-evaluation owner does not match the run"
+	_exact_owner_root=$(jq -r .canonical_root "$_exact_owner")
+	[ "$(one_namespace "$_exact_owner_root")" = "$_exact_out" ] || die "exact-evaluation owner root does not match the source"
+	_exact_completion_parent=$(dirname -- "$EXACT_COMPLETION")
+	[ -d "$_exact_completion_parent" ] && [ ! -L "$_exact_completion_parent" ] &&
+		_exact_completion_parent=$(one_namespace "$(CDPATH= cd -P -- "$_exact_completion_parent" && pwd -P)") ||
+		die "exact completion parent is not a plain canonical directory"
+	case "$EXACT_COMPLETION" in /* | [A-Za-z]:/*) ;; *) die "exact completion path must be absolute" ;; esac
+	[ -n "$EXACT_COMPLETION" ] && [ ! -e "$EXACT_COMPLETION" ] && [ ! -L "$EXACT_COMPLETION" ] || die "exact completion path must be fresh"
+	case "$HARNESS" in native) die "--harness native records a context this seam did not start and cannot attest exact process completion" ;; esac
+fi
 
 # One gate's evaluator is never handed another gate's standards, and no other
 # role is handed any. A rubric file arriving for a role that does not judge is a
@@ -1274,6 +1312,8 @@ esac
 command -v env >/dev/null 2>&1 ||
 	die "no 'env' on PATH — every context here is started with an allow-listed environment and there is no way to do that without it; not raising a context"
 
+EXACT_LIFECYCLE=''
+
 # ==============================================================================
 # the run directory, the scratch home, and the environment allow-list
 # ==============================================================================
@@ -1281,7 +1321,11 @@ command -v env >/dev/null 2>&1 ||
 # ONE PATH NAMESPACE, above: `$SCRUB_HOME` under this directory is handed to the
 # seat as `HOME`, and the coordinator's `TMPDIR` on Git Bash is `/tmp` — a mount
 # point, not a directory anything but this shell can find.
-RUNDIR=$(one_namespace "${TMPDIR:-/tmp}")/$ME-$SLUG-$ROLE-$$
+if [ -n "$EXACT_EVALUATION" ]; then
+	RUNDIR=$(one_namespace "$EXACT_RESULTS")/seam
+else
+	RUNDIR=$(one_namespace "${TMPDIR:-/tmp}")/$ME-$SLUG-$ROLE-$$
+fi
 mkdir -p "$RUNDIR" || die "cannot create the run directory $RUNDIR"
 OUTFILE="$RUNDIR/stdout"
 ERRFILE="$RUNDIR/stderr"
@@ -1295,7 +1339,11 @@ ENVLIST="$RUNDIR/envlist"
 # directories below — each of which is handed to the harness's CLI, so it goes
 # across in the spelling that CLI can open.
 REAL_HOME=$(one_namespace "${HOME:-}")
-SCRUB_HOME="$RUNDIR/home"
+if [ -n "$EXACT_EVALUATION" ]; then
+	SCRUB_HOME=$(one_namespace "$EXACT_SCRATCH")/home
+else
+	SCRUB_HOME="$RUNDIR/home"
+fi
 mkdir -p "$SCRUB_HOME" "$SCRUB_HOME/AppData/Roaming" "$SCRUB_HOME/AppData/Local" || die "cannot create the scratch home under $RUNDIR"
 
 # THE ONE WRITABLE SCRATCH ROOT is INSIDE THE WORKTREE: a sandboxed seat runs as
@@ -1306,7 +1354,11 @@ mkdir -p "$SCRUB_HOME" "$SCRUB_HOME/AppData/Roaming" "$SCRUB_HOME/AppData/Local"
 # is handed back. The NAME is short because Windows still refuses a path over
 # 260 characters and everything a seat writes hangs off this one.
 # file below it.
-SCRUB_TMP="$WT/.remit-tmp"
+if [ -n "$EXACT_EVALUATION" ]; then
+	SCRUB_TMP=$(one_namespace "$EXACT_SCRATCH")/tmp
+else
+	SCRUB_TMP="$WT/.remit-tmp"
+fi
 rm -rf "$SCRUB_TMP"
 mkdir -p "$SCRUB_TMP" ||
 	die "cannot create the scratch root at $SCRUB_TMP — a seat with nowhere to write cannot run anything, and this script will not raise one that cannot"
@@ -1494,20 +1546,15 @@ role_limits() {
 		printf '  expectation formed after reading is not an expectation.\n'
 		printf -- '- You NEVER repair, amend, accept, merge or close. A must-fix goes back to a\n'
 		printf '  fresh builder; that is the mechanism'\''s, not yours.\n'
-		printf -- '- You NEVER run `bin/remit` or `bin/remit-invoke`, and you NEVER run `git`\n'
-		printf '  or `gh` AT ALL — not to change anything and not to read anything. A\n'
-		printf '  raised context never runs either; the seam does. Everything you judge is\n'
-		printf '  already on disk in front of you, and a `git` you reach for here is denied\n'
-		printf '  by the containment this run wrote, on every harness. Those two are named\n'
-		printf '  so you know what not to do, NOT as files to go and look at: depending on\n'
-		printf '  how this repository was installed they may not be in your worktree at\n'
-		printf '  all, and their absence is normal rather than a finding.\n'
-		printf -- '- EVERY PATH THIS BRIEFING NAMES IS EITHER INSIDE YOUR WORKTREE OR MARKED\n'
-		printf '  AS TEXT. A path marked as text is where something came FROM, printed so\n'
-		printf '  you can name it in what you return; the thing itself is reproduced here\n'
-		printf '  in full and there is nothing to open. Do not go looking for one, and do\n'
-		printf '  not ask for access to anything outside your worktree — there is nothing\n'
-		printf '  outside it for this run, and asking ends the run without a verdict.\n'
+		printf -- '- You NEVER run `bin/remit` or `bin/remit-invoke`, or `gh`.\n'
+		if [ -n "$EXACT_EVALUATION" ]; then
+			printf -- '- You may use local `git` only to inspect this independent snapshot. It has no\n'
+			printf '  publishing remote, original object database, hooks or host configuration.\n'
+			printf -- '- Read source at `%s` and selected authority/proof at `%s`; nothing in the\n' "$WT" "$EXACT_INPUTS"
+			printf '  practitioner record or mutable builder tree was mounted into either.\n'
+		else
+			printf -- '- You NEVER run `git` AT ALL — not to change and not to read anything.\n'
+		fi
 		printf -- '- A finding is a FACT with its evidence, never a task. You do not classify\n'
 		printf '  findings by consequence: only a rubric below can accept a finding or make\n'
 		printf '  one a must-fix, and every such use cites the rubric and the evidence.\n'
@@ -1522,10 +1569,15 @@ role_limits() {
 		printf '  kept for you; continuous integration is the repository'\''s business and\n'
 		printf '  none of yours.\n'
 		printf -- '- EVERYTHING YOU WRITE GOES IN ONE PLACE: `%s`, which is what `TMPDIR`,\n' "$SCRUB_TMP"
-		printf '  `TEMP` and `TMP` name in your environment. Your clone of this repository,\n'
-		printf '  any fixture, any scratch file. It is inside the worktree because that is\n'
-		printf '  the one directory your sandbox can write to, and it is removed when this\n'
-		printf '  run ends, so nothing you make is left behind. If you ever find you cannot\n'
+		printf '  `TEMP` and `TMP` name in your environment. Your clone, fixture and every\n'
+		if [ -n "$EXACT_EVALUATION" ]; then
+			printf '  temporary file belong there; it is the writable scratch root beside the\n'
+			printf '  read-only source and inputs, and it is removed when this run ends.\n'
+		else
+			printf '  scratch file belong there. It is inside the worktree because that is the\n'
+			printf '  writable root for this run, and it is removed when this run ends.\n'
+		fi
+		printf '  If you ever find you cannot\n'
 		printf '  write there, say so in your answer and stop — do NOT make a directory of\n'
 		printf '  your own beside the repository to get past it. A judgement that had to\n'
 		printf '  litter the practitioner'\''s checkout to reach itself is a finding about\n'
@@ -1553,6 +1605,13 @@ role_limits() {
 runs_section() {
 	[ -n "$RUNS" ] || return 0
 	printf '\n## Where kept output goes\n\n'
+	if [ -n "$EXACT_EVALUATION" ]; then
+		printf 'Selected prior proof is read-only input at `%s/proof`. Write only new retained\n' "$EXACT_INPUTS"
+		printf 'proof beneath `%s`, and reference it by its path relative to that results root.\n' "$EXACT_RESULTS"
+		printf 'Temporary builds, fixtures and caches belong beneath `%s`. Source and inputs\n' "$EXACT_SCRATCH"
+		printf 'must remain unchanged; generated output anywhere else invalidates the evaluation.\n'
+		return 0
+	fi
 	case "$ROLE" in
 	build | research)
 		printf 'Output you are required to KEEP — a test run, a tier, a proof somebody after\n'
@@ -1602,6 +1661,12 @@ delivery_section() {
 	[ "$ROLE" = evaluate ] || return 0
 	[ -n "$DELIVERY" ] || return 0
 	printf '\n## The delivery you are judging\n\n'
+	if [ -n "$EXACT_EVALUATION" ]; then
+		printf 'It is recorded full commit `%s`, freshly exported into an independent local\n' "$DELIVERY"
+		printf 'snapshot at\n\n  %s\n\n' "$WT"
+		printf 'That snapshot, not a builder branch or the primary tree, is what this verdict judges.\n'
+		return 0
+	fi
 	printf 'It is commit `%s` on `work/%s`, and IT IS ALREADY CHECKED OUT: the delivered\n' "$DELIVERY" "$SLUG"
 	printf 'tree is the files in front of you at\n\n'
 	printf '  %s\n\n' "$WT"
@@ -1655,10 +1720,14 @@ role_returns() {
 		fi
 		printf 'ONE verdict, in these line shapes. They are the only text the mechanism\n'
 		printf 'parses; every other line is carried into the record verbatim.\n\n'
-		printf '  Verdict: PASS | PASS WITH FINDINGS | FAIL     (required; the first wins)\n'
+		printf '  Verdict: PASS | PASS WITH FINDINGS | FAIL | BLOCKED (exactly one, outside examples)\n'
 		printf '  Must-fix: <text>                              (zero or more)\n'
 		printf '  Finding: <text>                               (zero or more)\n'
-		printf '  Ask: <one question>                           (zero to four, in a FAIL only)\n\n'
+		printf '  Ask: <one question>                           (zero to four, in FAIL or BLOCKED)\n\n'
+		printf 'BLOCKED means a required prerequisite prevented evaluation. Record the\n'
+		printf 'evidence as Finding, with an adjacent Ask only if a decision is required.\n'
+		printf 'Do not cite rubrics or Must-fix in a BLOCKED return. It moves no stage,\n'
+		printf 'commissions no repair, and resume retries the evaluation.\n\n'
 		printf 'PASS means everything holds and nothing is worth recording. PASS WITH\n'
 		printf 'FINDINGS means the same, with findings recorded. FAIL means a must-fix\n'
 		printf 'stands — and a crossed boundary, a proof that does not hold, or a defect\n'
@@ -1785,7 +1854,7 @@ say "$ME — raising a fresh context"
 say "  role         : $ROLE (round $ROUND)"
 say "  item         : $SLUG"
 say "  harness      : $HARNESS${CLI:+ ($CLI)} — resolved from $SEAT_FROM"
-say "  model        : ${MODEL:-<the CLI's own default>}"
+say "  model        : ${MODEL:-<CLI default>}"
 say "  model check  : ${MODEL_CHECK:-none}"
 say "  authority    : ${AUTHORITY:-<none: the calling harness raised this context>}"
 say "  rubrics      : ${RUBRICS:-<none — this role is handed no rubric>}"
@@ -1922,7 +1991,7 @@ idle_watch() { # $1 the pid to watch. Returns when it has gone, or kills it.
 			_iw_quiet=0
 		fi
 		if [ "$QUIET" -gt 0 ] && [ "$_iw_quiet" -ge "$QUIET" ]; then
-			say "$ME: THE RUN HAS GONE SILENT — $CLI has written nothing to stdout or stderr for ${_iw_quiet}s (REMIT_QUIET=$QUIET). Ending it."
+			say "$ME: THE RUN HAS GONE SILENT — $CLI has written nothing to stdout or stderr for ${_iw_quiet}s; REMIT_QUIET=$QUIET. Ending it."
 			printf '%s: stalled — no output for %ss; the CLI was ended\n' "$ME" "$_iw_quiet" >>"$PROGRESSFILE"
 			STALLED=$_iw_quiet
 			idle_kill "$_iw_pid"
@@ -1931,6 +2000,58 @@ idle_watch() { # $1 the pid to watch. Returns when it has gone, or kills it.
 	done
 	return 0
 }
+
+windows_job_files() {
+	# The worker waits for a gate.  The supervisor assigns it to the Job first,
+	# so it cannot race a harness child outside the Job.
+	cat >"$RUNDIR/job-worker.ps1" <<'EOF'
+$ErrorActionPreference = 'Stop'
+$argFile=$args[0]; $work=$args[1]; $gate=$args[2]
+$until=[DateTime]::UtcNow.AddSeconds(30)
+while (!(Test-Path -LiteralPath $gate)) { if ([DateTime]::UtcNow -ge $until) { exit 125 }; Start-Sleep -Milliseconds 20 }
+$raw=[IO.File]::ReadAllText($argFile,[Text.UTF8Encoding]::new($false))
+$av=$raw.Split([char]0); if ($av.Count -gt 0 -and $av[$av.Count-1] -eq '') { $av=$av[0..($av.Count-2)] }
+if ($av.Count -eq 0) { exit 125 }
+$si=[Diagnostics.ProcessStartInfo]::new(); $si.FileName=$av[0]; $si.UseShellExecute=$false; $si.WorkingDirectory=$work
+for($i=1;$i -lt $av.Count;$i++){ [void]$si.ArgumentList.Add($av[$i]) }
+$p=[Diagnostics.Process]::Start($si); $p.WaitForExit(); exit $p.ExitCode
+EOF
+	cat >"$RUNDIR/job-supervisor.ps1" <<'EOF'
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System; using System.Runtime.InteropServices;
+public static class RemitJob {
+ [StructLayout(LayoutKind.Sequential)] public struct IO { public ulong ReadOperationCount,WriteOperationCount,OtherOperationCount,ReadTransferCount,WriteTransferCount,OtherTransferCount; }
+ [StructLayout(LayoutKind.Sequential)] public struct BasicLimit { public long PerProcessUserTimeLimit,PerJobUserTimeLimit; public uint LimitFlags; public UIntPtr MinimumWorkingSetSize,MaximumWorkingSetSize; public uint ActiveProcessLimit; public UIntPtr Affinity; public uint PriorityClass,SchedulingClass; }
+ [StructLayout(LayoutKind.Sequential)] public struct ExtendedLimit { public BasicLimit BasicLimitInformation; public IO IoInfo; public UIntPtr ProcessMemoryLimit,JobMemoryLimit,PeakProcessMemoryUsed,PeakJobMemoryUsed; }
+ [StructLayout(LayoutKind.Sequential)] public struct Accounting { public long TotalUserTime,TotalKernelTime,ThisPeriodTotalUserTime,ThisPeriodTotalKernelTime; public uint TotalPageFaultCount,TotalProcesses,ActiveProcesses,TotalTerminatedProcesses; }
+ [DllImport("kernel32.dll",SetLastError=true)] public static extern IntPtr CreateJobObject(IntPtr a,string n);
+ [DllImport("kernel32.dll",SetLastError=true)] public static extern bool SetInformationJobObject(IntPtr h,int c,IntPtr p,uint n);
+ [DllImport("kernel32.dll",SetLastError=true)] public static extern bool AssignProcessToJobObject(IntPtr h,IntPtr p);
+ [DllImport("kernel32.dll",SetLastError=true)] public static extern bool TerminateJobObject(IntPtr h,uint e);
+ [DllImport("kernel32.dll",SetLastError=true)] public static extern bool QueryInformationJobObject(IntPtr h,int c,IntPtr p,uint n,IntPtr r);
+ [DllImport("kernel32.dll",SetLastError=true)] public static extern bool CloseHandle(IntPtr h);
+}
+'@
+$worker=$args[0]; $argFile=$args[1]; $work=$args[2]; $gate=$args[3]; $done=$args[4]
+$job=[RemitJob]::CreateJobObject([IntPtr]::Zero,$null); if($job -eq [IntPtr]::Zero){exit 125}
+try {
+ $lim=[RemitJob+ExtendedLimit]::new(); $lim.BasicLimitInformation.LimitFlags=0x2000
+ $sz=[Runtime.InteropServices.Marshal]::SizeOf($lim); $mem=[Runtime.InteropServices.Marshal]::AllocHGlobal($sz)
+ try { [Runtime.InteropServices.Marshal]::StructureToPtr($lim,$mem,$false); if(![RemitJob]::SetInformationJobObject($job,9,$mem,$sz)){exit 125} } finally { [Runtime.InteropServices.Marshal]::FreeHGlobal($mem) }
+ $si=[Diagnostics.ProcessStartInfo]::new(); $si.FileName=(Join-Path $PSHOME 'pwsh.exe'); $si.UseShellExecute=$false
+ foreach($x in @('-NoProfile','-NonInteractive','-File',$worker,$argFile,$work,$gate)){[void]$si.ArgumentList.Add($x)}
+ $p=[Diagnostics.Process]::Start($si)
+ if(![RemitJob]::AssignProcessToJobObject($job,$p.Handle)){try{$p.Kill($true)}catch{};exit 125}
+ [IO.File]::WriteAllText($gate,'go',[Text.UTF8Encoding]::new($false)); $p.WaitForExit(); $rc=$p.ExitCode
+ [void][RemitJob]::TerminateJobObject($job,125)
+ $asz=[Runtime.InteropServices.Marshal]::SizeOf([type][RemitJob+Accounting]); $am=[Runtime.InteropServices.Marshal]::AllocHGlobal($asz)
+ try { $quiet=$false; for($i=0;$i -lt 100;$i++){ if(![RemitJob]::QueryInformationJobObject($job,1,$am,$asz,[IntPtr]::Zero)){exit 125}; $a=[Runtime.InteropServices.Marshal]::PtrToStructure($am,[type][RemitJob+Accounting]); if($a.ActiveProcesses -eq 0){$quiet=$true;break}; Start-Sleep -Milliseconds 20 }; if(!$quiet){exit 125} } finally { [Runtime.InteropServices.Marshal]::FreeHGlobal($am) }
+ [IO.File]::WriteAllText($done,'reaped',[Text.UTF8Encoding]::new($false)); exit $rc
+} finally { [void][RemitJob]::CloseHandle($job) }
+EOF
+}
+
 run_harness() { # $1 stdin file or 'none'; rest: the command, env prefix included
 	sf=$1
 	shift
@@ -1938,7 +2059,22 @@ run_harness() { # $1 stdin file or 'none'; rest: the command, env prefix include
 	# THE RUN IS BACKGROUNDED so that something else can watch it. With `QUIET` at
 	# 0 nothing does, and this is the same foreground wait it always was, one
 	# `wait` further out.
-	if [ "$sf" = none ]; then
+	if [ "$EXACT_LIFECYCLE" = windows-job ]; then
+		windows_job_files || { heartbeat_stop; die "could not create the Windows Job supervisor"; }
+		printf '%s\0' "$@" >"$RUNDIR/job-args" || { heartbeat_stop; die "could not write exact-run arguments"; }
+		rm -f "$RUNDIR/job-gate" "$RUNDIR/job-complete"
+		if [ "$sf" = none ]; then
+			pwsh.exe -NoProfile -NonInteractive -File "$RUNDIR/job-supervisor.ps1" "$RUNDIR/job-worker.ps1" "$RUNDIR/job-args" "$WT" "$RUNDIR/job-gate" "$RUNDIR/job-complete" >"$OUTFILE" 2>"$ERRFILE" &
+		else
+			pwsh.exe -NoProfile -NonInteractive -File "$RUNDIR/job-supervisor.ps1" "$RUNDIR/job-worker.ps1" "$RUNDIR/job-args" "$WT" "$RUNDIR/job-gate" "$RUNDIR/job-complete" <"$sf" >"$OUTFILE" 2>"$ERRFILE" &
+		fi
+	elif [ "$EXACT_LIFECYCLE" = linux-pid-namespace ]; then
+		if [ "$sf" = none ]; then
+			(cd "$WT" && unshare --user --map-root-user --pid --fork --kill-child=KILL -- "$@") >"$OUTFILE" 2>"$ERRFILE" &
+		else
+			(cd "$WT" && unshare --user --map-root-user --pid --fork --kill-child=KILL -- "$@" <"$sf") >"$OUTFILE" 2>"$ERRFILE" &
+		fi
+	elif [ "$sf" = none ]; then
 		(cd "$WT" && "$@") >"$OUTFILE" 2>"$ERRFILE" &
 	else
 		(cd "$WT" && "$@" <"$sf") >"$OUTFILE" 2>"$ERRFILE" &
@@ -1953,6 +2089,9 @@ run_harness() { # $1 stdin file or 'none'; rest: the command, env prefix include
 	HARNESS_EXIT=$?
 	HARNESS_PID=''
 	heartbeat_stop
+	if [ "$EXACT_LIFECYCLE" = windows-job ] && [ ! -f "$RUNDIR/job-complete" ]; then
+		die "the Windows Job supervisor did not attest that its process tree was reaped"
+	fi
 }
 
 # The devin context's containment, written into its tree for the run only.
@@ -2059,20 +2198,10 @@ EOF
 	# starred. Whether this fires before the deny resolves is NOT established here;
 	# if the deny wins, the run's log carries devin's sentence and the rule name,
 	# which is why the rules are named the way they are.
-	cat >"$devin_dir/hooks.v1.json" <<'EOF' || return 1
-{
-  "PreToolUse": [
-    {
-      "matcher": "exec",
-      "hooks": [ { "type": "command", "command": "sh .devin/remit-no-git.sh" } ]
-    },
-    {
-      "matcher": "^(request_scope|webfetch|mcp_call_tool|mcp__.*)$",
-      "hooks": [ { "type": "command", "command": "sh .devin/remit-no-reach.sh" } ]
-    }
-  ]
-}
-EOF
+	DEVIN_REACH_MATCHER='^(request_scope|webfetch|mcp_call_tool|mcp__.*)$'
+	jq -n --arg reach "$DEVIN_REACH_MATCHER" \
+		'{PreToolUse:[{matcher:"exec",hooks:[{type:"command",command:"sh .devin/remit-no-git.sh"}]},{matcher:$reach,hooks:[{type:"command",command:"sh .devin/remit-no-reach.sh"}]}]}' \
+		>"$devin_dir/hooks.v1.json" || return 1
 	cat >"$devin_dir/remit-no-reach.sh" <<'EOF' || return 1
 #!/bin/sh
 # Written by remit-invoke for one raise, and removed after it. Its whole job is
@@ -2642,6 +2771,19 @@ pi_tool_allowlist() { # $1 the caller's spec, empty for none — prints the list
 
 HARNESS_EXIT=0
 
+if [ -n "$EXACT_EVALUATION" ]; then
+	case "$(uname -s 2>/dev/null || :)" in
+	MSYS* | MINGW* | CYGWIN*)
+		command -v pwsh.exe >/dev/null 2>&1 || die "exact evaluation on Windows requires PowerShell 7.2+ and Job Objects"
+		pwsh.exe -NoProfile -NonInteractive -Command 'if ($PSVersionTable.PSVersion -lt [version]"7.2") { exit 2 }' >/dev/null 2>&1 || die "exact evaluation on Windows requires PowerShell 7.2+ and Job Objects"
+		EXACT_LIFECYCLE=windows-job ;;
+	*)
+		command -v unshare >/dev/null 2>&1 || die "exact evaluation requires unshare with a disposable PID namespace"
+		unshare --user --map-root-user --pid --fork --kill-child=KILL -- sh -c 'exit 0' >/dev/null 2>&1 || die "a user/PID namespace with kill-child is unavailable; no evaluator was raised"
+		EXACT_LIFECYCLE=linux-pid-namespace ;;
+	esac
+fi
+
 case "$HARNESS" in
 claude)
 	# THE CONTAINMENT IS WRITTEN HERE, PER RAISE — THE ENVIRONMENT's `claude` entry —
@@ -2810,6 +2952,11 @@ esac
 # the moment the run is. This run FINISHED, so a root that will not go is a
 # refusal — stated once, where the two answers to that condition sit together.
 scratch_gone_or_refuse
+
+if [ -n "$EXACT_EVALUATION" ]; then
+	jq -n --arg method "$EXACT_LIFECYCLE" --arg run_id "$EXACT_RUN_ID" '{schema:1,state:"reaped",method:$method,run_id:$run_id}' \
+		>"$EXACT_COMPLETION" || die "could not write exact-evaluation completion record"
+fi
 
 if [ "$HARNESS" != native ]; then
 	say "the harness process exited with code $HARNESS_EXIT — that is completion, not success."
@@ -3059,6 +3206,7 @@ write_provenance() {
 		[ -n "$DEVIN_TIER" ] && printf 'account: tier %s, primary org %s\n' "$DEVIN_TIER" "${DEVIN_ORG:-none reported}"
 		[ -n "$COPILOT_LOGIN" ] && printf 'account: %s at %s — recorded, not checked and not gated on\n' "$COPILOT_LOGIN" "${COPILOT_HOST:-not recorded}"
 		[ -n "$DEVIN_TIER_NOTE" ] && printf 'note: %s\n' "$DEVIN_TIER_NOTE"
+		[ -n "$EXACT_LIFECYCLE" ] && printf 'lifecycle: %s — worker process lifetime ended before return; native filesystem access was not contained\n' "$EXACT_LIFECYCLE"
 		[ -n "$final_note" ] && printf 'note: %s\n' "$final_note"
 		return 0
 	} >"$PROVFILE"

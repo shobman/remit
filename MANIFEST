@@ -1,22 +1,23 @@
 remit dist manifest v1
-version 0.3.22
+version 0.4.0
 100644 dba65a5df3bb3f082561af32324cc03b4d0126d5 CONTRIBUTING.md
 100644 c23c1d1c810eea733d6b21adda0c00ccffc41684 LICENSE
 100644 afd061a39ee0052f85ee91c58dee153a569e076b MANIFESTO.md
-100644 9115c4c8802954fe4d59fa0d75d371e287a0a37f README.md
-100644 172a2b4014fc934820779f3d51c39f31358fcc1d SHIPPED
-100644 0c4b454928cae1991f2821975c4be1452d4abccb VERSION
-100755 e8de527cc7df2b3cb4a1749ba9226f622dac6a14 bin/remit
+100644 17ef1e0eca8621ba702a7d4f8a597bd58d5500d5 README.md
+100644 3d942eaa6290d2b29fd7b2ea891002ab459d24d2 SHIPPED
+100644 1d0ba9ea182b0f7354f3daf12120744ec5e0c2f8 VERSION
+100755 7ed88995cb4b2fe03f2775c8d8e2d7cf2b53abf9 bin/remit
 100644 01d4bd38d5923e1dc1bff8896ee44a52e64903be bin/remit-exposure
-100755 7f980e02fa3aaa1eed30c32ddb206fe8fecddbce bin/remit-invoke
-100644 532e2523cefb54864dc222cb4dad101d58db63bf docs/index.html
-100755 23cc37b0a88f0e370b485f06615fb816e6019ee7 get-remit.sh
-100755 4208b580a0c66cf156e35378294ca228014f0d90 install.sh
+100755 f3dacc5d0a6b620f74084e0a670afcd9252cb23e bin/remit-invoke
+100755 0b5c5933b72f2a50d7d8fdf5e8b07129d417d84a bin/remit-snapshot
+100644 3f473cc4f192f5f42ba595c1b735c7c0bb13b86e docs/index.html
+100755 02a9fe3b2e8bc0bbc178acaee6f7bf1dc3dbd99f get-remit.sh
+100755 b6e821b4b5f6520d8c3ba6e3dc11dfbb30f6a9a1 install.sh
 100644 2ba357a6a00a9e68ce5884b8f090843deb77b7e6 install/AGENTS-remit.md
 100644 1158d5fe33d75073cb094c56ece4734ce5d7882c install/hooks/claude-settings.json
 100644 36cea88b10ec46a8553e40718cb7e5fb24525a3a install/hooks/copilot-no-agent-tool.json
 100644 38c52e0c5bdcd6bc8053122a2a56ecb97996d766 install/hooks/no-agent-tool.sh
-100755 4dc391b362fd29a9bde98e926b610a2600c4d122 install/hooks/pre-push
+100755 296a4e081abd4a98b6a53a7d6858b9a0fd9c88a6 install/hooks/pre-push
 100644 87d8401c188d32f1ab513069b4be89f28d34bb42 install/skills/remit-close/SKILL.md
 100644 f0e818d0ea10328a8c322f6dd70404da64bc8f1d install/skills/remit-exposure/SKILL.md
 100644 32de42c2fd2f59befba64be2fedda33b1a1497bd install/skills/remit-new/SKILL.md

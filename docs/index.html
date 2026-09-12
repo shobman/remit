@@ -165,7 +165,7 @@
 <body>
   <header class="wrap site-head">
     <a class="wordmark" href="#top" aria-label="remit home">remit</a>
-    <span class="version">VERSION 0.3.22</span>
+    <span class="version">VERSION 0.4.0</span>
   </header>
 
   <main id="top">
@@ -221,7 +221,7 @@
           </article>
           <article class="anchor">
             <h3>A separate evaluator judges the work</h3>
-            <p>A fresh context that did not write the work checks it against your brief and your rules before you read it. Put that evaluator on a model from another maker, and it is less likely to wave through work from its own family.</p>
+            <p>A fresh context that did not write the work checks an independent checkout of the exact recorded candidate against selected current authority, rules and proof. It never falls back to the builder's tree, and remit audits that checkout after the evaluator's owned process lifetime ends. Native execution detects mutation; it is not hostile-code read isolation. Put that evaluator on a model from another maker, and it is less likely to wave through work from its own family.</p>
           </article>
           <article class="anchor">
             <h3>It counts the attention each item used</h3>
@@ -246,7 +246,7 @@
           </article>
           <article class="problem">
             <h3>You can stop it with one command</h3>
-            <p>One command ends a running chain and every context it raised, and leaves the item at its last completed stage. A context starts with an emptied environment: no token or key crosses, and its CLI logs in as you through its own configuration directory.</p>
+            <p>One command ends a running chain and the contexts it raised, leaving the item at its last completed stage. The environment is filtered, but each CLI uses your authentication configuration. That is not an enforced boundary against reading your files.</p>
           </article>
         </div>
       </div>
@@ -260,6 +260,7 @@
           <article class="problem">
             <h3>The build loop stops itself</h3>
             <p>A builder gets four rounds at most. The same must-fix twice stops it. A must-fix that comes back after being displaced stops it, because the brief is arguing with itself, and that is yours to settle.</p>
+            <p>An unavailable evaluation prerequisite returns <code>BLOCKED</code>: the item waits and resume retries evaluation. Findings without an explicit must-fix do not become another build round.</p>
           </article>
           <article class="problem">
             <h3>The judgement loop stops itself</h3>
@@ -357,7 +358,7 @@
           </article>
           <article class="harness">
             <h3>Codex</h3>
-            <p>Runs inside a sandbox limited to its own files, checked after every run and refused on a downgrade. The one seat here with an enforced boundary.</p>
+            <p>Requests Codex's filesystem sandbox and checks its reported mode, refusing a reported downgrade. A missing report is unconfirmed. This is not a guarantee of blind or selected-input reads.</p>
           </article>
           <article class="harness">
             <h3>Devin</h3>
@@ -365,14 +366,14 @@
           </article>
           <article class="harness">
             <h3>Copilot CLI</h3>
-            <p>Cannot run git or gh in any wrapping, and that is tested before each real run. Checks the model and the reasoning effort before it bills anything. No enforced read boundary.</p>
+            <p>Uses tool-denial hooks and a preflight canary for Git commands. These checks are not a complete shell security boundary. Checks the model and reasoning effort before dispatch. No enforced read boundary.</p>
           </article>
           <article class="harness">
             <h3>Pi</h3>
             <p>The odd one out: it runs local models on your own machine, and any hosted provider you have configured, with built-in tools only and no extensions. A model the machine's own catalogue does not list is refused. No enforced read boundary.</p>
           </article>
         </div>
-        <p class="harnesses">Nothing raised by remit carries your API keys or tokens; each CLI logs in as you through its own configuration directory. <a href="https://github.com/shobman/remit#the-boundary-before-you-install">The README states the boundary in full</a>, and where each CLI lists its models.</p>
+        <p class="harnesses">The launch environment is filtered; each CLI still uses your authentication configuration. Fresh contexts and scratch directories do not establish blind isolation. <a href="https://github.com/shobman/remit#the-boundary-before-you-install">Read the actual boundaries in the README</a>.</p>
       </div>
     </section>
 
@@ -382,7 +383,8 @@
           <p class="eyebrow">Install</p>
           <h2 id="install-heading">Install remit in your repository.</h2>
           <p class="section-intro">Three scripts, the conventions, one section of AGENTS.md, a CONTRIBUTING.md it manages, a pre-push guard and the hook registrations, and a folder for the work, every file recorded in a manifest. There is no service to operate. The README explains how to inspect or pin the installer before you run it.</p>
-          <a href="https://github.com/shobman/remit#install-remit">Read the install guide on GitHub</a>
+          <p>Keep a dedicated install where the project adopts remit. Use <code>--shadow</code> with a separate private records repository for local adoption. Shadow excludes scaffolding from ordinary commits; it does not hide delivery branches, commit metadata or PR text, or isolate worker reads.</p>
+          <a href="https://github.com/shobman/remit#install-and-upgrade">Read the install guide on GitHub</a>
           <p class="harnesses">One installer serves <a href="#harnesses">all five agents</a>.</p>
         </div>
         <figure class="install-command" aria-labelledby="install-command-heading">

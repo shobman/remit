@@ -10,7 +10,7 @@ genuinely yours, and it does not nag you for it. It is three POSIX scripts and s
 there is no service to operate. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.3.22.**
+**Version 0.4.0.**
 
 ## Start by talking to your agent
 
@@ -147,7 +147,23 @@ supersede.
 
 ## What a verdict leaves behind
 
-A verdict passes, passes with findings, or fails with a must-fix. A must-fix goes back to a fresh
+A verdict passes, passes with findings, fails with a must-fix, or reports `BLOCKED` when a
+required prerequisite prevents evaluation. BLOCKED leaves the item active at its current
+stage; resume retries evaluation without commissioning a repair. A FAIL with no explicit
+Must-fix or applicable `fix` citation also waits: findings are never automatically turned
+into repair instructions. Exactly one verdict is required; quoted or fenced examples do
+not control the chain, and conflicting verdicts are refused.
+An unresolved, anchored question cannot accompany a passing verdict; that contradictory
+return is refused rather than accepting the work and dropping the question.
+
+For delivery gates, that fresh evaluator works from an independent checkout of the exact recorded
+candidate, never the builder's worktree or the primary tree. It receives selected current authority,
+rubric and proof inputs beside the checkout. After its owned process lifetime ends, remit audits the
+checkout, inputs and local Git controls; only scratch and bounded result files may change. Native
+execution supplies mutation detection and descendant cleanup, not hostile-code read isolation. If
+the candidate, lifecycle proof or audit is unavailable, the gate stays `BLOCKED` on that candidate.
+
+A must-fix goes back to a fresh
 author with the finding and nothing else. Within a gate, a finding is disposed of only by a rubric
 the evaluator cites: one in the gate file's `accept` section accepts it, one in `fix` makes it the
 must-fix. A finding no rubric disposes of stands. Closing an item seals every finding its last verdict at each
@@ -198,9 +214,10 @@ or declares work over for you. It never raises a context on a seat you did not r
 falls back to another when that seat refuses, and never lets a builder raise sub-agents of its own.
 
 It runs fresh agent contexts on your repository using the agent accounts already logged in on
-your machine. It passes through none of your API keys, tokens or SSH material, and gives each
-context a scratch home; a scratch home is not isolation. Only Codex supplies an enforced
-filesystem sandbox; Claude Code, Devin, Copilot CLI and Pi run as your user and can read what you
+your machine. It filters the launch environment and gives each context a scratch home, but
+the CLI still uses your authentication configuration. A scratch home is not isolation.
+Codex supplies a filesystem sandbox; that alone is not a selected-input or blind-read
+guarantee. Claude Code, Devin, Copilot CLI and Pi run as your user and can read what you
 can read. remit applies the containment each agent exposes and
 records on every pull request which applied; a sandbox for every agent is the direction, and the
 reference below says exactly what holds today.
@@ -230,11 +247,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.3.22` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.4.0` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.3.22 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.4.0 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:
@@ -242,6 +259,26 @@ If you already have a remit clone, run its installer directly:
 ```sh
 sh /path/to/remit/install.sh /path/to/your-repository
 ```
+
+The default is a **dedicated install**: the project adopts Remit's managed scaffolding.
+Records live in the project unless you configure personal records. For a project that has
+not adopted Remit, **shadow mode** installs locally without committing its scaffolding:
+
+```sh
+sh /path/to/remit/install.sh --shadow /path/to/your-repository
+```
+
+Before a shadow install, put a personal records pointer in the target's untracked
+`.remit/settings.local.json`, for example
+`{"records":{"remote":"git@github.com:your-account/private-records.git","folder":"project"}}`.
+Use a separate private repository with the intended access permissions. Shadow mode refuses
+without this pointer; upgrades must keep the original installation mode.
+
+Shadow mode is not a publication or read-isolation guarantee. Delivery branches, commit
+metadata and PR bodies remain visible, and currently include worker delivery text. Do not
+put confidential material in that text. A fork does not change this boundary, and local
+Git exclusions do not prevent deliberate force-staging. Stronger publication and isolated
+worker boundaries are not implemented by this installation mode.
 
 The target must be inside your repository's primary worktree; a linked worktree is refused. The
 installer needs only Git and a POSIX shell; on Windows, use Git Bash's `sh`. Run every remit
@@ -331,18 +368,21 @@ minutes and no chain raises into it while the mark is fresh.
 
 ### Agent containment, as it holds today
 
-Codex: an enforced sandbox, its own files and nothing else, read back from the run's own header
-after every run and refused on a downgrade. Claude Code: its sub-agent tool denied by flag and by a
+Codex: requests its filesystem sandbox, checks the reported mode and refuses a reported
+downgrade; a missing header is unconfirmed, not attested. This is not a blind-read boundary.
+Claude Code: its sub-agent tool denied by flag and by a
 hook written for the run, and the docker verbs that drop data denied the same two ways, in Bash and
 in PowerShell, so a builder that meets a stale database password stops for you instead of resetting
 the database; the settings block the installer offers denies them in your own sessions too. A deny
 rule is a fence, not a wall: it names commands, and a context that wants past it can look for
 another spelling. The sandbox is the wall, and it is the direction. Devin: an allow list written for the run, which ends the run on anything
-outside it. Copilot CLI: a hook against `git` and `gh` in any wrapping, tested by a throwaway run
-before the real one. Pi: built-in tools only, extensions off. Every context starts with an emptied
+outside it. Copilot CLI: Git tool-denial hooks and a throwaway canary before the real run;
+these do not prove that every shell spelling is blocked. Pi: built-in tools only, extensions off.
+Every context starts with a filtered
 environment and an allow-list: your `PATH`, a scratch `HOME` removed after the run, a scratch temp
 inside its own worktree, and the one configuration directory its CLI needs to log in as you. A
-context never runs `git` or `gh`; the mechanism does, as you.
+context is instructed not to run `git` or `gh`; the mechanism owns delivery, as you. This
+instruction and the command guards are not security isolation.
 
 ### Host notes
 
