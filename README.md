@@ -10,7 +10,7 @@ genuinely yours, and it does not nag you for it. It is three POSIX scripts and s
 there is no service to operate. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.4.2.**
+**Version 0.4.3.**
 
 ## Start by talking to your agent
 
@@ -234,6 +234,14 @@ can read. remit applies the containment each agent exposes and
 records on every pull request which applied; a sandbox for every agent is the direction, and the
 reference below says exactly what holds today.
 
+Working records are not inherently confidential. Remit does not fingerprint their contents or
+audit Git history for copied wording: useful research and practitioner language may appear in
+the product. Keep secrets and confidential source material out of the chain upstream. If you
+publish a public edition from a private project, its explicit export/build is your publication
+boundary. Remit still checks the exact delivery candidate and draft PR state, and selects PR
+prose deliberately rather than dumping raw worker returns. An optional candidate-bound
+`publication.md` is an ordinary committable item record in a dedicated installation.
+
 `sh bin/remit stop <slug>` ends a running chain and every context it raised, discards the
 worktree's in-flight changes, and leaves the item at the stage it last stopped at. A failure leaves
 the record with the reason as its last entry, the item's worktree beside your repository, and the
@@ -259,11 +267,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.4.2` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.4.3` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.4.2 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.4.3 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:
@@ -273,8 +281,9 @@ sh /path/to/remit/install.sh /path/to/your-repository
 ```
 
 The default is a **dedicated install**: the project adopts Remit's managed scaffolding.
-Records live in the project unless you configure personal records. For a project that has
-not adopted Remit, **shadow mode** installs locally without committing its scaffolding:
+Records live in the project unless you configure personal records. **Shadow mode** keeps
+frequent record commits separate from the product repository's human-review merge gates,
+and installs locally without committing its scaffolding:
 
 ```sh
 sh /path/to/remit/install.sh --shadow /path/to/your-repository
@@ -286,15 +295,18 @@ Before a shadow install, put a personal records pointer in the target's untracke
 Use a separate private repository with the intended access permissions. Shadow mode refuses
 without this pointer; upgrades must keep the original installation mode.
 
-Shadow mode is not a read-isolation guarantee. The publication boundary described above applies
-in both modes: public delivery text is deliberately selected, and raw worker returns stay in
-the work record, whose visibility depends on its repository and access permissions.
-Already published history remains exposed. A fork or local Git exclusion
-does not provide isolation or prevent deliberate force-staging.
+Both repositories may be private. Shadow is a workflow separation, not a confidentiality or
+public-export boundary: useful practitioner words may enter product code, comments or docs.
+Briefs and run records stay separate as working material, retained for the practitioner's later
+inspection rather than required product history. Shadow does not isolate worker reads.
 
 The target must be inside your repository's primary worktree; a linked worktree is refused. The
 installer needs only Git and a POSIX shell; on Windows, use Git Bash's `sh`. Run every remit
 command through `sh` the same way.
+
+Build-worktree creation enables Git's long-path support for that checkout command on Windows,
+without changing your repository or global Git settings. Publication reads only the destination
+base and delivery branch; unrelated GitHub pull refs need not be fetched.
 
 Then seat your agents. `sh bin/remit setup` reads the host and proposes `.remit/settings.json`,
 the registry of which agents and models each role may use, for you to accept or edit;

@@ -165,7 +165,7 @@
 <body>
   <header class="wrap site-head">
     <a class="wordmark" href="#top" aria-label="remit home">remit</a>
-    <span class="version">VERSION 0.4.2</span>
+    <span class="version">VERSION 0.4.3</span>
   </header>
 
   <main id="top">
@@ -384,7 +384,9 @@
           <p class="eyebrow">Install</p>
           <h2 id="install-heading">Install remit in your repository.</h2>
           <p class="section-intro">Three scripts, the conventions, one section of AGENTS.md, a CONTRIBUTING.md it manages, a pre-push guard and the hook registrations, and a folder for the work, every file recorded in a manifest. There is no service to operate. The README explains how to inspect or pin the installer before you run it.</p>
-          <p>Keep a dedicated install where the project adopts remit. Use <code>--shadow</code> with a separate private records repository for local adoption. Shadow excludes scaffolding from ordinary commits; it does not hide delivery branches, commit metadata or PR text, or isolate worker reads.</p>
+          <p>Keep a dedicated install where the project adopts remit. Use <code>--shadow</code> to separate frequent working-record commits from the product repository's human-review merge gates. Both repositories may be private. Shadow is a workflow separation, not a confidentiality or public-export boundary, and does not isolate worker reads.</p>
+          <p>Working records are not inherently confidential: useful practitioner words may enter the product. Remit does not fingerprint their contents or audit Git history for copied wording. Handle secrets upstream and public exports explicitly; exact-candidate checks and deliberately selected PR summaries remain.</p>
+          <p>Windows build-worktree creation enables long-path support for the checkout command. Delivery checks only its base and branch, without requiring unrelated GitHub pull refs locally.</p>
           <a href="https://github.com/shobman/remit#install-and-upgrade">Read the install guide on GitHub</a>
           <p class="harnesses">One installer serves <a href="#harnesses">all five agents</a>.</p>
         </div>

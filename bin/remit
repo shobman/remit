@@ -568,12 +568,12 @@
 #
 # After a `build` invoke has authored the worktree, `resume` constructs a scratch
 # index, creates a neutral local candidate and durably records `next=publish`
-# before an external write. It validates every newly reachable commit against
-# forbidden paths and known private fingerprints, freezes destination state,
+# before an external write. It checks staged paths and freezes the delivery
+# branch and base state,
 # then pushes that exact SHA without force. A new draft PR receives only the
 # candidate-bound `publication.md` or neutral mechanics. Later deliveries never
 # rewrite title/body: each receives one full-SHA marker comment, after a complete
-# marker lookup. Raw returns remain private record evidence. THE SEAM EXISTS
+# marker lookup. Raw returns remain record evidence, not automatic PR prose. THE SEAM EXISTS
 # ONCE, here; `t/unit/repro-pr-body-second-delivery.sh` asserts it.
 #
 # The build worktree is `<repo>-remit-worktrees/<slug>` — a SIBLING of the
@@ -1751,7 +1751,9 @@ delivery_id() {
 }
 
 delivery_forbidden_path() { # $1 repository-relative product path
-	case "$1" in */publication.md | */.publication.json | */.delivery.json | */.evaluation-retry.json | */runs/*) return 0 ;; esac
+	# Machine checkpoints and kept runs belong to record commits. Dedicated
+	# record documents may be committed; ordinary product paths are not special.
+	case "$1" in .remit/work-items/*/.publication.json | .remit/work-items/*/.delivery.json | .remit/work-items/*/.evaluation-retry.json | .remit/work-items/*/runs/*) return 0 ;; esac
 	if [ -n "$RECORDS_REMOTE" ]; then
 		case "$1" in .remit/work-items/* | .remit/settings.local.json | .remit/.install/* | .remit/rules/*) return 0 ;; esac
 		_dm_manifest="$root/.remit/.install/manifest"
@@ -1762,93 +1764,9 @@ delivery_forbidden_path() { # $1 repository-relative product path
 	return 1
 }
 
-# The optional declaration is private authority even in a dedicated install.
-# It is never part of an ordinary record commit. If an earlier version already
-# tracked it, publication stops: deleting it now would not retract its history.
-publication_primary_safe() {
-	[ "$rec_root" = "$root" ] || return 0
-	_pp="$item_rel/publication.md"
-	if git -C "$root" log --all --format=%H -- "$_pp" 2>/dev/null | grep -q .; then
-		return 1
-	fi
-	git -C "$root" remote get-url origin >/dev/null 2>&1 || return 0
-	git -C "$root" ls-remote origin >"$WORK/publication-primary-refs" 2>/dev/null || return 1
-	while IFS=' 	' read -r _psha _pref; do
-		[ -n "$_psha" ] || continue
-		git -C "$root" cat-file -e "$_psha^{commit}" 2>/dev/null || return 1
-		git -C "$root" rev-list "$_psha" -- "$_pp" 2>/dev/null | grep -q . && return 1
-	done <"$WORK/publication-primary-refs"
-	return 0
-}
-
 publication_digest() {
 	[ -f "$item/publication.md" ] || { printf 'absent\n'; return 0; }
 	git -C "$root" hash-object -- "$item/publication.md"
-}
-
-# Build fingerprints only from inputs this coordinator knows are private. Full
-# file object ids catch binary/exact copies; long lines catch excerpts. Machine
-# checkpoint files are deliberately excluded from the private input set.
-delivery_private_fingerprints() {
-	: >"$WORK/private-hashes"
-	: >"$WORK/private-lines"
-	{
-		[ -f "$LOCALSETTINGS" ] && printf '%s\n' "$LOCALSETTINGS"
-		find "$item" -type f ! -name .delivery.json ! -name .publication.json ! -name .evaluation-retry.json -print 2>/dev/null
-	} | while IFS= read -r _pf; do
-		[ -f "$_pf" ] || continue
-		git -C "$root" hash-object -- "$_pf" >>"$WORK/private-hashes" 2>/dev/null || return 1
-		LC_ALL=C awk 'length($0) >= 32 { print }' "$_pf" >>"$WORK/private-lines" 2>/dev/null || return 1
-		nocr "$_pf" | LC_ALL=C awk 'length($0) >= 32 { print }' >>"$WORK/private-lines" 2>/dev/null || return 1
-	done || return 1
-	sort -u "$WORK/private-hashes" -o "$WORK/private-hashes"
-	sort -u "$WORK/private-lines" -o "$WORK/private-lines"
-}
-
-# Compare every object newly reachable at the frozen destination. This scans
-# ancestor commits too, so deleting a private file in the final tree is not an
-# escape. The refs file is supplied by the caller and revalidated before push.
-delivery_outgoing_safe() { # $1 full candidate SHA  $2 frozen ls-remote output
-	_candidate=$1 _refs=$2
-	awk 'NF >= 2 { print $1 }' "$_refs" | sort -u >"$WORK/delivery-ref-shas"
-	if [ -s "$WORK/delivery-ref-shas" ]; then
-		git -C "$root" rev-list "$_candidate" --not $(cat "$WORK/delivery-ref-shas") >"$WORK/delivery-outgoing" 2>/dev/null || return 1
-	else
-		git -C "$root" rev-list "$_candidate" >"$WORK/delivery-outgoing" 2>/dev/null || return 1
-	fi
-	while IFS= read -r _dc; do
-		# A merge can introduce a path only relative to one parent. Without -m,
-		# diff-tree emits no per-parent path set and that path disappears from
-		# this boundary, including a path removed while resolving the merge.
-		git -C "$root" diff-tree --root -m --no-commit-id --name-only -r "$_dc" >"$WORK/delivery-paths" || return 1
-		while IFS= read -r _dp; do
-			case "$_dp" in '"'* | -* | *'\'*) return 1 ;; esac
-			delivery_forbidden_path "$_dp" && return 1
-		done <"$WORK/delivery-paths"
-	done <"$WORK/delivery-outgoing"
-	delivery_private_fingerprints || return 1
-	git -C "$root" rev-list --objects "$_candidate" --not $(cat "$WORK/delivery-ref-shas" 2>/dev/null) >"$WORK/delivery-objects" 2>/dev/null || return 1
-	while IFS=' ' read -r _oid _oname; do
-		[ -n "$_oid" ] || continue
-		_otype=$(git -C "$root" cat-file -t "$_oid" 2>/dev/null) || return 1
-		case "$_otype" in
-		blob)
-			grep -qxF "$_oid" "$WORK/private-hashes" 2>/dev/null && return 1
-			if [ -s "$WORK/private-lines" ]; then
-				git -C "$root" cat-file blob "$_oid" >"$WORK/public-blob" 2>/dev/null || return 1
-				LC_ALL=C grep -F -f "$WORK/private-lines" "$WORK/public-blob" >/dev/null 2>&1 && return 1
-			fi
-			;;
-		commit)
-			if [ -s "$WORK/private-lines" ]; then
-				git -C "$root" cat-file commit "$_oid" >"$WORK/public-meta" 2>/dev/null || return 1
-				printf '%s\n' "$_oname" >>"$WORK/public-meta"
-				LC_ALL=C grep -F -f "$WORK/private-lines" "$WORK/public-meta" >/dev/null 2>&1 && return 1
-			fi
-			;;
-		esac
-	done <"$WORK/delivery-objects"
-	return 0
 }
 
 # Re-emit the whole script-owned header as one block directly under the title.
@@ -2065,14 +1983,6 @@ record_only() { # $@ the pathspecs about to be committed
 		for _ro_f in $(git -C "$CIN_ROOT" diff --cached --name-only -- "$_ro_p" 2>/dev/null); do
 			_ro_rel=${_ro_f#"$_ro_p"/}
 			[ "$_ro_rel" = "$_ro_f" ] && continue
-			# publication.md is private publishing authority, not an ordinary
-			# dedicated record. A shadow record lives in its separate private
-			# repository and may retain it there.
-			if [ "$rec_root" = "$root" ] && [ "$_ro_rel" = publication.md ]; then
-				git -C "$CIN_ROOT" reset -q -- "$_ro_f" 2>/dev/null
-				_ro_left="${_ro_left:+$_ro_left }$_ro_f"
-				continue
-			fi
 			case "$_ro_rel" in
 			*/*)
 				case "$_ro_rel" in runs/*) continue ;; esac
@@ -4011,7 +3921,6 @@ prepare_delivery_candidate() { # worktree
 	_pdc_wt=$1
 	delivery_branch_prepare
 	delivery_destination
-	publication_primary_safe || { DELIVER_ERR="publication authority was already tracked or its primary history is unknown; publication.md is never shipped"; return 1; }
 	delivery_destination_bind || { DELIVER_ERR="delivery destination changed or could not be made durable"; return 1; }
 	git -C "$_pdc_wt" diff --cached --quiet || { DELIVER_ERR="refusing unexplained changes already staged before delivery"; return 1; }
 	_parent=$(git -C "$_pdc_wt" rev-parse HEAD) || { DELIVER_ERR="cannot resolve the candidate parent"; return 1; }
@@ -4022,7 +3931,7 @@ prepare_delivery_candidate() { # worktree
 	GIT_INDEX_FILE="$_pidx" git -C "$_pdc_wt" diff --cached --name-only >"$WORK/delivery-staged" || return 1
 	while IFS= read -r _sp; do
 		case "$_sp" in '"'* | -* | *'\'*) DELIVER_ERR="refusing an unsafe candidate path spelling"; return 1 ;; esac
-		delivery_forbidden_path "$_sp" && { DELIVER_ERR="refusing a private record, checkpoint or publication path in the candidate"; return 1; }
+		delivery_forbidden_path "$_sp" && { DELIVER_ERR="record or installation changes belong outside the product candidate"; return 1; }
 	done <"$WORK/delivery-staged"
 	GIT_INDEX_FILE="$_pidx" git -C "$_pdc_wt" diff --cached --quiet && { DELIVER_ERR="the build changed nothing — an empty stage is not a delivery"; return 1; }
 	DELIVERY_FILES=$(GIT_INDEX_FILE="$_pidx" git -C "$_pdc_wt" diff --cached --name-only | wc -l | tr -d ' ')
@@ -4060,7 +3969,6 @@ publish_delivery_candidate() { # worktree; checkpoint must exist
 		{ DELIVER_ERR="publication authority, branch or destination changed after candidate checkpoint"; return 3; }
 	CANDIDATE_SHA=$PC_CANDIDATE DELIVERY_FILES=$PC_FILES ROUND=$PC_ROUND
 	SHA=$(git -C "$root" rev-parse --short "$CANDIDATE_SHA")
-	publication_primary_safe || { DELIVER_ERR="publication authority was already tracked or its primary history is unknown; publication.md is never shipped"; return 3; }
 	_newdecl=$(publication_digest)
 	publication_body >"$WORK/pr-publication" || { DELIVER_ERR="publication declaration is invalid or is not bound to candidate $CANDIDATE_SHA"; return 3; }
 	if [ "$PC_DECLARATION" != "$_newdecl" ]; then
@@ -4072,16 +3980,9 @@ publish_delivery_candidate() { # worktree; checkpoint must exist
 	DELIVERY_HAS_REMOTE=no
 	if git -C "$root" remote get-url "$DELIVERY_REMOTE" >/dev/null 2>&1; then
 		DELIVERY_HAS_REMOTE=yes
-		git -C "$root" ls-remote "$DELIVERY_REMOTE" >"$WORK/delivery-refs.before" 2>/dev/null || { DELIVER_ERR="destination refs could not be read"; return 3; }
+		git -C "$root" ls-remote --refs "$DELIVERY_REMOTE" "refs/heads/$DELIVERY_BASE" "refs/heads/$DELIVERY_BRANCH" >"$WORK/delivery-refs.before" 2>/dev/null || { DELIVER_ERR="destination refs could not be read"; return 3; }
 		_remote_branch=$(awk -v r="refs/heads/$DELIVERY_BRANCH" '$2 == r { print $1; exit }' "$WORK/delivery-refs.before")
 		_remote_base=$(awk -v r="refs/heads/$DELIVERY_BASE" '$2 == r { print $1; exit }' "$WORK/delivery-refs.before")
-		# On a retry the destination branch may already name this candidate. Scan
-		# it against the branch tip recorded before it (the checkpoint parent),
-		# not against itself, or an external write between push and checkpoint
-		# would make every unsafe object disappear from the outgoing set.
-		awk -v r="refs/heads/$DELIVERY_BRANCH" -v c="$CANDIDATE_SHA" -v p="$PC_PARENT" \
-			'{ if ($2 == r && $1 == c) print p, $2; else print }' "$WORK/delivery-refs.before" >"$WORK/delivery-refs.scan"
-		delivery_outgoing_safe "$CANDIDATE_SHA" "$WORK/delivery-refs.scan" || { DELIVER_ERR="candidate outgoing history contains a forbidden path or known private content"; return 3; }
 		[ -n "$_remote_base" ] || { DELIVER_ERR="destination base branch is absent"; return 3; }
 		if [ "$PC_PHASE" = candidate ]; then
 			if [ "$_remote_branch" = "$CANDIDATE_SHA" ]; then PC_PHASE=pushed
@@ -4109,7 +4010,7 @@ publish_delivery_candidate() { # worktree; checkpoint must exist
 	fi
 
 	if [ "$DELIVERY_HAS_REMOTE" = yes ] && [ "$PC_PHASE" = candidate ]; then
-		git -C "$root" ls-remote "$DELIVERY_REMOTE" >"$WORK/delivery-refs.now" 2>/dev/null || { DELIVER_ERR="destination refs could not be revalidated"; return 3; }
+		git -C "$root" ls-remote --refs "$DELIVERY_REMOTE" "refs/heads/$DELIVERY_BASE" "refs/heads/$DELIVERY_BRANCH" >"$WORK/delivery-refs.now" 2>/dev/null || { DELIVER_ERR="destination refs could not be revalidated"; return 3; }
 		cmp -s "$WORK/delivery-refs.before" "$WORK/delivery-refs.now" || { DELIVER_ERR="destination refs changed during publication validation"; return 3; }
 		[ "$(publication_digest)" = "$PC_DECLARATION" ] || { DELIVER_ERR="publication declaration changed during destination validation"; return 3; }
 		if ! out=$(REMIT_PUBLICATION_CANDIDATE="$CANDIDATE_SHA" \
@@ -4218,21 +4119,23 @@ worktree_path() {
 }
 
 build_worktree() {
+	# Command-scoped: deep tracked archives must check out on Windows without
+	# changing the practitioner's repository or global Git configuration.
 	delivery_branch_prepare
 	_branch=$(delivery_branch)
 	WT=$(worktree_path)
 	[ -e "$WT/.git" ] && return 0
 	ensure_dir "$(dirname "$WT")" || return 1
 	if git -C "$root" show-ref --verify --quiet "refs/heads/$_branch"; then
-		git -C "$root" worktree add "$WT" "$_branch" >/dev/null 2>&1 || return 1
+		git -c core.longpaths=true -C "$root" worktree add "$WT" "$_branch" >/dev/null 2>&1 || return 1
 	elif git -C "$root" show-ref --verify --quiet "refs/remotes/$DELIVERY_REMOTE/$_branch"; then
-		git -C "$root" worktree add "$WT" -b "$_branch" "refs/remotes/$DELIVERY_REMOTE/$_branch" >/dev/null 2>&1 || return 1
+		git -c core.longpaths=true -C "$root" worktree add "$WT" -b "$_branch" "refs/remotes/$DELIVERY_REMOTE/$_branch" >/dev/null 2>&1 || return 1
 	elif git -C "$root" remote get-url "$DELIVERY_REMOTE" >/dev/null 2>&1 &&
 		git -C "$root" ls-remote --exit-code "$DELIVERY_REMOTE" "refs/heads/$_branch" >/dev/null 2>&1; then
 		git -C "$root" fetch -q "$DELIVERY_REMOTE" "refs/heads/$_branch:refs/remotes/$DELIVERY_REMOTE/$_branch" >/dev/null 2>&1 || return 1
-		git -C "$root" worktree add "$WT" -b "$_branch" "refs/remotes/$DELIVERY_REMOTE/$_branch" >/dev/null 2>&1 || return 1
+		git -c core.longpaths=true -C "$root" worktree add "$WT" -b "$_branch" "refs/remotes/$DELIVERY_REMOTE/$_branch" >/dev/null 2>&1 || return 1
 	else
-		git -C "$root" worktree add "$WT" -b "$_branch" "$DELIVERY_BASE" >/dev/null 2>&1 || return 1
+		git -c core.longpaths=true -C "$root" worktree add "$WT" -b "$_branch" "$DELIVERY_BASE" >/dev/null 2>&1 || return 1
 	fi
 	return 0
 }
@@ -4905,10 +4808,6 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 				LOOP_STOP=$DEPENDS_ON_STOP
 				LOOP_STOP_NOTE=$DEPENDS_ON_NOTE
 				return 2
-			fi
-			if ! publication_primary_safe; then
-				LOOP_STOP="cannot act: publication authority was already tracked or its primary history is unknown"
-				return 1
 			fi
 			if ! build_worktree; then
 				LOOP_STOP="cannot act: could not prepare the build worktree"

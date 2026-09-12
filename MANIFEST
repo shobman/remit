@@ -1,19 +1,19 @@
 remit dist manifest v1
-version 0.4.2
+version 0.4.3
 100644 dba65a5df3bb3f082561af32324cc03b4d0126d5 CONTRIBUTING.md
 100644 c23c1d1c810eea733d6b21adda0c00ccffc41684 LICENSE
 100644 afd061a39ee0052f85ee91c58dee153a569e076b MANIFESTO.md
-100644 0f956f79abb7d1ce9cea1a201828a6b238f548a0 README.md
-100644 bb1dff383f56c27eb87d163b180c996faedcbf86 SHIPPED
-100644 2b7c5ae01848a77d95e2792eb83ab605c9aed91a VERSION
-100755 164bacc4f85fad9cdc9ea2c88c31ef40f9261a43 bin/remit
+100644 fab0ae2607ca75dc30e6a95cfe3802ae513be0bb README.md
+100644 0ede5a0e2462403031bf5f8ff72377285cce43db SHIPPED
+100644 17b2ccd9bf9050efdf57d7800677e87919b9b5b9 VERSION
+100755 7f9ef8f80e4802dc7d6e7efd381a1f3cd437e1ef bin/remit
 100644 01d4bd38d5923e1dc1bff8896ee44a52e64903be bin/remit-exposure
 100755 6ef66983936ae1a8fa0ac42a1786403004064bba bin/remit-invoke
 100755 0b5c5933b72f2a50d7d8fdf5e8b07129d417d84a bin/remit-snapshot
-100644 30152319e927ebb54822bac53fbbdf16d796b809 docs/index.html
-100755 0c1d20cbeafb9566e26890e451f5a0acadc951bf get-remit.sh
+100644 9a473bcabcdf09590b43f05e1fe914827ce1960f docs/index.html
+100755 b8b70d16ee73ab22e04b7702292c93ded4ddc93d get-remit.sh
 100755 b6e821b4b5f6520d8c3ba6e3dc11dfbb30f6a9a1 install.sh
-100644 64088caac7b58a686bd2eac2b2d9e8984c756d57 install/AGENTS-remit.md
+100644 a5379f9a553e19dfbd66ddd20a72cf28542163f4 install/AGENTS-remit.md
 100644 1158d5fe33d75073cb094c56ece4734ce5d7882c install/hooks/claude-settings.json
 100644 36cea88b10ec46a8553e40718cb7e5fb24525a3a install/hooks/copilot-no-agent-tool.json
 100644 38c52e0c5bdcd6bc8053122a2a56ecb97996d766 install/hooks/no-agent-tool.sh

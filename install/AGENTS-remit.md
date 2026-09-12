@@ -82,7 +82,9 @@ sh "$(git rev-parse --show-toplevel)/bin/remit" <command> ...
   pull request; Remit does not merge or read CI checks.
 - A fresh context judges AI-produced work before the practitioner is asked to accept it.
   The author's own review is not independent evaluation. Preserve the exact candidate and
-  publication boundaries in the scripts; private records do not become public delivery text.
+  publication checks in the scripts. Select PR summaries deliberately; do not dump raw worker
+  returns into them. Working records are not inherently confidential, and useful practitioner
+  wording may appear in product code or documentation.
 - Exit 3 means committed locally but not accepted by the remote. Say so; do not call it
   pushed, backed up or safe. Exit 4 is an escalation: read its reason from the item's log.
   For other outcomes, report the command's actual state and changes.
