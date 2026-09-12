@@ -226,8 +226,10 @@
 #                            three names carry the same directory.
 #   LANG, LC_ALL, LC_CTYPE   locale, where the coordinator has them.
 #   SYSTEMROOT, COMSPEC,     Windows needs these to start a process at all;
-#   PATHEXT, SYSTEMDRIVE     without SYSTEMDRIVE a Windows CLI writes a literal
-#                            `%SystemDrive%/...` tree into the worktree.
+#   PATHEXT, SYSTEMDRIVE,    without SYSTEMDRIVE a Windows CLI writes a literal
+#   USERNAME                 `%SystemDrive%/...` tree into the worktree. Codex's
+#                            Windows sandbox needs USERNAME to resolve the local
+#                            sandbox account before CreateProcessWithLogonW.
 #   USERPROFILE, APPDATA,    Windows only, POINTED AT THIS RAISE'S SCRATCH — the
 #   LOCALAPPDATA             three roots a program writes its profile under, so
 #                            a tool that installs itself lands in the scratch
@@ -1456,6 +1458,11 @@ scrub_list() {
 	# Without this a Windows CLI writes a literal `%SystemDrive%` directory into its
 	# CWD — the worktree the seam is about to stage.
 	[ -n "${SYSTEMDRIVE:-}" ] && printf 'SYSTEMDRIVE=%s\n' "$SYSTEMDRIVE"
+	# Codex 0.154's Windows sandbox cannot resolve the local sandbox account when
+	# env -i removes USERNAME: its first process launch fails with Windows error 5.
+	# This is the coordinator's account name, not a credential or a profile path;
+	# USERPROFILE, APPDATA and LOCALAPPDATA remain pointed at this raise's scratch.
+	[ -n "${USERNAME:-}" ] && printf 'USERNAME=%s\n' "$USERNAME"
 	# THE WINDOWS PROFILE, POINTED AT THE SCRATCH: the three roots a program writes
 	# under go to THIS RAISE'S SCRATCH, the way HOME does — an install lands there
 	# and is removed with the run — and the three machine roots a program only reads
