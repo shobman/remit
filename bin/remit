@@ -3898,6 +3898,7 @@ delivery_pr_lookup() { # worktree; complete failure is never "none"
 		--json number,url,isDraft,headRefOid,baseRefName \
 		--jq '.[] | [.number,.url,.isDraft,.headRefOid,.baseRefName] | @tsv' 2>"$WORK/pr-lookup.err"); then
 		DELIVER_ERR="existing pull request lookup failed: $(tr '\n' ' ' <"$WORK/pr-lookup.err")"
+		PUBLICATION_RETRY=yes
 		return 1
 	fi
 	_dpl_count=$(printf '%s\n' "$existing" | grep -c .)
@@ -3923,6 +3924,7 @@ delivery_comments_have_marker() {
 	[ -z "$DELIVERY_REPOSITORY" ] || _dcm_repo="repos/$DELIVERY_REPOSITORY"
 	if ! (cd "$root" && gh api --paginate "$_dcm_repo/issues/$PR_NUM/comments" --jq '.[].body') >"$WORK/pr-comments" 2>"$WORK/pr-comments.err"; then
 		DELIVER_ERR="pull request comment lookup failed: $(tr '\n' ' ' <"$WORK/pr-comments.err")"
+		PUBLICATION_RETRY=yes
 		return 2
 	fi
 	grep -qF "<!-- remit-delivery:$CANDIDATE_SHA -->" "$WORK/pr-comments"
@@ -3968,6 +3970,38 @@ prepare_delivery_candidate() { # worktree
 }
 
 publish_delivery_candidate() { # worktree; checkpoint must exist
+	# Retry failed external operations from the durable checkpoint. A write may
+	# already have succeeded: the attempt reconciles exact refs and PR markers
+	# before writing again. Integrity failures never opt into this loop.
+	_pub_try=1
+	_pub_declaration=$(publication_digest)
+	_pub_identity=$(jq -c '[.candidate,.parent,.gate,.round,.authority,.branch,.push_remote,.repository,.base,.files]' "$item/.publication.json" 2>/dev/null) || {
+		DELIVER_ERR="missing or invalid publication checkpoint"; return 3;
+	}
+	while :; do
+		if [ "$_pub_try" -gt 1 ]; then
+			chain_intact || { DELIVER_ERR="authority changed during publication retry"; return 3; }
+			[ "$(publication_digest)" = "$_pub_declaration" ] &&
+				[ "$(jq -c '[.candidate,.parent,.gate,.round,.authority,.branch,.push_remote,.repository,.base,.files]' "$item/.publication.json" 2>/dev/null)" = "$_pub_identity" ] || {
+				DELIVER_ERR="candidate or publication declaration changed during retry"; return 3;
+			}
+		fi
+		PUBLICATION_RETRY=no
+		publish_delivery_attempt "$1"
+		_pub_rc=$?
+		[ "$_pub_rc" = 0 ] && return 0
+		[ "$PUBLICATION_RETRY" = yes ] || return "$_pub_rc"
+		if [ "$_pub_try" -ge 3 ]; then
+			DELIVER_ERR="$DELIVER_ERR (publication stopped after 3 attempts; checkpoint retained)"
+			return "$_pub_rc"
+		fi
+		say "publication: $DELIVER_ERR; revalidating the saved candidate in ${_pub_try}s."
+		sleep "$_pub_try"
+		_pub_try=$((_pub_try + 1))
+	done
+}
+
+publish_delivery_attempt() { # worktree; one revalidated attempt, no build
 	_pbc_wt=$1
 	publication_checkpoint_load; _pcl=$?
 	[ "$_pcl" = 0 ] || { DELIVER_ERR="missing or invalid publication checkpoint"; return 3; }
@@ -3991,7 +4025,7 @@ publish_delivery_candidate() { # worktree; checkpoint must exist
 	DELIVERY_HAS_REMOTE=no
 	if git -C "$root" remote get-url "$DELIVERY_REMOTE" >/dev/null 2>&1; then
 		DELIVERY_HAS_REMOTE=yes
-		git -C "$root" ls-remote --refs "$DELIVERY_REMOTE" "refs/heads/$DELIVERY_BASE" "refs/heads/$DELIVERY_BRANCH" >"$WORK/delivery-refs.before" 2>/dev/null || { DELIVER_ERR="destination refs could not be read"; return 3; }
+		git -C "$root" ls-remote --refs "$DELIVERY_REMOTE" "refs/heads/$DELIVERY_BASE" "refs/heads/$DELIVERY_BRANCH" >"$WORK/delivery-refs.before" 2>/dev/null || { DELIVER_ERR="destination refs could not be read"; PUBLICATION_RETRY=yes; return 3; }
 		_remote_branch=$(awk -v r="refs/heads/$DELIVERY_BRANCH" '$2 == r { print $1; exit }' "$WORK/delivery-refs.before")
 		_remote_base=$(awk -v r="refs/heads/$DELIVERY_BASE" '$2 == r { print $1; exit }' "$WORK/delivery-refs.before")
 		[ -n "$_remote_base" ] || { DELIVER_ERR="destination base branch is absent"; return 3; }
@@ -4020,17 +4054,30 @@ publish_delivery_candidate() { # worktree; checkpoint must exist
 		return 3
 	fi
 
-	if [ "$DELIVERY_HAS_REMOTE" = yes ] && [ "$PC_PHASE" = candidate ]; then
-		git -C "$root" ls-remote --refs "$DELIVERY_REMOTE" "refs/heads/$DELIVERY_BASE" "refs/heads/$DELIVERY_BRANCH" >"$WORK/delivery-refs.now" 2>/dev/null || { DELIVER_ERR="destination refs could not be revalidated"; return 3; }
-		cmp -s "$WORK/delivery-refs.before" "$WORK/delivery-refs.now" || { DELIVER_ERR="destination refs changed during publication validation"; return 3; }
+	if [ "$DELIVERY_HAS_REMOTE" = yes ]; then
+		git -C "$root" ls-remote --refs "$DELIVERY_REMOTE" "refs/heads/$DELIVERY_BASE" "refs/heads/$DELIVERY_BRANCH" >"$WORK/delivery-refs.now" 2>/dev/null || { DELIVER_ERR="destination refs could not be revalidated"; PUBLICATION_RETRY=yes; return 3; }
+		_now_branch=$(awk -v r="refs/heads/$DELIVERY_BRANCH" '$2 == r { print $1; exit }' "$WORK/delivery-refs.now")
+		_now_base=$(awk -v r="refs/heads/$DELIVERY_BASE" '$2 == r { print $1; exit }' "$WORK/delivery-refs.now")
+		[ -n "$_now_base" ] || { DELIVER_ERR="destination base branch disappeared during publication validation"; return 3; }
+		# Opening a PR binds its base branch name, not a frozen base SHA. Other
+		# items may advance main throughout this operation. Only the delivery ref
+		# must still match the validated value; its push remains fast-forward only.
+		if [ "$_now_branch" != "$_remote_branch" ]; then
+			DELIVER_ERR="destination delivery branch changed during publication validation"
+			[ "$_now_branch" != "$CANDIDATE_SHA" ] || PUBLICATION_RETRY=yes
+			return 3
+		fi
 		[ "$(publication_digest)" = "$PC_DECLARATION" ] || { DELIVER_ERR="publication declaration changed during destination validation"; return 3; }
+	fi
+	if [ "$DELIVERY_HAS_REMOTE" = yes ] && [ "$PC_PHASE" = candidate ]; then
 		if ! out=$(REMIT_PUBLICATION_CANDIDATE="$CANDIDATE_SHA" \
 			REMIT_PUBLICATION_REF="refs/heads/$DELIVERY_BRANCH" \
 			git -C "$root" push "$DELIVERY_REMOTE" "$CANDIDATE_SHA:refs/heads/$DELIVERY_BRANCH" 2>&1); then
 			DELIVER_ERR="candidate push was rejected: $(printf '%s' "$out" | tr '\n' ' ')"
+			PUBLICATION_RETRY=yes
 			return 3
 		fi
-		git -C "$root" ls-remote "$DELIVERY_REMOTE" "refs/heads/$DELIVERY_BRANCH" >"$WORK/delivery-branch.after" 2>/dev/null || { DELIVER_ERR="candidate push could not be confirmed"; return 3; }
+		git -C "$root" ls-remote "$DELIVERY_REMOTE" "refs/heads/$DELIVERY_BRANCH" >"$WORK/delivery-branch.after" 2>/dev/null || { DELIVER_ERR="candidate push could not be confirmed"; PUBLICATION_RETRY=yes; return 3; }
 		[ "$(awk 'NR == 1 { print $1 }' "$WORK/delivery-branch.after")" = "$CANDIDATE_SHA" ] || { DELIVER_ERR="destination did not retain the exact candidate"; return 3; }
 		PC_PHASE=pushed
 		publication_checkpoint_save pushed publish "$PC_PR_NUM" "$PC_PR_URL" || { DELIVER_ERR="could not checkpoint the candidate push"; return 3; }
@@ -4067,6 +4114,7 @@ publish_delivery_candidate() { # worktree; checkpoint must exist
 		if [ "$_dcm" != 0 ]; then
 			if ! out=$(cd "$_pbc_wt" && gh_pr pr comment "$PR_NUM" --body-file "$WORK/pr-publication" 2>&1); then
 				DELIVER_ERR="pull request comment failed after the candidate push: $(printf '%s' "$out" | tr '\n' ' ')"
+				PUBLICATION_RETRY=yes
 				return 3
 			fi
 			delivery_comments_have_marker || { DELIVER_ERR="pull request comment write could not be verified"; return 3; }
@@ -4078,20 +4126,26 @@ publish_delivery_candidate() { # worktree; checkpoint must exist
 		# proves ownership; otherwise this is an ambiguous external race.
 		if ! (cd "$_pbc_wt" && gh_pr pr view "$PR_NUM" --json body --jq .body) >"$WORK/pr-existing-body" 2>"$WORK/pr-existing-body.err"; then
 			DELIVER_ERR="new pull request body could not be reconciled"
+			PUBLICATION_RETRY=yes
 			return 3
 		fi
 		grep -qF "<!-- remit-delivery:$CANDIDATE_SHA -->" "$WORK/pr-existing-body" || { DELIVER_ERR="an unowned pull request appeared for the delivery branch"; return 3; }
 	else
 		if ! out=$(cd "$_pbc_wt" && gh_pr pr create --draft --base "$DELIVERY_BASE" --head "$DELIVERY_BRANCH" \
 			--title "${PUB_TITLE:-Delivery $(delivery_id)}" --body-file "$WORK/pr-publication" 2>&1); then
-			DELIVER_ERR="candidate is pushed; pull request create failed and resume will retry this candidate: $(printf '%s' "$out" | tr '\n' ' ')"
+			DELIVER_ERR="candidate is pushed; pull request create failed: $(printf '%s' "$out" | tr '\n' ' ')"
+			PUBLICATION_RETRY=yes
 			return 3
 		fi
 		PR_URL=$(printf '%s\n' "$out" | sed -n 's|.*\(https://[^ ]*\).*|\1|p' | sed -n 1p)
 		PR_NUM=$(printf '%s\n' "$PR_URL" | sed -n 's|.*/\([0-9][0-9]*\)$|\1|p')
 		case "$PR_NUM" in '' | *[!0-9]*) DELIVER_ERR="pull request create returned no durable identity"; return 3 ;; esac
-		if ! (cd "$_pbc_wt" && gh_pr pr view "$PR_NUM" --json body --jq .body) >"$WORK/pr-created-body" 2>"$WORK/pr-created-body.err" ||
-			! grep -qF "<!-- remit-delivery:$CANDIDATE_SHA -->" "$WORK/pr-created-body"; then
+		if ! (cd "$_pbc_wt" && gh_pr pr view "$PR_NUM" --json body --jq .body) >"$WORK/pr-created-body" 2>"$WORK/pr-created-body.err"; then
+			DELIVER_ERR="pull request create verification could not be read"
+			PUBLICATION_RETRY=yes
+			return 3
+		fi
+		if ! grep -qF "<!-- remit-delivery:$CANDIDATE_SHA -->" "$WORK/pr-created-body"; then
 			DELIVER_ERR="pull request create could not be verified against its candidate marker"
 			return 3
 		fi
