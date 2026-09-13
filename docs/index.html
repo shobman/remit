@@ -165,7 +165,7 @@
 <body>
   <header class="wrap site-head">
     <a class="wordmark" href="#top" aria-label="remit home">remit</a>
-    <span class="version">VERSION 0.4.3</span>
+    <span class="version">VERSION 0.4.4</span>
   </header>
 
   <main id="top">
@@ -387,6 +387,7 @@
           <p>Keep a dedicated install where the project adopts remit. Use <code>--shadow</code> to separate frequent working-record commits from the product repository's human-review merge gates. Both repositories may be private. Shadow is a workflow separation, not a confidentiality or public-export boundary, and does not isolate worker reads.</p>
           <p>Working records are not inherently confidential: useful practitioner words may enter the product. Remit does not fingerprint their contents or audit Git history for copied wording. Handle secrets upstream and public exports explicitly; exact-candidate checks and deliberately selected PR summaries remain.</p>
           <p>Windows build-worktree creation enables long-path support for the checkout command. Delivery checks only its base and branch, without requiring unrelated GitHub pull refs locally.</p>
+          <p>Exact delivery snapshots use a short repository-owned location under Git metadata, independent of the item name. Windows inspection handles long paths while retaining integrity checks, without changing machine settings. Older item-local snapshots remain recoverable after an upgrade; resume a snapshot-blocked item to retry.</p>
           <a href="https://github.com/shobman/remit#install-and-upgrade">Read the install guide on GitHub</a>
           <p class="harnesses">One installer serves <a href="#harnesses">all five agents</a>.</p>
         </div>

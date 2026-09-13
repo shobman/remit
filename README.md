@@ -10,7 +10,7 @@ genuinely yours, and it does not nag you for it. It is three POSIX scripts and s
 there is no service to operate. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.4.3.**
+**Version 0.4.4.**
 
 ## Start by talking to your agent
 
@@ -267,11 +267,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.4.3` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.4.4` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.4.3 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.4.4 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:
@@ -307,6 +307,11 @@ command through `sh` the same way.
 Build-worktree creation enables Git's long-path support for that checkout command on Windows,
 without changing your repository or global Git settings. Publication reads only the destination
 base and delivery branch; unrelated GitHub pull refs need not be fetched.
+
+Exact delivery snapshots use a short repository-owned location under Git metadata, independent
+of the item name. Windows snapshot inspection supports long paths without disabling integrity
+checks or changing machine settings. Interrupted snapshots from the older item-local location
+can still be recovered after an upgrade; resume an item blocked by snapshot preparation to retry.
 
 Then seat your agents. `sh bin/remit setup` reads the host and proposes `.remit/settings.json`,
 the registry of which agents and models each role may use, for you to accept or edit;

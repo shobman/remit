@@ -172,7 +172,10 @@ plain_windows_tree() { # one no-follow walk; no per-file PowerShell processes
 	_pwt_win=$(cygpath -w -- "$1") || return 1
 	# NTFS streams are not separate entries returned by find/Directory.Enumerate.
 	# Refuse every non-default stream, including streams attached to directories.
-	env REMIT_SNAPSHOT_PATH="$_pwt_win" pwsh.exe -NoProfile -NonInteractive -Command 'try { $pending=New-Object "System.Collections.Generic.Stack[string]"; $pending.Push($env:REMIT_SNAPSHOT_PATH); while ($pending.Count -gt 0) { $p=$pending.Pop(); $a=[IO.File]::GetAttributes($p); if (($a -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 1 }; foreach ($s in @(Get-Item -LiteralPath $p -Stream * -Force -ErrorAction Stop)) { if ($s.Stream -ne ":`$DATA") { exit 1 } }; if (($a -band [IO.FileAttributes]::Directory) -ne 0) { foreach ($entry in [IO.Directory]::EnumerateFileSystemEntries($p)) { $pending.Push($entry) } } }; exit 0 } catch { exit 2 }' >/dev/null 2>&1
+	# Get-Item -Stream still hits MAX_PATH on some PowerShell 7 hosts even with
+	# LongPathsEnabled=1. Use the extended native spelling for stream enumeration;
+	# retain the ordinary spelling for the no-follow attributes/directory walk.
+	env REMIT_SNAPSHOT_PATH="$_pwt_win" pwsh.exe -NoProfile -NonInteractive -Command 'try { $pending=New-Object "System.Collections.Generic.Stack[string]"; $pending.Push($env:REMIT_SNAPSHOT_PATH); while ($pending.Count -gt 0) { $p=$pending.Pop(); $a=[IO.File]::GetAttributes($p); if (($a -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 1 }; $native=if ($p.StartsWith("\\?\")) { $p } elseif ($p.StartsWith("\\")) { "\\?\UNC\"+$p.Substring(2) } else { "\\?\"+$p }; foreach ($s in @(Get-Item -LiteralPath $native -Stream * -Force -ErrorAction Stop)) { if ($s.Stream -ne ":`$DATA") { exit 1 } }; if (($a -band [IO.FileAttributes]::Directory) -ne 0) { foreach ($entry in [IO.Directory]::EnumerateFileSystemEntries($p)) { $pending.Push($entry) } } }; exit 0 } catch { Write-Error $_; exit 2 }' >/dev/null
 }
 
 safe_rel() { # $1 must be a nonempty, ordinary relative path

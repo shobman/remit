@@ -3148,6 +3148,17 @@ exact_prepare_dispose() { # candidate; remove safely or retain an atomic locator
 	return 0
 }
 
+exact_snapshot_parent() {
+	# Ephemeral materialisation, stable across coordinator restarts and changes
+	# to TMPDIR. Keep item slugs and record/shadow nesting out of source paths.
+	printf '%s/remit-eval\n' "$common_dir"
+}
+
+exact_snapshot_location_matches() { # run id, retained output path
+	[ "$2" = "$(exact_snapshot_parent)/$1" ] ||
+		[ "$2" = "$runs/.evaluation-snapshots/$1" ]
+}
+
 exact_prepare() { # candidate -> descriptor globals; 2 means BLOCKED
 	_candidate=$1
 	[ -x "$SNAPSHOT" ] || [ -f "$SNAPSHOT" ] || return 2
@@ -3165,7 +3176,7 @@ exact_prepare() { # candidate -> descriptor globals; 2 means BLOCKED
 		fi
 		return 2
 	fi
-	_snap_parent="$runs/.evaluation-snapshots"
+	_snap_parent=$(exact_snapshot_parent) || return 2
 	ensure_dir "$_snap_parent" || return 2
 	_seed="$(date -u +%Y%m%dT%H%M%S%N 2>/dev/null)-$$-$ROUND-$slug"
 	_nonce=$(printf '%s' "$_seed" | git hash-object --stdin 2>/dev/null) || return 2
@@ -3286,8 +3297,8 @@ exact_recover() { # candidate; 0 recovered, 1 no locator, 3 blocked, 4 invalid
 	EXACT_RUN_ID=$(jq -r .run_id "$_er_locator")
 	case "$EXACT_RUN_ID" in *[!A-Za-z0-9_.-]* | '' | .* | *..) return 4 ;; esac
 	EXACT_OUT=$(jq -r .out "$_er_locator")
-	_er_expected="$runs/.evaluation-snapshots/$EXACT_RUN_ID"
-	[ "$EXACT_OUT" = "$_er_expected" ] || return 4
+	# Retain recovery of pre-upgrade snapshots without admitting arbitrary roots.
+	exact_snapshot_location_matches "$EXACT_RUN_ID" "$EXACT_OUT" || return 4
 	EXACT_SOURCE=$(jq -r .source "$_er_locator")
 	EXACT_INPUTS=$(jq -r .inputs "$_er_locator")
 	EXACT_SCRATCH=$(jq -r .scratch "$_er_locator")
