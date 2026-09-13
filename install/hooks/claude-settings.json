@@ -1,5 +1,7 @@
 {
+  "autoMemoryEnabled": false,
   "env": {
+    "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
     "BASH_MAX_TIMEOUT_MS": "10800000"
   },
   "permissions": {

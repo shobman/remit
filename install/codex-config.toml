@@ -1,0 +1,7 @@
+# Remit rehydrates from the item record and current code.
+[features]
+memories = false
+
+[memories]
+use_memories = false
+generate_memories = false

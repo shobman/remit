@@ -63,6 +63,8 @@
 #                                  exactly what remit wrote, and when it is yours
 #                                  the block to merge is printed and nothing is
 #                                  touched
+#   .codex/config.toml            native memory off for coordinating sessions;
+#                                  existing custom settings are kept
 #   .remit/work-items/             the work location, empty
 #   .remit/field-reports/          observations from real use, empty
 #   .remit/rules/                  the practitioner's rubrics — the gate-file
@@ -470,6 +472,7 @@ HOOK_SRC="$SRC/install/hooks/pre-push"
 GUARD_SRC="$SRC/install/hooks/no-agent-tool.sh"
 GUARD_COPILOT="$SRC/install/hooks/copilot-no-agent-tool.json"
 GUARD_CLAUDE="$SRC/install/hooks/claude-settings.json"
+CODEX_CONFIG="$SRC/install/codex-config.toml"
 # remit's own CONTRIBUTING.md IS the payload — there is no second copy under
 # install/ the way the AGENTS.md section and the skills have one, so the file
 # this repository shows a contributor and the file an adopter is given cannot
@@ -482,7 +485,7 @@ CONTRIB_SRC="$SRC/CONTRIBUTING.md"
 [ -f "$SRC/bin/remit-exposure" ] || die "payload missing: $SRC/bin/remit-exposure"
 [ -f "$ADAPTER" ] || die "payload missing: $ADAPTER"
 [ -f "$HOOK_SRC" ] || die "payload missing: $HOOK_SRC"
-for f in "$GUARD_SRC" "$GUARD_COPILOT" "$GUARD_CLAUDE"; do
+for f in "$GUARD_SRC" "$GUARD_COPILOT" "$GUARD_CLAUDE" "$CODEX_CONFIG"; do
 	[ -f "$f" ] || die "payload missing: $f"
 done
 for s in $SKILLS; do
@@ -807,9 +810,8 @@ done
 install_file "$GUARD_SRC" ".remit/hooks/no-agent-tool.sh"
 install_file "$GUARD_COPILOT" ".github/hooks/remit-no-agent-tool.json"
 
-# Claude Code's registration is an OFFER, not an install, and the file carries
-# TWO things now: the agent-tool guard's PreToolUse entry, and
-# `env.BASH_MAX_TIMEOUT_MS`. Why a raise needs that ceiling raised is stated
+# Claude Code's settings carry the guard, permission denies, native-memory
+# opt-outs and `env.BASH_MAX_TIMEOUT_MS`. Why a raise needs that ceiling raised is stated
 # HERE, its one home: Claude Code cuts a shell call's requested timeout to
 # `max(BASH_MAX_TIMEOUT_MS, BASH_DEFAULT_TIMEOUT_MS)`, so 600 000 ms unless this
 # file says otherwise, and a raise past ten minutes dies mid-run without it. It
@@ -842,6 +844,7 @@ if [ "$SHADOW" = yes ]; then
 	# is the surface that IS a shadow install's to suggest — and suggesting is all
 	# this does, here as everywhere else settings are concerned.
 	report skipped "$SETTINGS_REL" "--shadow: remit writes no settings file here. Merge the block below into .claude/settings.local.json yourself — the \"hooks\" object to enforce the agent-tool guard, the \"permissions\" deny list against the docker verbs that drop data, and \"$SETTINGS_KEY\": \"$SETTINGS_MS\" under \"env\", without which Claude Code kills any raise past its own 600000 ms ceiling"
+	report skipped "$SETTINGS_REL" "coordinating-session memory is not configured off; also merge autoMemoryEnabled: false and env.CLAUDE_CODE_DISABLE_AUTO_MEMORY from the block below, then start a fresh session"
 	sed 's/^/               /' "$GUARD_CLAUDE"
 elif [ ! -e "$claude_settings" ]; then
 	ensure_dir "$TGT/.claude"
@@ -866,7 +869,21 @@ else
 		else
 			report kept "$SETTINGS_REL" "it is yours and remit does not rewrite it; merge the block below into it deliberately — the \"hooks\" object to enforce the guard, the \"permissions\" deny list against the docker verbs that drop data, and \"$SETTINGS_KEY\": \"$SETTINGS_MS\" under \"env\", without which Claude Code kills any raise past its own 600000 ms ceiling"
 		fi
+		report kept "$SETTINGS_REL" "coordinating-session memory is not verified off; also merge autoMemoryEnabled: false and env.CLAUDE_CODE_DISABLE_AUTO_MEMORY from the block below, then start a fresh session"
 		sed 's/^/               /' "$GUARD_CLAUDE"
+	fi
+fi
+
+# Native memory controls for coordinating Codex sessions. Preserve a target's
+# existing configuration; a shadow install writes no project settings. Worker
+# invocations carry their own overrides regardless of this installation outcome.
+if [ "$SHADOW" = yes ]; then
+	report skipped ".codex/config.toml" "--shadow: native memory is not configured for coordinating Codex sessions. Start Codex with -c features.memories=false -c memories.use_memories=false -c memories.generate_memories=false"
+else
+	install_file "$CODEX_CONFIG" ".codex/config.toml"
+	if [ "$OUTCOME" = kept ]; then
+		report kept ".codex/config.toml" "coordinating-session memory is not verified off. Merge the settings below into the existing tables, or pass their dotted keys with -c; do not duplicate TOML tables"
+		sed 's/^/               /' "$CODEX_CONFIG"
 	fi
 fi
 

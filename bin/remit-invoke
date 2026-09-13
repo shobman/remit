@@ -245,6 +245,7 @@
 #   the harness's own        so a CLI whose credentials live in the real home
 #   config variable          can still find them under a scratch HOME:
 #                              claude    CLAUDE_CONFIG_DIR   -> <home>/.claude
+#                                        CLAUDE_CODE_DISABLE_AUTO_MEMORY -> 1
 #                              codex     CODEX_HOME          -> <home>/.codex
 #                              pi        PI_CODING_AGENT_DIR -> <home>/.pi/agent
 #                              copilot   COPILOT_HOME        -> <home>/.copilot
@@ -297,6 +298,19 @@
 # THE PRACTITIONER'S CONFIGURATION IS IMPORTED BY SOME OF THESE CLIs, and that
 # is a different hole from the environment. It is closed where a documented
 # opt-out exists in a file remit already writes, and RECORDED where none does.
+#
+# AUTOMATIC MEMORY is separate from standing instructions and saved run evidence.
+# Claude gets CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 from this seam, never inherited
+# from the caller, AND --settings pins it and autoMemoryEnabled=false above user
+# and project settings (which otherwise can replace the environment value).
+# Codex gets features.memories=false, memories.use_memories=false
+# and memories.generate_memories=false as invocation overrides. These suppress
+# native recall and generation without relocating credentials or removing AGENTS.md.
+# Copilot -p leaves memory disabled (no --enable-memory); Pi --no-session and
+# --no-extensions reduce persistence but are not a verified native-memory opt-out.
+# Devin has no verified opt-out here. Every provenance record states the control
+# or gap. None of these switches prevents explicit file reads or rewrites prose
+# that a user has put into standing instructions.
 #
 #   devin — CLOSED for skills, commands and MCP servers, by `read_config_from`
 #     in the `.devin/config.json` this script writes per raise;
@@ -1481,7 +1495,10 @@ scrub_list() {
 	# credential. Where the coordinator already sets one, that value is what is
 	# passed; otherwise it is computed from the coordinator's real home.
 	case "$HARNESS" in
-	claude) printf 'CLAUDE_CONFIG_DIR=%s\n' "${CLAUDE_CONFIG_DIR:-$REAL_HOME/.claude}" ;;
+	claude)
+		printf 'CLAUDE_CONFIG_DIR=%s\n' "${CLAUDE_CONFIG_DIR:-$REAL_HOME/.claude}"
+		printf 'CLAUDE_CODE_DISABLE_AUTO_MEMORY=1\n'
+		;;
 	codex) printf 'CODEX_HOME=%s\n' "${CODEX_HOME:-$REAL_HOME/.codex}" ;;
 	pi) printf 'PI_CODING_AGENT_DIR=%s\n' "${PI_CODING_AGENT_DIR:-$REAL_HOME/.pi/agent}" ;;
 	copilot)
@@ -2076,10 +2093,13 @@ run_harness() { # $1 stdin file or 'none'; rest: the command, env prefix include
 			pwsh.exe -NoProfile -NonInteractive -File "$RUNDIR/job-supervisor.ps1" "$RUNDIR/job-worker.ps1" "$RUNDIR/job-args" "$WT" "$RUNDIR/job-gate" "$RUNDIR/job-complete" <"$sf" >"$OUTFILE" 2>"$ERRFILE" &
 		fi
 	elif [ "$EXACT_LIFECYCLE" = linux-pid-namespace ]; then
+		# The worker's /proc must describe its PID namespace. An inherited host
+		# /proc makes native shell-session process tracking use the wrong PIDs.
+		# --mount-proc creates a private mount namespace; host /proc is untouched.
 		if [ "$sf" = none ]; then
-			(cd "$WT" && unshare --user --map-root-user --pid --fork --kill-child=KILL -- "$@") >"$OUTFILE" 2>"$ERRFILE" &
+			(cd "$WT" && unshare --user --map-root-user --pid --fork --kill-child=KILL --mount-proc -- "$@") >"$OUTFILE" 2>"$ERRFILE" &
 		else
-			(cd "$WT" && unshare --user --map-root-user --pid --fork --kill-child=KILL -- "$@" <"$sf") >"$OUTFILE" 2>"$ERRFILE" &
+			(cd "$WT" && unshare --user --map-root-user --pid --fork --kill-child=KILL --mount-proc -- "$@" <"$sf") >"$OUTFILE" 2>"$ERRFILE" &
 		fi
 	elif [ "$sf" = none ]; then
 		(cd "$WT" && "$@") >"$OUTFILE" 2>"$ERRFILE" &
@@ -2786,7 +2806,7 @@ if [ -n "$EXACT_EVALUATION" ]; then
 		EXACT_LIFECYCLE=windows-job ;;
 	*)
 		command -v unshare >/dev/null 2>&1 || die "exact evaluation requires unshare with a disposable PID namespace"
-		unshare --user --map-root-user --pid --fork --kill-child=KILL -- sh -c 'exit 0' >/dev/null 2>&1 || die "a user/PID namespace with kill-child is unavailable; no evaluator was raised"
+		unshare --user --map-root-user --pid --fork --kill-child=KILL --mount-proc -- sh -c 'exit 0' >/dev/null 2>&1 || die "a user/PID namespace with kill-child and private /proc is unavailable; no evaluator was raised"
 		EXACT_LIFECYCLE=linux-pid-namespace ;;
 	esac
 fi
@@ -2801,6 +2821,7 @@ claude)
 		cp "$WT/.claude/$_ccf" "$RUNDIR/claude-$_ccf" 2>/dev/null || :
 	done
 	set -- "$@" claude -p --output-format json
+	set -- "$@" --settings '{"autoMemoryEnabled":false,"env":{"CLAUDE_CODE_DISABLE_AUTO_MEMORY":"1"}}'
 	[ -n "$MODEL" ] && set -- "$@" --model "$MODEL"
 	# Command-granular tool scoping is how a claude context's grant omits git.
 	[ -n "$ALLOWED" ] && set -- "$@" --allowedTools "$ALLOWED"
@@ -2824,12 +2845,13 @@ claude)
 	;;
 codex)
 	# `-` takes the briefing on stdin; -o writes the final message; the sandbox
-	# denies .git by upstream design. No `-c` override and no `--ignore-user-config`:
+	# denies .git by upstream design. Only native memory is overridden:
 	# nothing this CLI accepts suppresses the `$CODEX_HOME/AGENTS.md` a raise
 	# inherits without also taking the project's own instructions, the
 	# practitioner's configuration, or the directory the seat authenticates from —
 	# THE ENVIRONMENT at the head of this script.
 	set -- "$@" codex exec -s "$SANDBOX" -C "$WT" --skip-git-repo-check -o "$FINALFILE"
+	set -- "$@" -c features.memories=false -c memories.use_memories=false -c memories.generate_memories=false
 	[ -n "$MODEL" ] && set -- "$@" -m "$MODEL"
 	set -- "$@" -
 	say "invoking: codex exec -s $SANDBOX${MODEL:+ -m $MODEL} < $(basename "$BRIEF")"
@@ -3133,6 +3155,12 @@ write_provenance() {
 		printf 'harness: %s\n' "$HARNESS"
 		printf 'seat: %s\n' "$SEAT_KIND"
 		printf 'registry: %s %s\n' "$SETTINGS" "$REGISTRY_HASH"
+		case "$HARNESS" in
+		claude) printf 'memory: native recall/generation opt-outs supplied by environment and --settings (autoMemoryEnabled=false, CLAUDE_CODE_DISABLE_AUTO_MEMORY=1); not read back from this run\n' ;;
+		codex) printf 'memory: native recall/generation opt-outs supplied by invocation overrides (features.memories, memories.use_memories, memories.generate_memories); not read back from this run\n' ;;
+		copilot) printf 'memory: prompt-mode default off; --enable-memory is not passed\n' ;;
+		*) printf 'memory: no verified native-memory opt-out for %s; continuity instructions apply, isolation is not attested\n' "$HARNESS" ;;
+		esac
 		[ -n "$PROMPTED" ] && printf 'prompted: %s\n' "$PROMPTED"
 		[ -n "$DEVIN_ORG_ID" ] && printf 'organisation: %s (registry; this host is configured for it)\n' "$DEVIN_ORG_ID"
 		if [ -n "$MODEL_SERVED" ]; then

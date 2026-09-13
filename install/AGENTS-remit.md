@@ -134,6 +134,22 @@ Rehydrate from the item, linked authority and current code. Do not reconstruct a
 conversation. Archived work is history, read only when deliberately requested; current
 behaviour is established by code.
 
+Do not read, write or maintain automatic harness memory or parallel project-memory
+notes for remit work. Recover decisions and evidence from the existing item record;
+do not turn a remembered diagnosis into a fact. A fact the record and current evidence
+do not establish is unknown. This applies to the coordinating session and every raised
+context. Do not copy old memories into the record merely to preserve them.
+
+Remit disables native automatic memory for Claude and Codex workers and installs
+project settings for their coordinating sessions where it owns the settings file.
+When settings are kept or the install is shadowed, apply the installer's printed
+configuration before starting a fresh session. A running conversation can still carry
+already-loaded memory. Copilot prompt-mode workers leave memory disabled by default;
+interactive Copilot needs `/memory off`. Pi and Devin have no verified automatic-memory
+opt-out here. These controls preserve repository instructions and run evidence; they
+do not prevent a tool from explicitly reading an accessible file or remove memory
+someone embedded in standing instructions.
+
 | Request | Skill |
 |---|---|
 | Admit or park work; open a phase | `.claude/skills/remit-new/SKILL.md` |
