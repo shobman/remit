@@ -366,7 +366,8 @@
 #     only subtract. `--tools` bounds what the MODEL sees, not the code the
 #     PROCESS runs: an extension's `pi.on(...)` handlers fire whatever the tool
 #     list says, and `--no-extensions` is what stops them; `-e` paths still
-#     load, which is how the offline probes render a run. TRUST: a raise passes
+#     load: remit supplies exactly its command-guard extension this way.
+#     TRUST: a raise passes
 #     NEITHER `--approve` NOR `--no-approve`. `.pi/skills/`, `.agents/skills/`
 #     and `.pi/APPEND_SYSTEM.md` load ONLY after the project is trusted, and a
 #     `-p` run never prompts: what applies is the closest saved decision in
@@ -401,7 +402,8 @@
 #     settings file in `-p` with no trust step, and `PreToolUse` hooks fire in
 #     `-p` before any permission-mode check. IT NEVER OVERWRITES a
 #     `.claude/settings.local.json` already in the tree; then the flag is the
-#     whole containment, and the `containment:` line says so. Both layers match
+#     agent-tool guard. The mandatory command hook is supplied separately by
+#     --settings even when that local file exists. Both agent-tool layers match
 #     NAMES: a build that renames its agent tool walks past both.
 #
 # WHETHER A RUN CAN SAY WHAT IT CONSULTED — the `consulted:` provenance key —
@@ -1252,7 +1254,8 @@ COPILOT_CANARY_ID='' COPILOT_CANARY_AIU='' COPILOT_HOOK_ATTEST=''
 COPILOT_AIU='' COPILOT_PREMIUM='' COPILOT_CFG_DIR=''
 # Displayed, not expanded: the rules themselves are appended one at a time with
 # globbing off, because `shell(git:*)` is a pathname pattern to an unquoted shell.
-COPILOT_DENY='shell(git) shell(git:*) shell(gh) shell(gh:*)'
+COPILOT_DENY='shell(gh) shell(gh:*)'
+[ -n "$EXACT_EVALUATION" ] || COPILOT_DENY="shell(git) shell(git:*) $COPILOT_DENY"
 
 if [ "$HARNESS" = copilot ]; then
 	# Where the two package paths are, and why neither CLI is always on PATH, is
@@ -1914,7 +1917,7 @@ if [ "$HARNESS" = copilot ]; then
 	say "  version      : ${COPILOT_VERSION:-<not reported>}"
 	say "  account      : ${COPILOT_LOGIN:-<not recorded>} at ${COPILOT_HOST:-<not recorded>} — recorded, not checked and not gated on"
 	say "  effort       : ${EFFORT:-<none asked for>}"
-	say "  containment  : deny [$COPILOT_DENY], plus a preToolUse hook written to $WT/.github/hooks for the run — git and gh in any wrapping, and NOTHING else: no read boundary is enforced and the provenance discloses that rather than implying one. Then the repo-hook environment opt-in, then a canary that puts a wrapped git AND one in-tree file write of real source to the CLI before the context is raised"
+	say "  containment  : deny [$COPILOT_DENY], plus a preToolUse hook written to $WT/.github/hooks for the run — the role's Git/gh command-input check; no read boundary is enforced and the provenance discloses that rather than implying one. Then the repo-hook environment opt-in, then a canary that puts a wrapped git AND one in-tree file write of real source to the CLI before the context is raised"
 	say "  bounded wait : ${COPILOT_TIMEOUT}s (REMIT_COPILOT_TIMEOUT), canary ${COPILOT_CANARY_TIMEOUT}s"
 fi
 rule_off
@@ -2187,7 +2190,38 @@ run_harness() { # $1 stdin file or 'none'; rest: the command, env prefix include
 #
 # Written here, removed before anything else, committed nowhere. The copies kept
 # in the run directory are the record of what actually applied.
-DEVIN_DENY='Exec(git) Exec(gh) Write(.git/**) Write(.devin/**) mcp__* mcp_call_tool request_scope webfetch'
+# One command check for every harness. Inspect the execution input, never the
+# cwd, description, or file contents. This catches literal command names in
+# direct, chained and interpreter-wrapped calls. It is a tool-call guard, not
+# an OS executable boundary: computed names and previously written scripts are
+# outside its claim. Exact evaluators retain their independent snapshot's Git.
+write_command_guard() { # $1 output file; optional $2 exact evaluation
+	printf '#!/bin/sh\nremit_exact=%s\n' "${2:-}" >"$1" || return 1
+	cat >>"$1" <<'EOF' || return 1
+deny() { printf 'remit: Git/gh command denied for this raised role. Inspect files directly; the coordinator owns delivery.\n' >&2; exit 2; }
+payload=$(cat) || deny
+name=$(printf '%s' "$payload" | jq -er '
+  if type != "object" then error("invalid hook input") else . end |
+  (.tool_name // .toolName // .tool // .name // "")') || deny
+case "$name" in
+  Bash|PowerShell|bash|powershell|shell|exec|exec_command|shell_command|write_stdin|write_to_process) ;;
+  '') deny ;;
+  *) exit 0 ;;
+esac
+command=$(printf '%s' "$payload" | jq -er '
+  (.tool_input // .toolInput // .input // .toolArgs // {}) |
+  (if type == "string" then fromjson else . end) |
+  (.command // .cmd // .chars // .text_input // .text // .input) |
+  if type == "array" then join(" ") elif type == "string" then . else error("missing command") end') || deny
+pattern='(^|[^A-Za-z0-9_.-])(git|gh)([.]exe)?([^A-Za-z0-9_./\\-]|$)'
+[ -z "$remit_exact" ] || pattern='(^|[^A-Za-z0-9_.-])(gh)([.]exe)?([^A-Za-z0-9_./\\-]|$)'
+if printf '%s\n' "$command" | grep -Eiq "$pattern"; then deny; fi
+exit 0
+EOF
+} # end write_command_guard
+
+DEVIN_DENY='Exec(gh) Write(.git/**) Write(.devin/**) mcp__* mcp_call_tool request_scope webfetch'
+[ -n "${EXACT_EVALUATION:-}" ] || DEVIN_DENY="Exec(git) $DEVIN_DENY"
 DEVIN_ALLOW='read write edit apply_patch notebook_read notebook_edit grep glob find_file_by_name exec get_output write_to_process kill_shell todo_write exit_plan_mode skill run_subagent read_subagent mcp_list_servers mcp_list_tools mcp_read_resource Exec(sh)'
 devin_json_array() { # $1 space- or comma-separated entries -> "a", "b"
 	printf '%s\n' "$1" | tr ' ,' '\n\n' |
@@ -2227,7 +2261,7 @@ EOF
 	# which is why the rules are named the way they are.
 	DEVIN_REACH_MATCHER='^(request_scope|webfetch|mcp_call_tool|mcp__.*)$'
 	jq -n --arg reach "$DEVIN_REACH_MATCHER" \
-		'{PreToolUse:[{matcher:"exec",hooks:[{type:"command",command:"sh .devin/remit-no-git.sh"}]},{matcher:$reach,hooks:[{type:"command",command:"sh .devin/remit-no-reach.sh"}]}]}' \
+		'{PreToolUse:[{matcher:"^(exec|write_to_process)$",hooks:[{type:"command",command:"sh .devin/remit-no-git.sh"}]},{matcher:$reach,hooks:[{type:"command",command:"sh .devin/remit-no-reach.sh"}]}]}' \
 		>"$devin_dir/hooks.v1.json" || return 1
 	cat >"$devin_dir/remit-no-reach.sh" <<'EOF' || return 1
 #!/bin/sh
@@ -2236,33 +2270,7 @@ EOF
 printf 'blocked by remit law: your scope is the worktree you were raised in, and nothing outside it exists for this raise. Everything you were raised to author or judge is on disk in front of you, there is no MCP server configured for this run and no network errand in your brief, and there is no wider scope to be granted. If your briefing pointed you at something you cannot reach, THAT is the finding — report it in what you return, which is the one channel that gets read.\n' >&2
 exit 2
 EOF
-	cat >"$devin_dir/remit-no-git.sh" <<'EOF' || return 1
-#!/bin/sh
-# Written by remit-invoke for one raise, and removed after it. A context never
-# runs git: the delivery seam performs every git mechanic once the context has
-# stopped.
-#
-# A block here does not refuse one call and let the context carry on — under
-# devin the run stops at it. So the message below is written for whoever reads
-# the run afterwards as much as for the context, which will not get to act on it.
-#
-# This reads the whole PreToolUse payload rather than a parsed field of it, so no
-# quoting, chaining or interpreter-wrapping can hide the command from the test.
-#
-# The test is on a WORD BOUNDARY, never a substring: `.gitignore`, `digit`,
-# `legitimate` and `github` are ordinary words, and a context that cannot say
-# them is one this hook has broken rather than contained.
-payload=$(cat)
-if [ -z "$payload" ]; then
-	printf 'blocked by remit law: this hook could not read the tool call to check it, and it does not pass what it cannot read.\n' >&2
-	exit 2
-fi
-if printf '%s\n' "$payload" | grep -Eiq '(^|[^A-Za-z0-9_-])(git|gh)([^A-Za-z0-9_-]|$)'; then
-	printf 'blocked by remit law: a raised context never runs git or gh — the seam does, as the coordinator, after this context exits. Nothing you were raised for needs either: what you author or judge is the tree on disk in front of you, and a tree left uncommitted is exactly what the seam expects. Carry on without it.\n' >&2
-	exit 2
-fi
-exit 0
-EOF
+	write_command_guard "$devin_dir/remit-no-git.sh" "${EXACT_EVALUATION:-}" || return 1
 	return 0
 }
 
@@ -2274,8 +2282,8 @@ EOF
 #   1. Deny rules for git and gh. A denial names the rule that fired — but the
 #      matcher only sees the STEM of a command, so `sh -c "git status"`,
 #      `powershell -Command "…"`, `cmd /c …` and `node -e "…"` walk through.
-#   2. A preToolUse hook. It receives the WHOLE tool call, so no quoting or
-#      wrapping hides from it: git and gh, on a word boundary, in any wrapping.
+#   2. A preToolUse hook using the shared command-input check below. Literal
+#      Git/gh names in wrappers are checked too; this is not executable isolation.
 #      It is NOT a read boundary; the boundary that would hold is the one a
 #      context is RAISED in. The canary below puts a wrapped git to the live CLI
 #      alongside an in-tree write of real source, so neither the containment
@@ -2313,44 +2321,8 @@ copilot_write_containment() { # $1 the context's tree
   }
 }
 EOF
-	# git and gh, in any wrapping, and nothing else. Nothing is baked into this file
-	# at write time.
-	cat >"$1/.github/hooks/remit-no-git.sh" <<'EOF' || return 1
-#!/bin/sh
-# Written by remit-invoke for one raise, and removed after it. A context never
-# runs git: the delivery seam performs every git mechanic once the context has
-# stopped, and a tree left uncommitted is exactly what it expects.
-#
-# This reads the WHOLE preToolUse payload rather than a parsed field of it, so
-# no quoting, chaining or interpreter-wrapping hides the command from the test.
-# That is the one thing this hook has that nothing else in this CLI does: the
-# deny matcher and the built-in path wall both inspect only what a command
-# leaves standing as an argument of its own, and both are walked past by the
-# same wrapped payload.
-#
-# The test is on a WORD BOUNDARY, never a substring: `.gitignore`, `digit`,
-# `legitimate` and `github` are ordinary words, and a context that cannot say
-# them is one this hook has broken rather than contained.
-#
-# THIS HOOK ENFORCES NOTHING ELSE, and that is a decision rather than an
-# oversight. It is not a read boundary: a reading of command text is escaped by
-# a respelling, and this git test is not. A context under this hook runs on
-# the host's own login and reaches whatever that login reaches. The boundary
-# that would hold is the one the context is RAISED in — an OS-level sandbox, a
-# container, a scratch user — and no reading of command text substitutes for
-# it. The provenance discloses exactly that rather than implying a boundary
-# that is not here.
-payload=$(cat)
-if [ -z "$payload" ]; then
-	printf 'blocked by remit law: this hook could not read the tool call to check it, and it does not pass what it cannot read.\n' >&2
-	exit 2
-fi
-if printf '%s\n' "$payload" | grep -Eiq '(^|[^A-Za-z0-9_-])(git|gh)([^A-Za-z0-9_-]|$)'; then
-	printf 'blocked by remit law: a raised context never runs git or gh — the seam does, as the coordinator, after this context exits. Nothing you were raised for needs either: what you author or judge is the tree on disk in front of you, and a tree left uncommitted is exactly what the seam expects. Carry on without it.\n' >&2
-	exit 2
-fi
-exit 0
-EOF
+	# Keep the exact-evaluator Git exception in both the hook and native deny list.
+	write_command_guard "$1/.github/hooks/remit-no-git.sh" "${EXACT_EVALUATION:-}" || return 1
 	return 0
 } # end copilot_write_containment
 
@@ -2383,8 +2355,8 @@ copilot_get() { # $1 envelope file  $2 field
 	jq)
 		case "$2" in
 		final) jq -rs '[.[] | select(.type=="assistant.message") | select(((.data.toolRequests // []) | length) == 0)] | last | .data.content // empty' "$1" ;;
-		calls) jq -rs '(reduce (.[] | select(.type=="tool.execution_start")) as $e ({}; .[$e.data.toolCallId] = ($e.data.arguments.command // $e.data.arguments.path // ""))) as $c | .[] | select(.type=="tool.execution_complete") | [(if .data.success then "ran" else "blocked" end), ($c[.data.toolCallId] // "")] | @tsv' "$1" ;;
-		refusals) jq -rs '(reduce (.[] | select(.type=="tool.execution_start")) as $e ({}; .[$e.data.toolCallId] = ($e.data.arguments.command // $e.data.arguments.path // ""))) as $c | [.[] | select(.type=="tool.execution_complete") | select(.data.success | not) | (($c[.data.toolCallId] // "?") + " -> " + ((.data.error.message // "denied") | split("\n")[0]))] | join(" | ")' "$1" ;;
+		calls) jq -rs '(reduce (.[] | select(.type=="tool.execution_start")) as $e ({}; .[$e.data.toolCallId] = ($e.data.arguments | if type == "object" then (.command // .path // "") else "" end))) as $c | .[] | select(.type=="tool.execution_complete") | [(if .data.success then "ran" else "blocked" end), ($c[.data.toolCallId] // "")] | @tsv' "$1" ;;
+		refusals) jq -rs '(reduce (.[] | select(.type=="tool.execution_start")) as $e ({}; .[$e.data.toolCallId] = ($e.data.arguments | if type == "object" then (.command // .path // "") else "" end))) as $c | [.[] | select(.type=="tool.execution_complete") | select(.data.success | not) | (($c[.data.toolCallId] // "?") + " -> " + ((.data.error.message // "denied") | split("\n")[0]))] | join(" | ")' "$1" ;;
 		session_id) jq -rs '[.[] | select(.type=="result")] | last | .sessionId // empty' "$1" ;;
 		result_present) jq -rs 'if any(.[]; .type=="result") then "yes" else empty end' "$1" ;;
 		premium) jq -rs '[.[] | select(.type=="result")] | last | .usage.premiumRequests // empty' "$1" ;;
@@ -2436,6 +2408,7 @@ copilot_canary() { # $1 the context's tree — returns 0 if contained, 1 if not
 	# hook. That is the whole of what this containment claims, and it is therefore
 	# the whole of what is put to the live CLI here.
 	cop_git='git status --porcelain'
+	[ -z "${EXACT_EVALUATION:-}" ] || cop_git='gh --version'
 	# The manifest is written first and the prompt is generated from it, so the
 	# list of probes has one authoritative form: what the CLI is asked to attempt,
 	# and what any offline test replays against the hook, are the same lines.
@@ -2482,8 +2455,8 @@ copilot_canary() { # $1 the context's tree — returns 0 if contained, 1 if not
 	set -- "$@" timeout "$COPILOT_CANARY_TIMEOUT" "$COPILOT" \
 		--output-format json --allow-all-tools --no-ask-user --disable-builtin-mcps \
 		--log-dir "$cdir/log"
-	set -- "$@" --deny-tool 'shell(git)' --deny-tool 'shell(git:*)' \
-		--deny-tool 'shell(gh)' --deny-tool 'shell(gh:*)'
+	set -- "$@" --deny-tool 'shell(gh)' --deny-tool 'shell(gh:*)'
+	[ -n "${EXACT_EVALUATION:-}" ] || set -- "$@" --deny-tool 'shell(git)' --deny-tool 'shell(git:*)'
 	cop_model=${COPILOT_CANARY_MODEL:-$MODEL}
 	[ -n "$cop_model" ] && set -- "$@" --model "$cop_model"
 	say "containment canary: one throwaway run under the context's own configuration${cop_model:+, on $cop_model}."
@@ -2565,6 +2538,10 @@ model_channel=''
 # the two layers cannot come apart.
 CLAUDE_DENY_DOCKER='docker compose down,docker-compose down,docker compose rm,docker-compose rm,docker rm,docker volume rm,docker volume prune,docker container prune,docker system prune'
 CLAUDE_DENY_TOOLS='Agent,Task,AgentTool'
+for _cgit in gh git; do
+	[ "$_cgit" != git ] || [ -z "$EXACT_EVALUATION" ] || continue
+	CLAUDE_DENY_TOOLS="$CLAUDE_DENY_TOOLS,Bash($_cgit),Bash($_cgit *),PowerShell($_cgit),PowerShell($_cgit *)"
+done
 _cdifs=$IFS; IFS=,
 for _cdv in $CLAUDE_DENY_DOCKER; do
 	CLAUDE_DENY_TOOLS="$CLAUDE_DENY_TOOLS,Bash($_cdv *),PowerShell($_cdv *)"
@@ -2811,6 +2788,14 @@ if [ -n "$EXACT_EVALUATION" ]; then
 	esac
 fi
 
+# Kept beside the transcript, not in the delivery. Encode the path so the hook
+# command parses the same under POSIX shells and native Windows PowerShell,
+# including apostrophes, dollar signs and backticks in a host's temp path.
+COMMAND_GUARD="$RUNDIR/command-guard.sh"
+write_command_guard "$COMMAND_GUARD" "$EXACT_EVALUATION" || die "cannot write command guard"
+_guard_path=$(printf '%s' "$COMMAND_GUARD" | jq -Rrs @base64) || die "cannot encode command guard path"
+COMMAND_GUARD_COMMAND="sh -c 'exec sh \"\$(printf %s $_guard_path | jq -Rr @base64d)\"'"
+
 case "$HARNESS" in
 claude)
 	# THE CONTAINMENT IS WRITTEN HERE, PER RAISE — THE ENVIRONMENT's `claude` entry —
@@ -2821,9 +2806,14 @@ claude)
 		cp "$WT/.claude/$_ccf" "$RUNDIR/claude-$_ccf" 2>/dev/null || :
 	done
 	set -- "$@" claude -p --output-format json
-	set -- "$@" --settings '{"autoMemoryEnabled":false,"env":{"CLAUDE_CODE_DISABLE_AUTO_MEMORY":"1"}}'
+	CLAUDE_COMMAND_SETTINGS=$(jq -cn --arg command "$COMMAND_GUARD_COMMAND" '
+  {autoMemoryEnabled:false,disableAllHooks:false,env:{CLAUDE_CODE_DISABLE_AUTO_MEMORY:"1"},
+   hooks:{PreToolUse:[{matcher:"Bash|PowerShell",hooks:[{type:"command",command:$command}]}]}}') || die "cannot encode Claude command guard"
+	set -- "$@" --settings "$CLAUDE_COMMAND_SETTINGS"
+	printf '%s\n' "$CLAUDE_COMMAND_SETTINGS" >"$RUNDIR/claude-command-settings.json"
+	CLAUDE_CONTAINMENT="$CLAUDE_CONTAINMENT; command guard supplied by --settings on every raise"
 	[ -n "$MODEL" ] && set -- "$@" --model "$MODEL"
-	# Command-granular tool scoping is how a claude context's grant omits git.
+	# --allowedTools pre-approves matching tools; it is not an exclusive allowlist.
 	[ -n "$ALLOWED" ] && set -- "$@" --allowedTools "$ALLOWED"
 	# AND THE DENY, on EVERY raise, allowlist or none. A deny outranks every
 	# allow at every level, so this is the one containment here that does not
@@ -2844,14 +2834,36 @@ claude)
 	claude_remove_containment "$WT"
 	;;
 codex)
-	# `-` takes the briefing on stdin; -o writes the final message; the sandbox
-	# denies .git by upstream design. Only native memory is overridden:
+	# `-` takes the briefing on stdin; -o writes the final message. The sandbox
+	# protects .git writes; the command hook covers disallowed Git reads as well.
 	# nothing this CLI accepts suppresses the `$CODEX_HOME/AGENTS.md` a raise
 	# inherits without also taking the project's own instructions, the
 	# practitioner's configuration, or the directory the seat authenticates from —
 	# THE ENVIRONMENT at the head of this script.
 	set -- "$@" codex exec -s "$SANDBOX" -C "$WT" --skip-git-repo-check -o "$FINALFILE"
 	set -- "$@" -c features.memories=false -c memories.use_memories=false -c memories.generate_memories=false
+	# Trust only this exact session hook, without changing shared config or
+	# bypassing trust for other hooks. Hash the CLI's normalized hook identity.
+	_codex_identity=$(jq -cSj --null-input --arg command "$COMMAND_GUARD_COMMAND" '
+  {event_name:"pre_tool_use",matcher:"Bash|PowerShell",hooks:[{type:"command",command:$command,timeout:600,async:false}]}')
+	if command -v sha256sum >/dev/null 2>&1; then
+		_codex_hash=$(printf '%s' "$_codex_identity" | sha256sum | awk '{print $1}')
+	else
+		_codex_hash=$(printf '%s' "$_codex_identity" | shasum -a 256 | awk '{print $1}')
+	fi
+	[ -n "$_codex_hash" ] || die "cannot fingerprint Codex command guard"
+	_codex_key='/<session-flags>/config.toml:pre_tool_use:0:0'
+	case "$(uname -s)" in MSYS*|MINGW*|CYGWIN*) _codex_key='C:\<session-flags>\config.toml:pre_tool_use:0:0' ;; esac
+	_codex_command=$(printf '%s' "$COMMAND_GUARD_COMMAND" | jq -Rs .)
+	_codex_key=$(printf '%s' "$_codex_key" | jq -Rs .)
+	# write_stdin does not fire PreToolUse in the tested native CLI. Keep output
+	# polling, but remove interactive TTY input so it cannot bypass this guard.
+	# --disable validates the feature name. A -c override is silently ignored by
+	# older clients (including 0.153.4), leaving interactive stdin open.
+	set -- "$@" --enable hooks --disable unified_exec_tty \
+		-c "hooks.PreToolUse=[{matcher=\"Bash|PowerShell\",hooks=[{type=\"command\",command=$_codex_command}]}]" \
+		-c "hooks.state={$_codex_key={enabled=true,trusted_hash=\"sha256:$_codex_hash\"}}"
+	printf '%s\n' "$_codex_identity" >"$RUNDIR/codex-command-hook.json"
 	[ -n "$MODEL" ] && set -- "$@" -m "$MODEL"
 	set -- "$@" -
 	say "invoking: codex exec -s $SANDBOX${MODEL:+ -m $MODEL} < $(basename "$BRIEF")"
@@ -2866,7 +2878,22 @@ pi)
 	# installed pi packages register, and every line of code those packages run at
 	# startup. What was rendered, and why the allowlist alone is not enough, is in
 	# THE ENVIRONMENT at the head of this script — the one place it is stated.
-	set -- "$@" --no-extensions
+	# Explicit remit extension still loads with discovery disabled.
+	cat >"$RUNDIR/command-guard.ts" <<EOF || die "cannot write Pi command guard"
+import { spawnSync } from "node:child_process";
+export default function(pi) {
+  pi.on("tool_call", (event) => {
+    if (event.toolName !== "bash") return;
+    const result = spawnSync("sh", [$(printf '%s' "$COMMAND_GUARD" | jq -Rs .)], {
+      input: JSON.stringify({tool_name:event.toolName,tool_input:event.input}),
+      encoding:"utf8", timeout:10000
+    });
+    if (result.error || result.status !== 0)
+      return {block:true,reason:result.stderr || "remit command guard failed; execution refused"};
+  });
+}
+EOF
+	set -- "$@" --no-extensions -e "$RUNDIR/command-guard.ts"
 	PI_TOOLS=$(pi_tool_allowlist "$ALLOWED")
 	if [ -n "$PI_TOOLS" ]; then
 		set -- "$@" --tools "$PI_TOOLS"
@@ -2876,10 +2903,7 @@ pi)
 		set -- "$@" --no-tools
 		say "note: --allowed-tools '$ALLOWED' names no tool pi has built in, and a contained pi context has nothing else. This raise runs with --no-tools."
 	fi
-	# Whole-tool scoping only: excluding git means excluding bash wholesale, so a
-	# pi context restrained by mechanism has no shell at all. The caller chose;
-	# this records which. Pi applies the denylist after the allowlist, so this can
-	# only subtract from the line above.
+	# Caller tool exclusions can only narrow the built-in tools further.
 	[ -n "$EXCLUDED" ] && set -- "$@" --exclude-tools "$EXCLUDED"
 	set -- "$@" -p "@$BRIEF"
 	say "invoking: pi --model $MODEL --no-session --no-extensions ${PI_TOOLS:+--tools $PI_TOOLS}${PI_TOOLS:---no-tools} -p @$(basename "$BRIEF")"
@@ -2943,8 +2967,8 @@ copilot)
 	set -- "$@" timeout "$COPILOT_TIMEOUT" "$COPILOT" \
 		--output-format json --allow-all-tools --no-ask-user --disable-builtin-mcps \
 		--log-dir "$RUNDIR/copilot-log"
-	set -- "$@" --deny-tool 'shell(git)' --deny-tool 'shell(git:*)' \
-		--deny-tool 'shell(gh)' --deny-tool 'shell(gh:*)'
+	set -- "$@" --deny-tool 'shell(gh)' --deny-tool 'shell(gh:*)'
+	[ -n "${EXACT_EVALUATION:-}" ] || set -- "$@" --deny-tool 'shell(git)' --deny-tool 'shell(git:*)'
 	# `shell(git:*)` is a pathname pattern to an unquoted shell, so any caller
 	# additions are split with globbing off.
 	if [ -n "$EXCLUDED" ] || [ -n "$ALLOWED" ]; then
@@ -3155,6 +3179,12 @@ write_provenance() {
 		printf 'harness: %s\n' "$HARNESS"
 		printf 'seat: %s\n' "$SEAT_KIND"
 		printf 'registry: %s %s\n' "$SETTINGS" "$REGISTRY_HASH"
+		if [ "$HARNESS" != native ]; then
+			_guard_scope='git and gh'
+			[ -z "$EXACT_EVALUATION" ] || _guard_scope='gh; local snapshot Git remains permitted'
+			printf 'command-guard: %s; native tool hook configured; literal command names and wrappers, not OS executable isolation; kept at %s\n' "$_guard_scope" "$COMMAND_GUARD"
+			[ "$HARNESS" != codex ] || printf 'command-guard-note: interactive TTY input disabled because write_stdin does not fire PreToolUse; output polling remains available\n'
+		fi
 		case "$HARNESS" in
 		claude) printf 'memory: native recall/generation opt-outs supplied by environment and --settings (autoMemoryEnabled=false, CLAUDE_CODE_DISABLE_AUTO_MEMORY=1); not read back from this run\n' ;;
 		codex) printf 'memory: native recall/generation opt-outs supplied by invocation overrides (features.memories, memories.use_memories, memories.generate_memories); not read back from this run\n' ;;
