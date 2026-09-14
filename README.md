@@ -10,7 +10,7 @@ genuinely yours, and it does not nag you for it. It is three POSIX scripts and s
 there is no service to operate. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.4.7.**
+**Version 0.4.8.**
 
 ## Start by talking to your agent
 
@@ -231,7 +231,7 @@ the CLI still uses your authentication configuration. A scratch home is not isol
 Codex supplies a filesystem sandbox; that alone is not a selected-input or blind-read
 guarantee. Claude Code, Devin, Copilot CLI and Pi run as your user and can read what you
 can read. remit applies the containment each agent exposes and
-records on every pull request which applied; a sandbox for every agent is the direction, and the
+records which applied in the item's run evidence; a sandbox for every agent is the direction, and the
 reference below says exactly what holds today.
 
 Working records are not inherently confidential. Remit does not fingerprint their contents or
@@ -241,6 +241,28 @@ publish a public edition from a private project, its explicit export/build is yo
 boundary. Remit still checks the exact delivery candidate and draft PR state, and selects PR
 prose deliberately rather than dumping raw worker returns. An optional candidate-bound
 `publication.md` is an ordinary committable item record in a dedicated installation.
+New PRs use the work-item title unless `publication.md` supplies an explicit title.
+When remit next handles an existing PR, it replaces its exact old generated
+`Delivery r-…` title with the work-item title; authored PR titles and bodies stay intact.
+
+The builder writes a dedicated delivery note with four parts: **Problem**, **Solution**,
+**Technical approach**, and **Testing**. The initial note becomes the PR description.
+Each later repair or phase adds one comment describing that delivery's need or finding,
+change, useful implementation decisions, and actual verification results and gaps.
+The opening description stays intact, and publication retries do not duplicate comments.
+The default is one short paragraph per part, with more space where the change warrants it.
+Commit IDs, file counts, status and harness metadata stay in their existing records.
+
+If a note is missing or incomplete, publication waits with the candidate retained. The
+conductor can write the four fields from the brief, findings and retained execution evidence
+to the candidate-specific JSON path printed by remit, then resume under the existing
+authorization. This also recovers older pending deliveries without rebuilding them or
+requiring another product ruling. The builder's final chat response is never the fallback.
+
+A closing-gate repair returns the matching PR to draft before the builder runs.
+The repaired candidate must pass accepted revalidation before remit restores ready
+status and retries closure. If a transition fails, resume retries from the retained
+delivery or publication checkpoint; no manual draft operation is required.
 
 `sh bin/remit stop <slug>` ends a running chain and every context it raised, discards the
 worktree's in-flight changes, and leaves the item at the stage it last stopped at. A failure leaves
@@ -267,11 +289,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.4.7` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.4.8` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.4.7 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.4.8 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:

@@ -742,6 +742,7 @@ REVIEW=${REMIT_REVIEW:-}
 PROVFILE=${REMIT_PROVENANCE:-}
 RUNS=${REMIT_RUNS:-}
 RUNS_NAMING=${REMIT_RUNS_NAMING:-}
+DELIVERY_NOTE=${REMIT_DELIVERY_NOTE:-}
 EXACT_EVALUATION=${REMIT_EXACT_EVALUATION:-}
 EXACT_INPUTS=${REMIT_EXACT_INPUTS:-}
 EXACT_SCRATCH=${REMIT_EXACT_SCRATCH:-}
@@ -1733,7 +1734,33 @@ research_author_section() {
 
 role_returns() {
 	case "$ROLE" in
-	build) printf 'Your final message. It is recorded as the delivery'\''s returned text, quoted\nand not endorsed. The tree you authored is the delivery; the message says what\nyou did, what you could not do, and what you left undone.\n' ;;
+	build)
+		printf 'Your final message is retained as run evidence, not copied into GitHub.\n'
+		if [ -n "$DELIVERY_NOTE" ]; then
+			printf '\nBefore finishing, write the human delivery note to:\n\n  %s\n\n' "$DELIVERY_NOTE"
+			cat <<'NOTE'
+Write one JSON object with four nonempty string fields: problem, solution,
+approach, testing. These fields render as Problem, Solution, Technical approach,
+and Testing in the PR description or the next delivery comment. This is an
+explicit publication output, separate from your final conversational message.
+
+Use one short paragraph per part by default; expand only for consequential
+complexity. Problem: the need this first delivery addresses, or the evaluator's
+observed defect for a repair, or the current phase's increment. Solution: what
+actually changed and anything still outstanding. Approach: decisions that help a
+reviewer understand the implementation; identifiers only when useful. Testing:
+why the verification addresses the risks, what actually ran and its results,
+and meaningful gaps. Distinguish earlier evidence from checks of this delivery.
+Do not turn intended checks into completed tests.
+
+Write for someone returning weeks later. Do not copy the brief, log, raw tool
+output or internal process narrative wholesale. Do not include commit hashes,
+file counts, evaluation/draft status, harness/model/session IDs, or claims about
+who ran Git. Remit records those mechanics separately. Ordinary Markdown inside
+the strings is welcome. Do not run Git to prepare this note.
+NOTE
+		fi
+		;;
 	research) printf 'Your findings as free text. They are written to `research.md` beside the brief\nexactly as returned, REPLACING what is there — on a round after the first, what\nyou return is the whole of the research this item carries.\n' ;;
 	evaluate)
 		if [ "$REVIEW" = yes ]; then

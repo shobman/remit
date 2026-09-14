@@ -28,6 +28,11 @@ Report the terminal row, shared cause and any next required action under AGENTS.
 Normal rounds need no narration. A stop at the authorised stage is a complete result.
 Keep unchanged stage, changed work and remote durability distinct.
 
+`publication note needed` leaves a completed candidate waiting for its human summary.
+Follow AGENTS.md's Human delivery notes contract: prepare the four-part note from retained
+evidence at the command's printed path and resume the same candidate within the existing
+delegation. This is publication work, not another product build or an evaluation failure.
+
 For an `asked:` stop, use `answer --conductor` only within the recorded elevation and its
 mechanical bound; state the provisional ruling and continue. Otherwise relay the question.
 An escalation needs its recorded cause and missing authority, not an automatic menu of every

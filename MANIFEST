@@ -1,19 +1,19 @@
 remit dist manifest v1
-version 0.4.7
+version 0.4.8
 100644 dba65a5df3bb3f082561af32324cc03b4d0126d5 CONTRIBUTING.md
 100644 c23c1d1c810eea733d6b21adda0c00ccffc41684 LICENSE
 100644 afd061a39ee0052f85ee91c58dee153a569e076b MANIFESTO.md
-100644 eba54a3a26a2a4071c9cc9430574bc6015d2fcea README.md
-100644 5c66d56e53502251d39babc364ceb2c252e2d491 SHIPPED
-100644 f90568270955379549eb7ee163cee9470f285188 VERSION
-100755 aee8f4be62d299f640b4f4872d3b9f74ed7d0688 bin/remit
+100644 fad7fffc92e7b2a1bdf7a519d530e5b09319b2c8 README.md
+100644 ff08ebcec17b9c4a920a94b3acddbb5456d897e6 SHIPPED
+100644 cb498ab2c89f41f36e3c6ae234c4e0e844e49e23 VERSION
+100755 19655cbb893687bcf65df3c9221bc28c8ef1b904 bin/remit
 100644 01d4bd38d5923e1dc1bff8896ee44a52e64903be bin/remit-exposure
-100755 9c7f077184c5ab8b54c3af2a1247fe0779e8693d bin/remit-invoke
+100755 5f9d37c714711097544638c9c9937a3d0569a2bc bin/remit-invoke
 100755 fbd811611eb2aeccdb391cc440e708d7cab41c77 bin/remit-snapshot
-100644 21e71ef59d715a8e34f6b4e1d40d17190597db70 docs/index.html
-100755 562775a49b0c8a6374d54fc1e00093f15d544b03 get-remit.sh
+100644 a45d64dd536816edfb68cf1f6ea21e39a3ca2655 docs/index.html
+100755 2876dccd300d9402d93a03e33acee51c0b89710e get-remit.sh
 100755 b3bde92d0210f68006aabe0c6850763e624481bc install.sh
-100644 bf106f1a6d7365f6c04ff274c9f22adee4b6e5b9 install/AGENTS-remit.md
+100644 8ccad729747c8f64d53914683ddf15d485681caf install/AGENTS-remit.md
 100644 7c35c112111ef332b071ba32969452b7ce3fd84f install/codex-config.toml
 100644 58f061ba0c356a9edc03092982ef7c752c2292e8 install/hooks/claude-settings.json
 100644 36cea88b10ec46a8553e40718cb7e5fb24525a3a install/hooks/copilot-no-agent-tool.json
@@ -22,7 +22,7 @@ version 0.4.7
 100644 4250cbfc201e31b9ba8b099ae9900b69f10270c3 install/skills/remit-close/SKILL.md
 100644 f0e818d0ea10328a8c322f6dd70404da64bc8f1d install/skills/remit-exposure/SKILL.md
 100644 768a62052feb81bbe6db49d9a501234de471c0da install/skills/remit-new/SKILL.md
-100644 5365d875894760fb3ef4ff444fe2c9b7fc9492c6 install/skills/remit-resume/SKILL.md
+100644 500e10ddb0a06d23be7f947bd7ca23885386549e install/skills/remit-resume/SKILL.md
 100644 ac3170b6e33395bdd1c9511f6cc94e214016c3ac install/skills/remit-retro/SKILL.md
 100644 2640f1258c51e705d06a3ec31e5e840d95cd0fd9 install/skills/remit-review/SKILL.md
 100644 4b3b839967972b68b9c7b93f9dc85046c3a5d052 install/skills/remit-status/SKILL.md

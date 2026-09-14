@@ -571,9 +571,11 @@
 # before an external write. It checks staged paths and freezes the delivery
 # branch and base state,
 # then pushes that exact SHA without force. A new draft PR receives only the
-# candidate-bound `publication.md` or neutral mechanics. Later deliveries never
-# rewrite title/body: each receives one full-SHA marker comment, after a complete
-# marker lookup. Raw returns remain record evidence, not automatic PR prose. THE SEAM EXISTS
+# work-item title and candidate-bound `publication.md` or neutral body mechanics.
+# Later deliveries retain authored titles and bodies; legacy opaque generated
+# titles are replaced with the work-item title. Each receives one full-SHA marker
+# comment, after a complete marker lookup. Raw returns remain record evidence,
+# not automatic PR prose. THE SEAM EXISTS
 # ONCE, here; `t/unit/repro-pr-body-second-delivery.sh` asserts it.
 #
 # The build worktree is `<repo>-remit-worktrees/<slug>` — a SIBLING of the
@@ -2887,7 +2889,12 @@ resume_point() { # $1 the gate the item's stage will run
 	if [ "$_pcl" = 2 ]; then
 		escalate "cannot act: invalid publication checkpoint"
 	elif [ "$_pcl" = 0 ] && [ "$PC_NEXT" = publish ]; then
-		[ "$PC_GATE" = "$1" ] || escalate "cannot act: publication checkpoint names the wrong gate"
+		if [ "$PC_GATE" != "$1" ]; then
+			# A closing repair can itself need another accepted-gate repair.
+			# Its publication still belongs to the enclosing closing transition.
+			[ "$1" = closed ] && [ "$PC_GATE" = accepted ] && closing_revalidation_read ||
+				escalate "cannot act: publication checkpoint names the wrong gate"
+		fi
 		AT_GATE=$1
 		AT_ROUND=$PC_ROUND
 		AT_AWAITING=yes
@@ -3078,7 +3085,7 @@ EXACT_SCRATCH='' EXACT_RESULTS='' EXACT_BASELINE='' EXACT_EVIDENCE=''
 # configuration.  Do not let a caller's environment introduce that interface
 # into ordinary research, build or refinement raises.
 unset REMIT_EXACT_EVALUATION REMIT_EXACT_INPUTS REMIT_EXACT_SCRATCH \
-	REMIT_EXACT_RESULTS REMIT_EXACT_COMPLETION REMIT_EXACT_RUN_ID
+	REMIT_EXACT_RESULTS REMIT_EXACT_COMPLETION REMIT_EXACT_RUN_ID REMIT_DELIVERY_NOTE
 
 exact_candidate() { # full local commit, authoritative checkpoint first
 	publication_checkpoint_load
@@ -3203,7 +3210,7 @@ exact_prepare() { # candidate -> descriptor globals; 2 means BLOCKED
 	if [ -d "$runs" ]; then
 		for _pf in "$runs"/*; do
 			[ -f "$_pf" ] && [ ! -L "$_pf" ] || continue
-			case "${_pf##*/}" in raise-evaluate-*) continue ;; esac
+			case "${_pf##*/}" in raise-evaluate-* | delivery-note-*.json) continue ;; esac
 			exact_input_add "$_pf" "proof/${_pf##*/}" || return 2
 		done
 	fi
@@ -3559,6 +3566,13 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 		printf '%s: could not open the kept-output home at %s — this raise is told it has nowhere to keep what it runs.\n' \
 			"$ME" "$(runs_home "$_wt")" >&2
 	fi
+	# A dedicated, fresh build output; never infer public prose from a final
+	# conversational message or reuse a previous round's report.
+	_note=''
+	if [ "$_role" = build ]; then
+		rm -f "$WORK/delivery-note.json"
+		[ -z "$_runs" ] || _note=$(mktemp "$_runs/delivery-note-XXXXXX.json") || _note=''
+	fi
 	# The clock is read immediately before and after the raise: the wall clock they
 	# waited through.
 	_t0=$(secs)
@@ -3595,6 +3609,7 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 		sh "$INVOKE" "$_role" "$slug" "$_wt" $(seat_args "$_role") >"$_seam_out" 2>"$_invoke_err" </dev/null &
 	else
 		REMIT_ITEM="$item" \
+		REMIT_DELIVERY_NOTE="$_note" \
 		REMIT_RUNS="$_runs" \
 		REMIT_RUNS_NAMING="$(runs_naming)" \
 		REMIT_AUTHORITY="$_auth" \
@@ -3620,6 +3635,10 @@ invoke() { # $1 role  $2 output file  $3 worktree  [$4 must-fix file]
 	if [ "$EXACT_MODE" != yes ]; then
 		raise_log_keep "$_role" "$_wt"
 		runs_harvest "$_wt"
+	fi
+	if [ "$_role" = build ] && [ -n "$_note" ] && [ -f "$_note" ] && [ ! -L "$_note" ] &&
+		[ "$(wc -c <"$_note" | tr -d ' ')" -le 65536 ]; then
+		cp -P "$_note" "$WORK/delivery-note.json" || rm -f "$WORK/delivery-note.json"
 	fi
 	# AND THE SEEDED ARTEFACTS COME BACK OUT here, the last point every road out of a
 	# raise passes through: nothing seeded is on disk when the next `git add -A`
@@ -3813,6 +3832,7 @@ publication_checkpoint_load() {
 	PC_REPOSITORY=$(jq -r .repository "$_pc")
 	PC_BASE=$(jq -r .base "$_pc")
 	PC_FILES=$(jq -r .files "$_pc")
+	PC_NOTE=$(jq -c '.note // null' "$_pc")
 	PC_PR_NUM=$(jq -r '.pr_number // ""' "$_pc")
 	PC_PR_URL=$(jq -r '.pr_url // ""' "$_pc")
 	return 0
@@ -3824,10 +3844,10 @@ publication_checkpoint_save() { # phase next [pr number] [pr url] — no commit
 		--argjson round "$PC_ROUND" --arg next "$_pcs_next" --arg phase "$_pcs_phase" \
 		--arg authority "$PC_AUTHORITY" --arg declaration "$PC_DECLARATION" \
 		--arg branch "$PC_BRANCH" --arg push_remote "$PC_REMOTE" --arg repository "$PC_REPOSITORY" \
-		--arg base "$PC_BASE" --argjson files "$PC_FILES" --arg pr_number "$_pcs_num" --arg pr_url "$_pcs_url" \
+		--arg base "$PC_BASE" --argjson files "$PC_FILES" --argjson note "${PC_NOTE:-null}" --arg pr_number "$_pcs_num" --arg pr_url "$_pcs_url" \
 		'{schema:1,gate:$gate,candidate:$candidate,parent:$parent,round:$round,next:$next,
 		phase:$phase,authority:$authority,declaration:$declaration,branch:$branch,
-		push_remote:$push_remote,repository:$repository,base:$base,files:$files}
+		push_remote:$push_remote,repository:$repository,base:$base,files:$files,note:$note}
 		+ (if $pr_number == "" then {} else {pr_number:($pr_number|tonumber),pr_url:$pr_url} end)' \
 		>"$item/.publication.json.tmp" && mv "$item/.publication.json.tmp" "$item/.publication.json"
 }
@@ -3864,11 +3884,12 @@ delivery_destination_matches() {
 }
 
 publication_body() {
-	PUB_TITLE=''
+	PUB_TITLE=$(work_item_title)
 	_p="$item/publication.md"
 	if [ ! -f "$_p" ]; then
-		printf '# Delivery %s\n\n- Commit: `%s`\n- Files changed: %s\n- Evaluation: pending\n\n<!-- remit-delivery:%s -->\n' \
-			"$(delivery_id)" "$CANDIDATE_SHA" "$DELIVERY_FILES" "$CANDIDATE_SHA"
+		printf '%s\n' "${PC_NOTE:-null}" | publication_note_valid || return 2
+		printf '%s\n' "$PC_NOTE" | jq -r '"## Problem\n\n" + .problem + "\n\n## Solution\n\n" + .solution + "\n\n## Technical approach\n\n" + .approach + "\n\n## Testing\n\n" + .testing'
+		printf '\n<!-- remit-delivery:%s -->\n' "$CANDIDATE_SHA"
 		return 0
 	fi
 	[ "$(wc -c <"$_p" | tr -d ' ')" -le 65536 ] || return 1
@@ -3878,20 +3899,72 @@ publication_body() {
 	[ "$(sed -n '2s/^\*\*Candidate:\*\* \([0-9a-f]\{40\}\)$/\1/p' "$_p")" = "$CANDIDATE_SHA" ] || return 1
 	awk '
 		/^# / { top++; if (NR != 1) bad=1 }
-		NR > 2 && n == 0 && $0 !~ /^[[:space:]]*$/ && $0 != "## Summary" { bad=1 }
+		NR > 2 && n == 0 && $0 !~ /^[[:space:]]*$/ && $0 != "## Summary" && $0 != "## Problem" { bad=1 }
 		/^## / {
 			n++
-			want = (n == 1 ? "## Summary" : n == 2 ? "## Verification" : n == 3 ? "## Limitations" : "")
+			if (n == 1) four = ($0 == "## Problem")
+			want = four ? (n == 1 ? "## Problem" : n == 2 ? "## Solution" : n == 3 ? "## Technical approach" : n == 4 ? "## Testing" : "") : (n == 1 ? "## Summary" : n == 2 ? "## Verification" : n == 3 ? "## Limitations" : "")
 			if ($0 != want) bad=1
 		}
 		/^\*\*Candidate:\*\* / { cand++; if (NR != 2) bad=1 }
-		END { exit !(top == 1 && cand == 1 && n == 3 && !bad) }
+		END { exit !(top == 1 && cand == 1 && n == (four ? 4 : 3) && !bad) }
 	' "$_p" || return 1
-	cat "$_p"
+	# A legacy declaration's candidate binding is internal, not PR prose.
+	sed '1,2d' "$_p"
 	printf '\n<!-- remit-delivery:%s -->\n' "$CANDIDATE_SHA"
 }
 
-delivery_pr_lookup() { # worktree; complete failure is never "none"
+closing_revalidation_read() {
+	_crm="$runs/.closing-revalidate.json"
+	_crm_parent=''
+	if publication_checkpoint_load; then
+		_crm_candidate=$PC_CANDIDATE
+		[ "$PC_GATE" != accepted ] || _crm_parent=$PC_PARENT
+	else
+		_crm_candidate=$(exact_candidate 2>/dev/null) || return 1
+	fi
+	# Before publication finishes, the marker may still name the predecessor
+	# that was being revalidated when this new accepted-gate repair was built.
+	[ -f "$_crm" ] && [ ! -L "$_crm" ] &&
+		jq -e --arg candidate "$_crm_candidate" --arg parent "$_crm_parent" \
+		'.schema == 1 and (.candidate == $candidate or ($parent != "" and .candidate == $parent)) and
+		(.closing_round | type == "number" and . >= 2 and . == floor)' "$_crm" >/dev/null 2>&1 || return 1
+	CLOSING_REVALIDATE_ROUND=$(jq -r .closing_round "$_crm")
+}
+
+publication_note_valid() {
+	jq -es 'length == 1 and (.[0] | type == "object" and ([.problem,.solution,.approach,.testing] | all(.[]; type == "string" and test("\\S"))))' >/dev/null 2>&1
+}
+
+work_item_title() {
+	_wit=$(nocr "$brief" | sed -n '/^# /{s/^# *//p;q;}')
+	printf '%s\n' "${_wit:-$slug}"
+}
+
+# Only migrate our exact old generated title. A cosmetic API failure must not
+# stop a repair; a later publication/transition can retry the same comparison.
+pr_restore_work_item_title() {
+	[ -n "$PR_NUM" ] || return 0
+	_prt_old=$(cd "$root" && gh_pr pr view "$PR_NUM" --json title --jq .title 2>/dev/null) || {
+		say "warning: pull request #$PR_NUM title could not be checked."; return 0;
+	}
+	[ "$_prt_old" = "Delivery $(delivery_id)" ] || return 0
+	_prt_title=$(work_item_title)
+	_prt_repo='repos/{owner}/{repo}'
+	[ -z "$DELIVERY_REPOSITORY" ] || _prt_repo="repos/$DELIVERY_REPOSITORY"
+	if ! (cd "$root" && gh api -X PATCH "$_prt_repo/pulls/$PR_NUM" -f "title=$_prt_title") >/dev/null 2>&1; then
+		say "warning: pull request #$PR_NUM still has its legacy delivery-ID title; title update failed."
+		return 0
+	fi
+	_prt_now=$(cd "$root" && gh_pr pr view "$PR_NUM" --json title --jq .title 2>/dev/null) || _prt_now=''
+	if [ "$_prt_now" = "$_prt_title" ]; then
+		say "pull request: #$PR_NUM now uses its work-item title."
+	else
+		say "warning: pull request #$PR_NUM title update could not be verified."
+	fi
+}
+
+delivery_pr_lookup() { # worktree [any-state]; complete failure is never "none"
 	_dpl_wt=$1
 	PR_NUM='' PR_URL='' PR_DRAFT='' PR_HEAD='' PR_BASE=''
 	if ! existing=$(cd "$_dpl_wt" && gh_pr pr list --head "$DELIVERY_BRANCH" --state open --limit 2 \
@@ -3911,12 +3984,53 @@ delivery_pr_lookup() { # worktree; complete failure is never "none"
 	PR_HEAD=$(printf '%s\n' "$existing" | cut -f4)
 	PR_BASE=$(printf '%s\n' "$existing" | cut -f5)
 	case "$PR_NUM" in '' | *[!0-9]*) DELIVER_ERR="existing pull request lookup returned an invalid identity"; return 1 ;; esac
-	if [ "$PR_DRAFT" != true ]; then
+	case "$PR_DRAFT" in true | false) ;; *) DELIVER_ERR="existing pull request lookup returned an invalid draft state"; return 1 ;; esac
+	if [ "$PR_DRAFT" != true ] && [ "${2:-}" != any-state ]; then
 		DELIVER_ERR="the existing pull request is ready, not draft; refusing a new candidate"
 		return 1
 	fi
 	[ "$PR_BASE" = "$DELIVERY_BASE" ] || { DELIVER_ERR="the existing pull request targets a different base branch"; return 1; }
 	return 0
+}
+
+# Closing repairs replace an already accepted delivery. Reconcile its PR view
+# before authoring (or recovering publication), then restore ready only after
+# accepted revalidation. Unlike an amendment's best-effort pr_to_draft, these
+# transitions must succeed and be read back before work proceeds.
+closing_pr_state() { # worktree expected remote candidate true=draft|false=ready [recovered candidate]
+	_cps_wt=$1 _cps_head=$2 _cps_draft=$3
+	_cps_pr=$(recorded_pr)
+	[ -n "$_cps_pr" ] || return 0
+	delivery_branch_prepare
+	delivery_destination
+	delivery_destination_matches || { DELIVER_ERR="delivery destination changed before closing repair"; return 1; }
+	command -v gh >/dev/null 2>&1 || { DELIVER_ERR="gh is unavailable for the closing repair PR transition"; return 1; }
+	delivery_pr_lookup "$_cps_wt" any-state || return 1
+	# A push may have succeeded before its checkpoint was saved. Publication
+	# will revalidate it; only the exact checkpoint candidate is an alternative.
+	if [ -n "${4:-}" ] && [ "$PR_HEAD" = "$4" ]; then _cps_head=$4; fi
+	[ "$PR_NUM" = "$_cps_pr" ] && [ -n "$_cps_head" ] && [ "$PR_HEAD" = "$_cps_head" ] || {
+		DELIVER_ERR="closing repair pull request identity or head differs from the recorded delivery"; return 1;
+	}
+	pr_restore_work_item_title
+	[ "$PR_DRAFT" != "$_cps_draft" ] || return 0
+	chain_intact || { DELIVER_ERR="authority changed before closing repair PR transition"; return 1; }
+	set -- pr ready "$_cps_pr"
+	[ "$_cps_draft" != true ] || set -- "$@" --undo
+	if ! out=$(cd "$_cps_wt" && gh_pr "$@" 2>&1); then
+		DELIVER_ERR="closing repair PR transition failed: $(printf '%s' "$out" | tr '\n' ' ')"
+		return 1
+	fi
+	delivery_pr_lookup "$_cps_wt" any-state || return 1
+	[ "$PR_NUM" = "$_cps_pr" ] && [ "$PR_HEAD" = "$_cps_head" ] && [ "$PR_DRAFT" = "$_cps_draft" ] || {
+		DELIVER_ERR="closing repair PR transition could not be verified"; return 1;
+	}
+	_cps_view=ready
+	[ "$_cps_draft" != true ] || _cps_view=draft
+	printf -- '- pull request: #%s\n- candidate: %s\n- view: %s\n' "$_cps_pr" "$_cps_head" "$_cps_view" |
+		log_append "pull request — closing repair — $(now)"
+	commit_step "remit: $slug closing repair PR $_cps_view" ".remit/work-items/$slug"
+	say "pull request: #$_cps_pr is $_cps_view for the closing repair."
 }
 
 delivery_comments_have_marker() {
@@ -3962,6 +4076,8 @@ prepare_delivery_candidate() { # worktree
 	PC_GATE=$GATE PC_CANDIDATE=$CANDIDATE_SHA PC_PARENT=$_parent PC_ROUND=$ROUND PC_NEXT=publish PC_PHASE=candidate
 	PC_AUTHORITY=$AUTHORITY_HASH PC_DECLARATION=$(publication_digest) PC_BRANCH=$DELIVERY_BRANCH
 	PC_REMOTE=$DELIVERY_REMOTE PC_REPOSITORY=$DELIVERY_REPOSITORY PC_BASE=$DELIVERY_BASE PC_FILES=$DELIVERY_FILES
+	PC_NOTE=$(jq -cs 'if length == 1 then .[0] else null end' "$WORK/delivery-note.json" 2>/dev/null) || PC_NOTE=null
+	[ -n "$PC_NOTE" ] || PC_NOTE=null
 	publication_checkpoint_save candidate publish || { DELIVER_ERR="could not save the candidate checkpoint"; return 1; }
 	publication_checkpoint_commit "remit: $slug checkpoint candidate ${CANDIDATE_SHA}" || { DELIVER_ERR="candidate checkpoint is not durable at the record destination"; return 1; }
 	SHA=$(git -C "$_pdc_wt" rev-parse --short "$CANDIDATE_SHA")
@@ -4015,7 +4131,23 @@ publish_delivery_attempt() { # worktree; one revalidated attempt, no build
 	CANDIDATE_SHA=$PC_CANDIDATE DELIVERY_FILES=$PC_FILES ROUND=$PC_ROUND
 	SHA=$(git -C "$root" rev-parse --short "$CANDIDATE_SHA")
 	_newdecl=$(publication_digest)
-	publication_body >"$WORK/pr-publication" || { DELIVER_ERR="publication declaration is invalid or is not bound to candidate $CANDIDATE_SHA"; return 3; }
+	# Old prepared deliveries, or a build that omitted its note, can finish
+	# publication from retained evidence without a new product build.
+	_note_recovery="$runs/delivery-note-$CANDIDATE_SHA.json"
+	if [ ! -f "$item/publication.md" ] && ! printf '%s\n' "$PC_NOTE" | publication_note_valid &&
+		[ -f "$_note_recovery" ] && [ ! -L "$_note_recovery" ] &&
+		[ "$(wc -c <"$_note_recovery" | tr -d ' ')" -le 65536 ] && publication_note_valid <"$_note_recovery"; then
+		PC_NOTE=$(jq -c . "$_note_recovery")
+		publication_checkpoint_save "$PC_PHASE" publish "$PC_PR_NUM" "$PC_PR_URL" &&
+			publication_checkpoint_commit "remit: $slug retain delivery note" || { DELIVER_ERR="delivery note checkpoint is not durable"; return 3; }
+	fi
+	publication_body >"$WORK/pr-publication"
+	_pb_rc=$?
+	if [ "$_pb_rc" = 2 ]; then
+		DELIVER_ERR="Write the delivery note from the brief, findings and retained execution evidence to $_note_recovery as a JSON object with problem, solution, approach and testing strings, then resume. The candidate is retained; do not rebuild it or ask for a new product ruling."
+		return 2
+	fi
+	[ "$_pb_rc" = 0 ] || { DELIVER_ERR="publication declaration is invalid or is not bound to candidate $CANDIDATE_SHA"; return 3; }
 	if [ "$PC_DECLARATION" != "$_newdecl" ]; then
 		PC_DECLARATION=$_newdecl
 		publication_checkpoint_save "$PC_PHASE" publish "$PC_PR_NUM" "$PC_PR_URL" || { DELIVER_ERR="could not lock publication declaration"; return 3; }
@@ -4108,6 +4240,7 @@ publish_delivery_attempt() { # worktree; one revalidated attempt, no build
 	_recorded_pr=$(recorded_pr)
 	if [ -n "$_recorded_pr" ]; then
 		[ "$PR_NUM" = "$_recorded_pr" ] || { DELIVER_ERR="the recorded pull request is no longer the open draft for this branch"; return 3; }
+		pr_restore_work_item_title
 		delivery_comments_have_marker
 		_dcm=$?
 		[ "$_dcm" = 2 ] && return 3
@@ -4119,8 +4252,7 @@ publish_delivery_attempt() { # worktree; one revalidated attempt, no build
 			fi
 			delivery_comments_have_marker || { DELIVER_ERR="pull request comment write could not be verified"; return 3; }
 		fi
-		say "pull request: #$PR_NUM retained its existing title and body; the candidate has one marked public comment."
-		say "warning: existing pull request text may predate this boundary and remains publicly exposed; publication does not rewrite or recopy it."
+		say "pull request: #$PR_NUM retained its authored text; the candidate has one marked public comment."
 	elif [ -n "$PR_NUM" ]; then
 		# A create may have succeeded before its checkpoint. Only its exact marker
 		# proves ownership; otherwise this is an ambiguous external race.
@@ -4132,7 +4264,7 @@ publish_delivery_attempt() { # worktree; one revalidated attempt, no build
 		grep -qF "<!-- remit-delivery:$CANDIDATE_SHA -->" "$WORK/pr-existing-body" || { DELIVER_ERR="an unowned pull request appeared for the delivery branch"; return 3; }
 	else
 		if ! out=$(cd "$_pbc_wt" && gh_pr pr create --draft --base "$DELIVERY_BASE" --head "$DELIVERY_BRANCH" \
-			--title "${PUB_TITLE:-Delivery $(delivery_id)}" --body-file "$WORK/pr-publication" 2>&1); then
+			--title "$PUB_TITLE" --body-file "$WORK/pr-publication" 2>&1); then
 			DELIVER_ERR="candidate is pushed; pull request create failed: $(printf '%s' "$out" | tr '\n' ' ')"
 			PUBLICATION_RETRY=yes
 			return 3
@@ -4811,16 +4943,13 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 	_seen_mf=''
 	: >"$WORK/mustfix"
 	if [ "$_requested_gate" = closed ] && [ -e "$_closing_marker" ]; then
-		_cr_candidate=$(exact_candidate 2>/dev/null) || _cr_candidate=''
-		if [ -f "$_closing_marker" ] && [ ! -L "$_closing_marker" ] &&
-			jq -e --arg candidate "$_cr_candidate" \
-			'.schema == 1 and .candidate == $candidate and (.closing_round | type == "number" and . >= 2 and . == floor)' \
-			"$_closing_marker" >/dev/null 2>&1; then
+		if closing_revalidation_read; then
 			_closing_revalidate=yes
-			_closing_round=$(jq -r .closing_round "$_closing_marker")
+			_closing_round=$CLOSING_REVALIDATE_ROUND
 			GATE=accepted
 			STANDARDS_GATE=accepted
 			ROUND=1
+			[ "$_publishnow" != yes ] || ROUND=$PC_ROUND
 			_authornow=no
 		else
 			LOOP_STOP='cannot act: closing revalidation checkpoint is invalid or names another candidate'
@@ -4833,8 +4962,15 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 		if [ "$_publishnow" = yes ]; then
 			DELIVER_ERR=''
 			build_worktree || { LOOP_STOP="cannot act: could not prepare the delivery worktree"; return 1; }
+			if [ "$_requested_gate" = closed ]; then
+				publication_checkpoint_load || { LOOP_STOP="cannot act: closing publication checkpoint is invalid"; return 1; }
+				_cr_head=$PC_PARENT
+				[ "$PC_PHASE" = candidate ] || _cr_head=$PC_CANDIDATE
+				closing_pr_state "$WT" "$_cr_head" true "$PC_CANDIDATE" || { LOOP_STOP="cannot act: $DELIVER_ERR"; return 1; }
+			fi
 			publish_delivery_candidate "$WT"
 			_prc=$?
+			if [ "$_prc" = 2 ]; then LOOP_STOP='publication note needed'; LOOP_STOP_NOTE=$DELIVER_ERR; return 2; fi
 			[ "$_prc" = 0 ] || { LOOP_STOP="cannot act: $DELIVER_ERR"; return 1; }
 			publication_finish_record || { LOOP_STOP="cannot act: published candidate record is not durable"; return 1; }
 			_publishnow=no
@@ -4878,6 +5014,10 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 				LOOP_STOP="cannot act: could not prepare the build worktree"
 				return 1
 			fi
+			if [ "$_requested_gate" = closed ]; then
+				_cr_head=$(exact_candidate) || { LOOP_STOP="cannot act: closing repair delivery is not recorded exactly"; return 1; }
+				closing_pr_state "$WT" "$_cr_head" true || { LOOP_STOP="cannot act: $DELIVER_ERR"; return 1; }
+			fi
 			if ! git -C "$WT" diff --cached --quiet; then
 				LOOP_STOP="cannot act: unexplained changes were staged before the build"
 				return 1
@@ -4898,6 +5038,7 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 			prepare_delivery_candidate "$WT" || { LOOP_STOP="cannot act: $DELIVER_ERR"; return 1; }
 			publish_delivery_candidate "$WT"
 			_drc=$?
+			if [ "$_drc" = 2 ]; then LOOP_STOP='publication note needed'; LOOP_STOP_NOTE=$DELIVER_ERR; return 2; fi
 			[ "$_drc" = 0 ] || { LOOP_STOP="cannot act: $DELIVER_ERR"; return 1; }
 			publication_finish_record || { LOOP_STOP="cannot act: published candidate record is not durable"; return 1; }
 			_built_this_round=yes
@@ -5213,6 +5354,8 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 					LOOP_STOP_NOTE="The accepted re-evaluation of the repaired closing candidate cited \`hold: $GATE_HOLD\`. The item remains accepted, the closing checkpoint is retained, and no closing evaluator was raised."
 					return 2
 				fi
+				_cr_head=$(exact_candidate) || { LOOP_STOP="cannot act: revalidated closing delivery is not recorded exactly"; return 1; }
+				closing_pr_state "$root" "$_cr_head" false || { LOOP_STOP="cannot act: $DELIVER_ERR"; return 1; }
 				rm -f "$_closing_marker" || { LOOP_STOP='cannot act: clear accepted revalidation before closing'; return 1; }
 				_closing_revalidate=no
 				GATE=closed
@@ -7193,6 +7336,7 @@ in the stage it is in, for the practitioner, whatever else was cited there."
 				build_worktree || escalate "cannot act: could not prepare the build worktree"
 				delivery_destination
 				delivery_destination_matches || escalate "cannot act: delivery destination changed"
+				pr_restore_work_item_title
 				out=$(cd "$WT" && gh_pr pr ready "$PR_NUM" 2>&1) ||
 					escalate "cannot act: gh pr ready — $(printf '%s' "$out" | tr '\n' ' ')"
 				say "pull request: #$PR_NUM is ready for review — a recorded passing verdict took it out of draft."
@@ -7203,10 +7347,12 @@ in the stage it is in, for the practitioner, whatever else was cited there."
 			;;
 		accepted)
 			mark_step "the move into closed"
-			# The pull request is read back from the record for the closing entry's
-			# delivery line, and for nothing else: NOTHING HERE MERGES. An item whose record
+			# The pull request is read back for its delivery line and legacy title
+			# reconciliation: NOTHING HERE MERGES. An item whose record
 			# names no pull request still closes: the gate licensed it.
 			pr_from_record
+			delivery_destination
+			if delivery_destination_matches; then pr_restore_work_item_title; fi
 			# WHAT LICENSED THIS CLOSURE is written down, because two different
 			# things can license one and they are not the same fact. Either the
 			# practitioner's own `until` reached `closed`, or the closing gate's

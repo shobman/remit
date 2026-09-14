@@ -95,6 +95,23 @@ sh "$(git rev-parse --show-toplevel)/bin/remit" <command> ...
 - When a capability or source is unavailable, say so. Never substitute a model silently or
   fill a gap with a plausible reconstruction.
 
+## Human delivery notes
+
+The PR title is the work-item name. Its opening description explains the initial delivery;
+each later repair or phase adds one chronological comment on the same PR. Each note has
+Problem, Solution, Technical approach and Testing: concise intent or observed defect,
+actual changes and outstanding issues, consequential implementation decisions, and the
+verification approach, performed checks/results and meaningful gaps. Do not repeat the
+whole original problem in every repair. Do not copy raw returns, process disclaimers,
+session/model identifiers, commit IDs, file counts or evaluation status into these notes.
+
+The build step authors a dedicated note; the mechanism retains and publishes it. If the
+command stops at `publication note needed`, complete that publication output from the
+brief, findings and retained execution evidence at the exact path it prints, then resume
+under the existing instruction. Do not rebuild completed code, invent evidence, ask for
+another product ruling, or hand-edit the publication checkpoint. If a material fact cannot
+be established, state that gap in the note; ask only for genuinely missing authority.
+
 ## Running work
 
 Raise contexts only through `bin/remit-invoke`, never a harness's own agent, task or sub-agent
