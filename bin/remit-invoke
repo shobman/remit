@@ -2066,8 +2066,17 @@ while (!(Test-Path -LiteralPath $gate)) { if ([DateTime]::UtcNow -ge $until) { e
 $raw=[IO.File]::ReadAllText($argFile,[Text.UTF8Encoding]::new($false))
 $av=$raw.Split([char]0); if ($av.Count -gt 0 -and $av[$av.Count-1] -eq '') { $av=$av[0..($av.Count-2)] }
 if ($av.Count -eq 0) { exit 125 }
-$si=[Diagnostics.ProcessStartInfo]::new(); $si.FileName=$av[0]; $si.UseShellExecute=$false; $si.WorkingDirectory=$work
-for($i=1;$i -lt $av.Count;$i++){ [void]$si.ArgumentList.Add($av[$i]) }
+# .NET's Windows argument quoting is not MSYS argv quoting. Passing the payload
+# through ArgumentList to env.exe consumes backslashes (including TOML escapes).
+# Let the same POSIX shell that normally launches env own that transition. Every
+# argument is a single-quoted literal; only the launcher path crosses .NET/MSYS.
+$launchFile=$argFile+'.sh'
+$escapeQuote="'"+[char]34+"'"+[char]34+"'"
+$quoted=foreach($arg in $av){ "'"+$arg.Replace("'",$escapeQuote)+"'" }
+[IO.File]::WriteAllText($launchFile,"#!/bin/sh`nexec "+($quoted -join ' ')+"`n",[Text.UTF8Encoding]::new($false))
+$launchShell=(Get-Command sh.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+$si=[Diagnostics.ProcessStartInfo]::new(); $si.FileName=$launchShell; $si.UseShellExecute=$false; $si.WorkingDirectory=$work
+[void]$si.ArgumentList.Add($launchFile.Replace('\','/'))
 $p=[Diagnostics.Process]::Start($si); $p.WaitForExit(); exit $p.ExitCode
 EOF
 	cat >"$RUNDIR/job-supervisor.ps1" <<'EOF'
