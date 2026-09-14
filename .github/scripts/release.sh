@@ -1,11 +1,25 @@
 #!/bin/sh
-# Runs in the public mirror after an artifact tag arrives. It never creates tags.
+# Runs in the public mirror after its artifact branch or tag arrives. Never tags.
 set -eu
 die(){ printf 'release entry: %s\n' "$1" >&2; exit 1; }
 [ "${GITHUB_REPOSITORY:-}" = shobman/remit ] || die 'not the public mirror'
-[ "${GITHUB_REF_TYPE:-}" = tag ] || die 'select a published version tag'
-tag=${GITHUB_REF_NAME:-}
+case "${GITHUB_REF_TYPE:-}" in
+tag) tag=${GITHUB_REF_NAME:-} ;;
+branch)
+    [ "${GITHUB_EVENT_NAME:-}" = push ] && [ "${GITHUB_REF_NAME:-}" = main ] || die 'select a published version tag'
+    tag=v$(git show HEAD:VERSION) || die 'artifact version is missing' ;;
+*) die 'select a published version tag' ;;
+esac
 printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || die 'invalid release tag'
+if [ "$GITHUB_REF_TYPE" = branch ]; then
+    # Branch and tag arrive in one publication. A checkout can observe the branch
+    # first; retry fetching that one tag, never create it or change the checkout.
+    for attempt in 1 2 3; do
+        git rev-parse --verify "refs/tags/$tag^{commit}" >/dev/null 2>&1 && break
+        git fetch -q --no-tags origin "refs/tags/$tag:refs/tags/$tag" && break
+        [ "$attempt" = 3 ] || sleep 1
+    done
+fi
 commit=$(git rev-parse --verify "refs/tags/$tag^{commit}") || die 'tag is absent'
 [ "$(git rev-parse HEAD)" = "$commit" ] || die 'checkout differs from the tag'
 [ "$(git show "$commit:VERSION")" = "${tag#v}" ] || die 'artifact version differs from the tag'
