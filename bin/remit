@@ -1902,16 +1902,13 @@ next_finding_no() {
 #
 # Inside the mutex A REJECTED PUSH IS RETRIED: fetch the branch, replay this
 # commit on top, push again — three pushes at most, and stopping at once when the
-# fetch brings nothing new. The replay is `reset --soft` and a fresh pathspec
-# commit, NOT `git rebase`, which needs a clean tree the next waiting run has
-# already written into. It runs only where the fetched tip contains everything
+# fetch brings nothing new. The replay is constructed in a temporary index,
+# then checked out with a two-tree merge that preserves unrelated local work.
+# It runs only where the fetched tip contains everything
 # this branch held before this commit (`merge-base --is-ancestor`).
 #
-# The replay does not update the working tree with what the fetch brought back,
-# and where that fetch changed the same paths this commit occupies, this working
-# tree's version supersedes it with nothing raised: a pathspec commit has no
-# conflict to raise. On one machine every commit on the branch came through this
-# mutex, so it cannot arise.
+# Conflicting record changes or overlapping practitioner edits refuse replay.
+# A failed push retains a coherent local commit, index and working tree.
 
 LOCKDIR="$common_dir/remit-commit.lock"
 LOCK_WAIT=${REMIT_LOCK_WAIT:-120}
@@ -2055,6 +2052,35 @@ commit_project_and_push() { # $1 message, then every path this change occupies
 	return $_cprc
 }
 
+record_replay() (
+	# Work only from committed trees. The real index may carry the practitioner's
+	# staged work, and a reset to the fetched tip would either discard our record
+	# or leave unrelated product paths staged in reverse.
+	_ri=$(mktemp -d "$common_dir/remit-replay-XXXXXX") || exit 1
+	trap 'rm -rf "$_ri"' EXIT HUP INT TERM
+	GIT_INDEX_FILE="$_ri/index" git -C "$CIN_ROOT" read-tree "$_new" &&
+		GIT_INDEX_FILE="$_ri/index" git -C "$CIN_ROOT" read-tree -i -m --aggressive "$_pre" "$_new" "$_had" || exit 1
+	# Remote working markers must not be reintroduced, nor checked out over a
+	# live marker. As in markers_untrack, only their index entries are removed.
+	GIT_INDEX_FILE="$_ri/index" git -C "$CIN_ROOT" rm -q --cached --ignore-unmatch -- "$marker_glob" || exit 1
+	_rt=$(GIT_INDEX_FILE="$_ri/index" git -C "$CIN_ROOT" write-tree) || exit 1
+	_rh=$_new
+	if [ "$_rt" != "$(git -C "$CIN_ROOT" rev-parse "$_new^{tree}")" ]; then
+		set --
+		[ "$(git -C "$CIN_ROOT" config --bool commit.gpgsign 2>/dev/null)" != true ] || set -- -S
+		_rh=$(git -C "$CIN_ROOT" commit-tree "$@" "$_rt" -p "$_new" -m "$_msg") || exit 1
+	fi
+	# Git's two-tree checkout retains staged/unstaged paths where the commits
+	# agree, and refuses an overwrite of local work where they differ.
+	git -C "$CIN_ROOT" read-tree -m -u "$_had" "$_rh" || exit 1
+	if ! git -C "$CIN_ROOT" update-ref -m "remit: replay record on fetched tip" HEAD "$_rh" "$_had"; then
+		_rr=$(git -C "$CIN_ROOT" rev-parse HEAD) &&
+			git -C "$CIN_ROOT" read-tree -m -u "$_rh" "$_rr" ||
+			printf '%s: concurrent HEAD change prevented replay checkout rollback; inspect the checkout before committing.\n' "$ME" >&2
+		exit 1
+	fi
+)
+
 # The body of the above, run with the mutex held. Called from there and nowhere
 # else, so that every path out of it releases the lock in one place.
 commit_locked() { # $1 message, then every path this change occupies
@@ -2123,23 +2149,7 @@ commit_locked() { # $1 message, then every path this change occupies
 		[ "$_new" = "$_pre" ] && break
 		git -C "$CIN_ROOT" merge-base --is-ancestor "$_pre" "$_new" 2>/dev/null || break
 		_had=$(git -C "$CIN_ROOT" rev-parse HEAD) || break
-		git -C "$CIN_ROOT" reset -q --soft "$_new" || break
-		# The reset put HEAD back on a tip that still carries whatever markers
-		# the remote holds, so the sweep is made again against THAT tip. Its
-		# earlier commit went away with the reset, and an unrepeated sweep would
-		# leave the marker in the tree while reporting the push as landed.
-		markers_untrack
-		git -C "$CIN_ROOT" add -A -- "$@" "$marker_exclude" ||
-			{ git -C "$CIN_ROOT" reset -q --soft "$_had"; break; }
-		if git -C "$CIN_ROOT" diff --cached --quiet -- "$@" "$marker_exclude" 2>/dev/null; then
-			if [ "$MARKER_SWEPT" = no ]; then
-				printf 'the remote already carries this change — nothing left to push.\n'
-				return 0
-			fi
-		else
-			git -C "$CIN_ROOT" commit -q -m "$_msg" -- "$@" "$marker_exclude" ||
-				{ git -C "$CIN_ROOT" reset -q --soft "$_had"; break; }
-		fi
+		record_replay || break
 		printf 'the push was rejected; %s had moved. Replayed this commit on top of it.\n' "$remote"
 		_pre=$_new
 		_try=$((_try + 1))

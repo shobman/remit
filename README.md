@@ -10,7 +10,7 @@ genuinely yours, and it does not nag you for it. It is three POSIX scripts and s
 there is no service to operate. Why it exists, in the practitioner's own words:
 [MANIFESTO.md](MANIFESTO.md).
 
-**Version 0.4.8.**
+**Version 0.4.9.**
 
 ## Start by talking to your agent
 
@@ -289,11 +289,11 @@ curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh -o 
 sh /tmp/get-remit.sh /path/to/your-repository
 ```
 
-To pin the bootstrap to this release, place `REMIT_REF=v0.4.8` immediately before `sh`, the
+To pin the bootstrap to this release, place `REMIT_REF=v0.4.9` immediately before `sh`, the
 last command in the pipeline, so `get-remit.sh` receives the variable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.4.8 sh -s -- /path/to/your-repository
+curl -fsSL https://raw.githubusercontent.com/shobman/remit/main/get-remit.sh | REMIT_REF=v0.4.9 sh -s -- /path/to/your-repository
 ```
 
 If you already have a remit clone, run its installer directly:
@@ -448,6 +448,11 @@ instruction and the command guards are not security isolation.
   remit writes the pull request body over REST when that call fails.
 
 ### Contributions and licence
+
+Each published version has [release notes](https://github.com/shobman/remit/releases)
+describing its changes and validation. The public repository's release workflow
+creates that entry from the artifact's [authored notes](RELEASE_NOTES.md); the
+workflow and notes stay in this repository and are not installed into your project.
 
 A repository running remit takes contributions the way remit does: the installed
 [`CONTRIBUTING.md`](CONTRIBUTING.md) states the route. remit is not a project management system:

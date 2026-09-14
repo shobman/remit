@@ -1,0 +1,27 @@
+name: Publish GitHub release
+
+on:
+  push:
+    tags: ['v[0-9]*']
+  workflow_dispatch:
+
+concurrency:
+  group: public-release-entry
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.repository == 'shobman/remit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Publish the entry for the verified artifact tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh .github/scripts/release.sh
