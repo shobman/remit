@@ -47,7 +47,8 @@
 # object ID produced outside every repository, so it does not vary with the
 # caller's current worktree object format. On MSYS, path comparisons use the
 # final native path of each existing path (or existing parent for a fresh path),
-# and directory walks additionally refuse reparse points and NTFS ADS.
+# and directory walks additionally refuse reparse points and NTFS ADS other than
+# sec.endpointdlp endpoint metadata. That metadata is ignored, never stripped.
 
 set -u
 
@@ -72,6 +73,7 @@ usage() {
 command -v git >/dev/null 2>&1 || die "git is required"
 command -v jq >/dev/null 2>&1 || die "jq is required"
 command -v cmp >/dev/null 2>&1 || die "cmp is required"
+command -v od >/dev/null 2>&1 || die "od is required"
 
 case "$(uname -s 2>/dev/null || :)" in
 MSYS* | MINGW*)
@@ -158,24 +160,64 @@ path_equal() {
 }
 
 not_link_like() { # MSYS must also reject NTFS junctions/reparse points
-	[ ! -L "$1" ] || return 1
+	[ ! -L "$1" ] || { printf 'remit-snapshot: refused symbolic link: %s\n' "$1" >&2; return 1; }
 	[ "$PATH_FAMILY" = msys ] || return 0
-	_nl_win=$(cygpath -w -- "$1") || return 2
+	_nl_win=$(cygpath -w -- "$1") || { printf 'remit-snapshot: could not convert path: %s\n' "$1" >&2; return 2; }
 	# Walk from the drive root, stopping at a reparse point BEFORE inspecting
 	# anything beneath it. An inspection error is not a successful plain path.
-	env REMIT_SNAPSHOT_PATH="$_nl_win" pwsh.exe -NoProfile -NonInteractive -Command 'try { $p=$env:REMIT_SNAPSHOT_PATH; $root=[IO.Path]::GetPathRoot($p); $cursor=$root; foreach ($part in $p.Substring($root.Length).Split([char]92)) { if ($part.Length -eq 0) { continue }; $cursor=[IO.Path]::Combine($cursor,$part); $i=Get-Item -LiteralPath $cursor -Force -ErrorAction Stop; if (($i.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 1 } }; exit 0 } catch { exit 2 }' >/dev/null 2>&1
+	env REMIT_SNAPSHOT_PATH="$_nl_win" pwsh.exe -NoProfile -NonInteractive -Command '
+$cursor=$env:REMIT_SNAPSHOT_PATH
+try {
+    $p=$env:REMIT_SNAPSHOT_PATH; $root=[IO.Path]::GetPathRoot($p); $cursor=$root
+    foreach ($part in $p.Substring($root.Length).Split([char]92)) {
+        if ($part.Length -eq 0) { continue }
+        $cursor=[IO.Path]::Combine($cursor,$part)
+        $i=Get-Item -LiteralPath $cursor -Force -ErrorAction Stop
+        if (($i.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            [Console]::Error.WriteLine("remit-snapshot: refused reparse point: {0}", $cursor); exit 1
+        }
+    }
+    exit 0
+    } catch {
+    [Console]::Error.WriteLine("remit-snapshot: could not inspect path {0}: {1}", $cursor, $_.Exception.Message); exit 2
+    }' >/dev/null
 }
 
 plain_windows_tree() { # one no-follow walk; no per-file PowerShell processes
 	[ "$PATH_FAMILY" = msys ] || return 0
-	not_link_like "$1" || return 1
-	_pwt_win=$(cygpath -w -- "$1") || return 1
+	not_link_like "$1" || return $?
+	_pwt_win=$(cygpath -w -- "$1") || { printf 'remit-snapshot: could not convert tree path: %s\n' "$1" >&2; return 2; }
 	# NTFS streams are not separate entries returned by find/Directory.Enumerate.
-	# Refuse every non-default stream, including streams attached to directories.
+	# Ignore sec.endpointdlp monitoring metadata on files and directories without
+	# reading or changing it. Other non-default streams remain unsupported.
 	# Get-Item -Stream still hits MAX_PATH on some PowerShell 7 hosts even with
 	# LongPathsEnabled=1. Use the extended native spelling for stream enumeration;
 	# retain the ordinary spelling for the no-follow attributes/directory walk.
-	env REMIT_SNAPSHOT_PATH="$_pwt_win" pwsh.exe -NoProfile -NonInteractive -Command 'try { $pending=New-Object "System.Collections.Generic.Stack[string]"; $pending.Push($env:REMIT_SNAPSHOT_PATH); while ($pending.Count -gt 0) { $p=$pending.Pop(); $a=[IO.File]::GetAttributes($p); if (($a -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 1 }; $native=if ($p.StartsWith("\\?\")) { $p } elseif ($p.StartsWith("\\")) { "\\?\UNC\"+$p.Substring(2) } else { "\\?\"+$p }; foreach ($s in @(Get-Item -LiteralPath $native -Stream * -Force -ErrorAction Stop)) { if ($s.Stream -ne ":`$DATA") { exit 1 } }; if (($a -band [IO.FileAttributes]::Directory) -ne 0) { foreach ($entry in [IO.Directory]::EnumerateFileSystemEntries($p)) { $pending.Push($entry) } } }; exit 0 } catch { Write-Error $_; exit 2 }' >/dev/null
+	env REMIT_SNAPSHOT_PATH="$_pwt_win" pwsh.exe -NoProfile -NonInteractive -Command '
+$p=$env:REMIT_SNAPSHOT_PATH; $operation="inspect attributes"
+try {
+    $pending=New-Object "System.Collections.Generic.Stack[string]"; $pending.Push($p)
+    while ($pending.Count -gt 0) {
+        $p=$pending.Pop(); $operation="inspect attributes"; $a=[IO.File]::GetAttributes($p)
+        if (($a -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            [Console]::Error.WriteLine("remit-snapshot: refused reparse point: {0}", $p); exit 1
+        }
+        $native=if ($p.StartsWith("\\?\")) { $p } elseif ($p.StartsWith("\\")) { "\\?\UNC\"+$p.Substring(2) } else { "\\?\"+$p }
+        $operation="enumerate alternate streams"
+        foreach ($s in @(Get-Item -LiteralPath $native -Stream * -Force -ErrorAction Stop)) {
+            if ($s.Stream -ne ":`$DATA" -and $s.Stream -ine "sec.endpointdlp") {
+                [Console]::Error.WriteLine("remit-snapshot: refused alternate stream {0} at {1}", $s.Stream, $p); exit 1
+            }
+        }
+        if (($a -band [IO.FileAttributes]::Directory) -ne 0) {
+            $operation="enumerate directory"
+            foreach ($entry in [IO.Directory]::EnumerateFileSystemEntries($p)) { $pending.Push($entry) }
+        }
+    }
+    exit 0
+    } catch {
+    [Console]::Error.WriteLine("remit-snapshot: could not {0} at {1}: {2}", $operation, $p, $_.Exception.Message); exit 2
+    }' >/dev/null
 }
 
 safe_rel() { # $1 must be a nonempty, ordinary relative path
@@ -265,8 +307,9 @@ existing_owned_dir() { # $1 path, $2 label: direct, physical directory
 
 fs_manifest() { # $1 root; source is special because .git is audited separately
 	_mroot=$1
-	[ -d "$_mroot" ] && [ ! -L "$_mroot" ] || return 1
-	plain_windows_tree "$_mroot" || return 1
+	[ ! -L "$_mroot" ] || { printf 'remit-snapshot: refused manifest root link: %s\n' "$_mroot" >&2; return 1; }
+	[ -d "$_mroot" ] || { printf 'remit-snapshot: manifest root is not a directory: %s\n' "$_mroot" >&2; return 2; }
+	plain_windows_tree "$_mroot" || return $?
 	(
 		cd "$_mroot" || exit 1
 		if [ "$_mroot" = "$SOURCE" ]; then
@@ -298,8 +341,9 @@ fs_manifest() { # $1 root; source is special because .git is audited separately
 }
 
 git_control_raw_manifest() { # never invokes Git: safe before trusting .git
-	[ -d "$SOURCE/.git" ] && [ ! -L "$SOURCE/.git" ] || return 1
-	plain_windows_tree "$SOURCE/.git" || return 1
+	[ ! -L "$SOURCE/.git" ] || { printf 'remit-snapshot: refused Git control root link: %s\n' "$SOURCE/.git" >&2; return 1; }
+	[ -d "$SOURCE/.git" ] || { printf 'remit-snapshot: Git control root is not a directory: %s\n' "$SOURCE/.git" >&2; return 2; }
+	plain_windows_tree "$SOURCE/.git" || return $?
 	find "$SOURCE/.git" -print | LC_ALL=C sort |
 	while IFS= read -r _gf; do
 		[ "$_gf" = "$SOURCE/.git" ] && { printf 'd\t.\n'; continue; }
@@ -337,9 +381,9 @@ excluded() { # $1 candidate path, exclusion paths are already safe
 }
 
 write_baseline() {
-	fs_manifest "$SOURCE" >"$OUT/source.manifest" || die "could not manifest snapshot source"
-	fs_manifest "$OUT/inputs" >"$OUT/inputs.manifest" || die "could not manifest snapshot inputs"
-	git_control_raw_manifest >"$OUT/git.raw.manifest" || die "could not inspect snapshot Git controls"
+	fs_manifest "$SOURCE" >"$OUT/source.manifest" || die "could not manifest snapshot source (exit $?): $SOURCE"
+	fs_manifest "$OUT/inputs" >"$OUT/inputs.manifest" || die "could not manifest snapshot inputs (exit $?): $OUT/inputs"
+	git_control_raw_manifest >"$OUT/git.raw.manifest" || die "could not inspect snapshot Git controls (exit $?): $SOURCE/.git"
 	git_semantic_manifest >"$OUT/git.manifest" || die "could not manifest snapshot Git state"
 	jq -n \
 		--arg candidate "$FULL" --arg selected_tree "$SELECTED_TREE" --arg snapshot_head "$SNAPSHOT_HEAD" \
@@ -451,11 +495,17 @@ prepare() {
 		[ -n "$_path" ] || continue
 		safe_source_rel "$_path" || die "unsupported candidate path: $_path"
 		repo_git cat-file blob "$_oid" >"$OUT/candidate.blob" || die "could not read candidate blob $_path"
-		_first=$(sed -n '1p' "$OUT/candidate.blob") || die "could not inspect candidate blob $_path"
-		if [ "$_first" = 'version https://git-lfs.github.com/spec/v1' ]; then
+		# Read only the 42-byte LFS signature and its possible CRLF terminator.
+		# Hex output is shell-safe even for NULs and an arbitrarily long first line.
+		# Keep od separate from whitespace normalisation so a read error is fatal.
+		_prefix=$(LC_ALL=C od -An -tx1 -N 44 "$OUT/candidate.blob") || die "could not inspect candidate blob $_path"
+		_prefix=$(printf '%s' "$_prefix" | tr -d '[:space:]') || die "could not normalise candidate prefix $_path"
+		_lfs_signature=76657273696f6e2068747470733a2f2f6769742d6c66732e6769746875622e636f6d2f737065632f7631
+		case "$_prefix" in "$_lfs_signature" | "${_lfs_signature}0a"* | "${_lfs_signature}0d0a")
 			rm -f "$OUT/candidate.blob" || die "could not discard unsupported LFS pointer"
 			die "candidate contains an unsupported LFS pointer: $_path"
-		fi
+			;;
+		esac
 		if excluded "$_path"; then
 			rm -f "$OUT/candidate.blob" || die "could not discard excluded blob"
 			continue
@@ -533,10 +583,10 @@ cleanup_owned() {
 	validate_owned "$@"
 	# Removal never follows a worker-created link or Windows reparse point.  An
 	# invalid tree is evidence and stays at the locator for explicit inspection.
-	plain_windows_tree "$OUT" || die "snapshot cleanup found a reparse point or could not inspect the tree; retained at $OUT"
+	plain_windows_tree "$OUT" || die "snapshot cleanup tree check failed (exit $?); retained at $OUT"
 	if [ "$PATH_FAMILY" = msys ]; then
 		_out_win=$(cygpath -w -- "$OUT") || die "cannot map owned snapshot for cleanup"
-		env REMIT_SNAPSHOT_CLEAN="$_out_win" pwsh.exe -NoProfile -NonInteractive -Command 'try { Remove-Item -LiteralPath $env:REMIT_SNAPSHOT_CLEAN -Recurse -Force -ErrorAction Stop; if (Test-Path -LiteralPath $env:REMIT_SNAPSHOT_CLEAN) { exit 2 }; exit 0 } catch { exit 2 }' >/dev/null 2>&1 || die "could not remove owned snapshot; retained at $OUT"
+		env REMIT_SNAPSHOT_CLEAN="$_out_win" pwsh.exe -NoProfile -NonInteractive -Command 'try { Remove-Item -LiteralPath $env:REMIT_SNAPSHOT_CLEAN -Recurse -Force -ErrorAction Stop; if (Test-Path -LiteralPath $env:REMIT_SNAPSHOT_CLEAN) { [Console]::Error.WriteLine("remit-snapshot: snapshot survived removal: {0}", $env:REMIT_SNAPSHOT_CLEAN); exit 2 }; exit 0 } catch { [Console]::Error.WriteLine("remit-snapshot: could not remove {0}: {1}", $env:REMIT_SNAPSHOT_CLEAN, $_.Exception.Message); exit 2 }' >/dev/null || die "could not remove owned snapshot (exit $?); retained at $OUT"
 	else
 		find -P "$OUT" -type l -print -quit 2>/dev/null | grep -q . && die "snapshot cleanup found a symbolic link; retained at $OUT"
 		rm -rf -- "$OUT" || die "could not remove owned snapshot; retained at $OUT"
@@ -550,7 +600,7 @@ validate_results() {
 	OUT=$2
 	existing_owned_dir "$OUT" --out
 	[ -d "$OUT/results" ] && [ ! -L "$OUT/results" ] || invalid "results root is absent or replaced"
-	plain_windows_tree "$OUT/results" || invalid "results contain a reparse point or could not be inspected"
+	plain_windows_tree "$OUT/results" || invalid "results tree check failed (exit $?): $OUT/results"
 	# Default find traversal does not follow POSIX links.  Any link, device or
 	# other non-file node invalidates harvest before a byte is copied.
 	find "$OUT/results" ! -type d ! -type f -print -quit 2>/dev/null | grep -q . && invalid "results contain a link or unsupported node"

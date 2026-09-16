@@ -3143,7 +3143,7 @@ exact_prepare_evidence() { # candidate; preserve why setup failed even after saf
 	_epe_candidate=$1
 	EXACT_EVIDENCE="$runs/evaluations/$EXACT_RUN_ID"
 	ensure_dir "$runs/evaluations" && mkdir "$EXACT_EVIDENCE" || return 1
-	for _epe in "$WORK/exact-inputs.json" "$WORK/exact-exclude.json" "$WORK/exact-prepare.err"; do
+	for _epe in "$WORK/exact-inputs.json" "$WORK/exact-exclude.json" "$WORK/exact-prepare.err" "$WORK/exact-prepare.exit"; do
 		[ -f "$_epe" ] && [ ! -L "$_epe" ] && cp -P "$_epe" "$EXACT_EVIDENCE/${_epe##*/}" || :
 	done
 	printf '%s\n' prepare-failed >"$EXACT_EVIDENCE/outcome"
@@ -3151,13 +3151,38 @@ exact_prepare_evidence() { # candidate; preserve why setup failed even after saf
 		'{schema:1,run_id:$run_id,candidate:$candidate,state:"prepare-failed"}' >"$EXACT_EVIDENCE/prepare.json"
 }
 
+exact_prepare_operation() { # helper operation, candidate; durable attempt before execution
+	_epo_operation=$1 _epo_candidate=$2
+	case "$_epo_operation" in cleanup | validate-owned) ;; *) return 2 ;; esac
+	EXACT_OPERATION_EVIDENCE=''
+	# Only coordinator-owned record locations are written. Every retry gets a
+	# fresh directory, so a later successful attempt cannot erase the first error.
+	for _epo_dir in "$runs/evaluations" "$runs/evaluations/$EXACT_RUN_ID" "$runs/evaluations/$EXACT_RUN_ID/preparation-attempts"; do
+		[ ! -L "$_epo_dir" ] && ensure_dir "$_epo_dir" || return 2
+	done
+	EXACT_OPERATION_EVIDENCE=$(mktemp -d "$runs/evaluations/$EXACT_RUN_ID/preparation-attempts/attempt-XXXXXX") || return 2
+	jq -n --arg operation "$_epo_operation" --arg run "$EXACT_RUN_ID" --arg out "$EXACT_OUT" --arg candidate "$_epo_candidate" \
+		'{schema:1,state:"started",operation:$operation,run_id:$run,out:$out,candidate:$candidate}' \
+		>"$EXACT_OPERATION_EVIDENCE/started.json" || return 2
+	sh "$SNAPSHOT" "$_epo_operation" --out "$EXACT_OUT" --run-id "$EXACT_RUN_ID" \
+		>"$EXACT_OPERATION_EVIDENCE/stdout" 2>"$EXACT_OPERATION_EVIDENCE/stderr"
+	_epo_rc=$?
+	jq --argjson rc "$_epo_rc" '.state="complete" | .exit_code=$rc' \
+		"$EXACT_OPERATION_EVIDENCE/started.json" >"$EXACT_OPERATION_EVIDENCE/result.json.tmp" &&
+		mv "$EXACT_OPERATION_EVIDENCE/result.json.tmp" "$EXACT_OPERATION_EVIDENCE/result.json" || return 2
+	return "$_epo_rc"
+}
+
 exact_prepare_dispose() { # candidate; remove safely or retain an atomic locator
 	_epd_candidate=$1
 	_epd_locator="$runs/.evaluation-snapshot.json"
-	if sh "$SNAPSHOT" cleanup --out "$EXACT_OUT" --run-id "$EXACT_RUN_ID" >/dev/null 2>"$WORK/exact-cleanup.err"; then
+	exact_prepare_operation cleanup "$_epd_candidate"
+	_epd_rc=$?
+	if [ "$_epd_rc" = 0 ]; then
 		rm -f "$_epd_locator"
 		return 0
 	fi
+	say "$ME: snapshot cleanup exited $_epd_rc; retained diagnostics: ${EXACT_OPERATION_EVIDENCE:-could not create an evidence directory}"
 	_epd_tmp="$_epd_locator.retain-$$"
 	jq -n --arg run_id "$EXACT_RUN_ID" --arg out "$EXACT_OUT" --arg candidate "$_epd_candidate" --arg gate "$GATE" \
 		'{schema:1,run_id:$run_id,out:$out,candidate:$candidate,gate:$gate,state:"prepare-failed"}' >"$_epd_tmp" &&
@@ -3244,6 +3269,7 @@ exact_prepare() { # candidate -> descriptor globals; 2 means BLOCKED
 		--out "$EXACT_OUT" --run-id "$EXACT_RUN_ID" --coordinator-pid "$$" \
 		>"$WORK/exact-descriptor.json" 2>"$WORK/exact-prepare.err"
 	_ep_rc=$?
+	printf '%s\n' "$_ep_rc" >"$WORK/exact-prepare.exit"
 	if [ "$_ep_rc" != 0 ]; then
 		exact_prepare_evidence "$_candidate" || :
 		if [ -d "$EXACT_OUT" ] && [ -f "$EXACT_OUT/.remit-owner.json" ]; then
@@ -3299,12 +3325,66 @@ exact_prepare() { # candidate -> descriptor globals; 2 means BLOCKED
 	return 0
 }
 
+exact_recover_prepare_failed() { # candidate, locator; 1 ready to prepare, 3 blocked, 4 invalid
+	_erpf_candidate=$1 _erpf_locator=$2
+	jq -e --arg candidate "$_erpf_candidate" --arg gate "$GATE" '
+		type == "object" and ((keys | sort) == ["candidate","gate","out","run_id","schema","state"])
+		and .schema == 1 and .state == "prepare-failed" and .candidate == $candidate and .gate == $gate
+		and all(.run_id,.out; type == "string" and length > 0)
+	' "$_erpf_locator" >/dev/null 2>&1 || return 4
+	EXACT_RUN_ID=$(jq -r .run_id "$_erpf_locator")
+	case "$EXACT_RUN_ID" in *[!A-Za-z0-9_.-]* | '' | .* | *..) return 4 ;; esac
+	EXACT_OUT=$(jq -r .out "$_erpf_locator")
+	exact_snapshot_location_matches "$EXACT_RUN_ID" "$EXACT_OUT" || return 4
+	# A crash after proved cleanup but before locator removal is recoverable.
+	# Absence by itself is insufficient: require our completed cleanup receipt.
+	if [ ! -e "$EXACT_OUT" ] && [ ! -L "$EXACT_OUT" ]; then
+		for _erpf_result in "$runs/evaluations/$EXACT_RUN_ID/preparation-attempts"/attempt-*/result.json; do
+			[ -f "$_erpf_result" ] && [ ! -L "$_erpf_result" ] || continue
+			if jq -e --arg run "$EXACT_RUN_ID" --arg out "$EXACT_OUT" --arg candidate "$_erpf_candidate" '
+				.schema == 1 and .state == "complete" and .operation == "cleanup" and .exit_code == 0
+				and .run_id == $run and .out == $out and .candidate == $candidate
+			' "$_erpf_result" >/dev/null 2>&1; then
+				rm -f "$_erpf_locator" || return 3
+				return 1
+			fi
+		done
+		EXACT_RECOVER_STOP='the failed-preparation snapshot is missing without a completed cleanup record; its locator was retained'
+		return 4
+	fi
+	exact_prepare_operation validate-owned "$_erpf_candidate" || {
+		EXACT_RECOVER_STOP="the failed-preparation snapshot ownership could not be validated; retained diagnostics: ${EXACT_OPERATION_EVIDENCE:-unavailable}"
+		return 4
+	}
+	# Failed preparation precedes invocation. Do not let that recovery route
+	# dispose of a tree with evidence that an evaluator was actually started.
+	for _erpf_file in return invoke.err provenance completion.json; do
+		if [ -e "$EXACT_OUT/coordinator/$_erpf_file" ] || [ -L "$EXACT_OUT/coordinator/$_erpf_file" ]; then
+			EXACT_RECOVER_STOP='the failed-preparation snapshot contains evaluator invocation evidence; it was retained'
+			return 4
+		fi
+	done
+	exact_prepare_operation cleanup "$_erpf_candidate"
+	_erpf_rc=$?
+	if [ "$_erpf_rc" != 0 ]; then
+		EXACT_RECOVER_STOP="the failed-preparation snapshot could not be safely cleaned up (exit $_erpf_rc); retained diagnostics: ${EXACT_OPERATION_EVIDENCE:-unavailable}"
+		return 3
+	fi
+	rm -f "$_erpf_locator" || { EXACT_RECOVER_STOP='the cleaned snapshot locator could not be removed'; return 3; }
+	EXACT_MODE=no
+	return 1
+}
+
 exact_recover() { # candidate; 0 recovered, 1 no locator, 3 blocked, 4 invalid
 	_er_candidate=$1
 	_er_locator="$runs/.evaluation-snapshot.json"
 	[ -e "$_er_locator" ] || [ -L "$_er_locator" ] || return 1
 	EXACT_RECOVER_STOP='the retained exact-evaluation locator is invalid; it was not overwritten'
 	[ -f "$_er_locator" ] && [ ! -L "$_er_locator" ] || return 4
+	if [ "$(jq -r '.state // empty' "$_er_locator" 2>/dev/null)" = prepare-failed ]; then
+		exact_recover_prepare_failed "$_er_candidate" "$_er_locator"
+		return $?
+	fi
 	jq -e --arg candidate "$_er_candidate" --arg gate "$GATE" '
 		type == "object" and ((keys | sort) == ["baseline_manifest_oid","baseline_oid","candidate","completion","descriptor_oid","gate","inputs","out","provenance","results","return","run_id","schema","scratch","source","state","stderr"])
 		and .schema == 1 and .state == "prepared" and .candidate == $candidate and .gate == $gate

@@ -1,24 +1,32 @@
-## Windows evaluations start with intact arguments
+## Snapshot preparation recovers and respects endpoint metadata
 
-Exact evaluations on Windows could fail before Codex started, reporting that
-`hooks.state` was a string instead of a map. Remit constructed the correct value,
-but the Windows Job worker passed it through .NET argument quoting to MSYS
-`env.exe`, which consumed backslashes inside quoted arguments.
+On managed Windows machines, endpoint software can attach `sec.endpointdlp`
+metadata to freshly copied files. Remit rejected that metadata during snapshot
+preparation and cleanup. When failed preparation left a snapshot behind, every
+later resume could stop at the retained failure marker without retrying.
 
-The shared worker now writes each argument as a literal in a temporary POSIX
-launcher. The shell handles the MSYS transition, preserving configuration values
-for every harness using this path. The existing Windows Job still supervises and
-reaps the process tree; hook trust and command restrictions remain in place.
+Remit now ignores this exact metadata name on files and directories without
+reading or stripping it or changing endpoint settings. Preparation and audit
+continue to check ordinary file contents, other alternate streams and reparse
+points. The same exception lets normal cleanup dispose of owned snapshots.
 
-Validation: native Windows regression checks exact arguments, environment, stdin,
-exit status and termination of a started descendant. The v0.4.10 negative control
-fails on corrupted arguments. A native Codex 0.154.0 probe through the full exact
-evaluation path reproduces the reported startup error on v0.4.10 and succeeds
-with this change. It uses a local synthetic provider and an explicit read-only
-sandbox: it proves startup and cleanup, not a product verdict or workspace-write
-sandbox execution. The full Linux unit suite gates publication; the full Windows
-tier and other native harnesses were not rerun for this transport correction.
+Resume now recognizes failed preparation, checks the candidate, gate, location
+and snapshot ownership, and retries cleanup before preparing the same delivery
+again. It preserves the original failure and each cleanup attempt's diagnostics.
+Foreign snapshots and snapshots showing evaluator invocation are retained.
+Continuing cleanup failure reports its cause instead of silently trapping the
+item behind an invalid marker. Snapshot errors identify the path, stream or
+inspection operation, and binary files no longer flood preparation logs with
+ignored-NUL warnings.
 
-After upgrading, the blocked evaluation can be retried through Remit's normal
-resume command. No Codex downgrade or shared configuration edit is required for
-this startup defect.
+Validation: the full Linux unit tier gates publication. Focused native Windows
+tests passed 48 metadata assertions, 40 preparation-recovery assertions and 10
+long-path assertions. They cover metadata attached before preparation's manifest,
+later metadata changes, preserved source and metadata bytes, detection of actual
+source edits, and owned cleanup. Endpoint metadata is synthetic in these tests;
+Zenith's live endpoint agent and delivery gates have not been exercised. The full
+Windows tier and live model evaluations were not rerun.
+
+After upgrading, retry affected items with the normal `remit resume <item>`
+command. No manual deletion of valid owned failed-preparation remnants or change
+to endpoint monitoring is needed for the reported metadata failure.
