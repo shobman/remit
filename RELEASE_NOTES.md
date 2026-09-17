@@ -1,32 +1,33 @@
-## Snapshot preparation recovers and respects endpoint metadata
+## Completed evaluations no longer wedge while saving evidence
 
-On managed Windows machines, endpoint software can attach `sec.endpointdlp`
-metadata to freshly copied files. Remit rejected that metadata during snapshot
-preparation and cleanup. When failed preparation left a snapshot behind, every
-later resume could stop at the retained failure marker without retrying.
+An evaluation that wrote a result directly under `results/` could finish, then
+fail while Remit saved its evidence. Remit created `results`, tried to create
+`results/.` again, and stopped with "File exists". An invalid snapshot audit then
+left a prepared locator that every resume revisited without completing recovery.
 
-Remit now ignores this exact metadata name on files and directories without
-reading or stripping it or changing endpoint settings. Preparation and audit
-continue to check ordinary file contents, other alternate streams and reparse
-points. The same exception lets normal cleanup dispose of owned snapshots.
+Remit now creates the results destination before copying either top-level or
+nested files. The existing recovery path can finalize a retained invalid attempt
+and safely clean up its owned snapshot. Each finalization attempt keeps its stderr,
+exit status and failed operation outside temporary coordinator files. Audit errors
+now identify the actual rejection; Windows diagnostic diffs preserve line endings
+and explicitly mark truncation.
 
-Resume now recognizes failed preparation, checks the candidate, gate, location
-and snapshot ownership, and retries cleanup before preparing the same delivery
-again. It preserves the original failure and each cleanup attempt's diagnostics.
-Foreign snapshots and snapshots showing evaluator invocation are retained.
-Continuing cleanup failure reports its cause instead of silently trapping the
-item behind an invalid marker. Snapshot errors identify the path, stream or
-inspection operation, and binary files no longer flood preparation logs with
-ignored-NUL warnings.
+New disposable snapshot repositories disable automatic Git maintenance and
+object packing before recording their baseline. This prevents Git housekeeping
+from changing the pinned internal files during normal inspection. Host Git
+settings are untouched, and source changes, altered Git controls and explicit
+packing remain detectable. Maintenance is a reproduced failure mechanism; the
+exact command that changed Zenith's original snapshot was not established.
 
-Validation: the full Linux unit tier gates publication. Focused native Windows
-tests passed 48 metadata assertions, 40 preparation-recovery assertions and 10
-long-path assertions. They cover metadata attached before preparation's manifest,
-later metadata changes, preserved source and metadata bytes, detection of actual
-source edits, and owned cleanup. Endpoint metadata is synthetic in these tests;
-Zenith's live endpoint agent and delivery gates have not been exercised. The full
-Windows tier and live model evaluations were not rerun.
+Validation: focused Windows and Linux checks cover clean and invalid evidence
+with top-level and nested results, interrupted recovery, copy-error diagnostics,
+Windows line endings and bounded diffs. A real Git maintenance trigger stays clean
+with the new setting; an explicitly enabled control packs objects and fails audit.
+Coordinator tests recreate the old wedge, recover without another evaluator, and
+then retry the same delivery without rebuilding. Full Linux tests gate release;
+the full Windows tier and live model evaluations were not run.
 
-After upgrading, retry affected items with the normal `remit resume <item>`
-command. No manual deletion of valid owned failed-preparation remnants or change
-to endpoint monitoring is needed for the reported metadata failure.
+For an already-retained invalid evaluation, the first `remit resume <item>` can
+finish saving the rejected attempt and remove its locator while still reporting
+that old evaluation as invalid. A subsequent resume starts a fresh evaluation of
+the same delivery. Do not delete evidence or alter snapshot metadata manually.

@@ -3462,6 +3462,7 @@ exact_recover() { # candidate; 0 recovered, 1 no locator, 3 blocked, 4 invalid
 		return 3
 	fi
 	if [ "$_er_audit" = 4 ]; then
+		EXACT_RECOVER_STOP="$(sed -n '1p' "$WORK/exact-audit.err")"
 		exact_retry_write || { EXACT_RECOVER_STOP='the invalid recovered evaluation retry could not be retained'; return 3; }
 		if [ "$_er_harvest" != 0 ]; then
 			EXACT_RECOVER_STOP='the invalid recovered evaluation evidence could not be finalized; the owned snapshot was retained'
@@ -3500,11 +3501,12 @@ exact_audit_summary() { # retain bounded current manifests and their baseline di
 		git) _eas_current=git.current ;;
 		esac
 		[ -f "$_eas_dir/$_eas_current" ] && [ ! -L "$_eas_dir/$_eas_current" ] || continue
-		jq -j --arg key "$_eas_name" '.[$key]' "$EXACT_OUT/audit-baseline.json" >"$WORK/exact-$_eas_name.expected" 2>/dev/null || continue
+		# Native Windows jq must not turn the stored LF bytes into CRLF.
+		jq -b -j --arg key "$_eas_name" '.[$key]' "$EXACT_OUT/audit-baseline.json" >"$WORK/exact-$_eas_name.expected" 2>/dev/null || continue
 		{
 			printf '%s\n' "--- baseline/$_eas_name" "+++ current/$_eas_name"
 			diff -u "$WORK/exact-$_eas_name.expected" "$_eas_dir/$_eas_current" 2>/dev/null | sed -n '3,$p' || :
-		} | awk 'NR <= 200 { print substr($0,1,1000) }' >>"$WORK/exact-audit-diff.txt"
+		} | awk 'NR <= 200 { print substr($0,1,1000) } END { if (NR > 200) print "[diff truncated after 200 lines]" }' >>"$WORK/exact-audit-diff.txt"
 	done
 }
 
@@ -3531,8 +3533,24 @@ exact_evidence_valid() { # evidence directory, expected outcome
 	done <"$_eev_dir/evidence.manifest"
 }
 
-exact_harvest() { # outcome label; bounded, regular, no-follow, atomic evidence
+exact_harvest() { # preserve each finalization failure outside transient WORK
+	ensure_dir "$runs/evaluations" || return 1
+	EXACT_FINALIZE_LOG=$(mktemp "$runs/evaluations/.finalize-$EXACT_RUN_ID-XXXXXX") || return 1
+	_eh_stage=start
+	exact_harvest_files "$1" 2>"$EXACT_FINALIZE_LOG"
+	_eh_status=$?
+	printf 'exit=%s\noperation=%s\n' "$_eh_status" "$_eh_stage" >"$EXACT_FINALIZE_LOG.result" || return 1
+	if [ "$_eh_status" != 0 ]; then
+		cat "$EXACT_FINALIZE_LOG" >&2
+		printf 'remit: evaluation evidence finalization failed at %s (exit %s); diagnostics: %s\n' \
+			"$_eh_stage" "$_eh_status" "$EXACT_FINALIZE_LOG" >&2
+	fi
+	return "$_eh_status"
+}
+
+exact_harvest_files() { # outcome label; bounded, regular, no-follow, atomic evidence
 	_eh_state=$1
+	_eh_stage='validate existing evidence'
 	EXACT_EVIDENCE="$runs/evaluations/$EXACT_RUN_ID"
 	ensure_dir "$runs/evaluations" || return 1
 	if [ -e "$EXACT_EVIDENCE" ] || [ -L "$EXACT_EVIDENCE" ]; then
@@ -3543,6 +3561,7 @@ exact_harvest() { # outcome label; bounded, regular, no-follow, atomic evidence
 		return 4
 	fi
 	_eh_tmp="$runs/evaluations/.harvest-$EXACT_RUN_ID-$$"
+	_eh_stage='copy coordinator evidence'
 	[ ! -e "$_eh_tmp" ] && [ ! -L "$_eh_tmp" ] && mkdir "$_eh_tmp" || return 1
 	for _eh in "$WORK/exact-descriptor.json" "$EXACT_OUT/audit-baseline.json" "$WORK/exact-audit.err" "$WORK/verdict" "$WORK/invoke.err" "$WORK/prov"; do
 		[ -f "$_eh" ] && [ ! -L "$_eh" ] || continue
@@ -3556,7 +3575,9 @@ exact_harvest() { # outcome label; bounded, regular, no-follow, atomic evidence
 	printf '%s\n' "$_eh_state" >"$_eh_tmp/outcome" || return 1
 	_total=0
 	if [ -d "$EXACT_RESULTS" ] && [ ! -L "$EXACT_RESULTS" ]; then
-		sh "$SNAPSHOT" validate-results --out "$EXACT_OUT" >"$WORK/exact-results-check.out" 2>"$WORK/exact-results-check.err" || return 2
+		_eh_stage='validate results tree'
+		sh "$SNAPSHOT" validate-results --out "$EXACT_OUT" || return 2
+		_eh_stage='manifest results and check size bounds'
 		find "$EXACT_RESULTS" -type f -print | while IFS= read -r _rf; do
 			[ -f "$_rf" ] && [ ! -L "$_rf" ] || exit 2
 			_rel=${_rf#"$EXACT_RESULTS"/}
@@ -3569,6 +3590,10 @@ exact_harvest() { # outcome label; bounded, regular, no-follow, atomic evidence
 		[ "$_eh_rc" = 0 ] || return "$_eh_rc"
 		_total=$(awk -F"$TAB" '{n += $1} END {print n+0}' "$WORK/exact-results.manifest")
 		[ "$_total" -le 67108864 ] || { cp "$WORK/exact-results.manifest" "$_eh_tmp/unretained-oversize"; return 3; }
+		_eh_stage='copy results'
+		# A top-level result has dirname ".". Create results first so the
+		# recursive helper never tries mkdir results/. after making results.
+		ensure_dir "$_eh_tmp/results" || return 1
 		while IFS="$TAB" read -r _sz _hash _rel; do
 			[ -n "$_rel" ] || continue
 			ensure_dir "$_eh_tmp/results/$(dirname "$_rel")" || return 1
@@ -3576,6 +3601,7 @@ exact_harvest() { # outcome label; bounded, regular, no-follow, atomic evidence
 		done <"$WORK/exact-results.manifest"
 		cp "$WORK/exact-results.manifest" "$_eh_tmp/results.manifest" || return 1
 	fi
+	_eh_stage='finalize evidence manifest'
 	find "$_eh_tmp" -type f ! -name evidence.manifest -print | LC_ALL=C sort | while IFS= read -r _eh_file; do
 		_eh_rel=${_eh_file#"$_eh_tmp"/}
 		exact_portable_rel "$_eh_rel" || exit 2
@@ -3587,6 +3613,7 @@ exact_harvest() { # outcome label; bounded, regular, no-follow, atomic evidence
 		'{schema:1,state:"finalized",run_id:$run,candidate:$candidate,outcome:$outcome,manifest_oid:$manifest}' \
 		>"$_eh_tmp/finalized.json" || return 1
 	mv "$_eh_tmp" "$EXACT_EVIDENCE" || return 1
+	_eh_stage='validate finalized evidence'
 	exact_evidence_valid "$EXACT_EVIDENCE" "$_eh_state"
 }
 
@@ -5210,7 +5237,7 @@ run_gate() { # $1 gate stage  $2 build|none  $3 yes|no — author before the fir
 						else
 							say "$ME: invalid evaluation evidence could not be finalized; retained $EXACT_OUT"
 						fi
-						LOOP_STOP='invalid exact evaluation: candidate or selected inputs changed'
+						LOOP_STOP="invalid exact evaluation: $(sed -n '1p' "$WORK/exact-audit.err")"
 						return 1
 					elif [ "$_arc" != 0 ]; then
 						_exact_block='the exact evaluation audit was unavailable'

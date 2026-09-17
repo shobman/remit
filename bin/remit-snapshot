@@ -525,6 +525,10 @@ prepare() {
 	# add`, so an in-tree .gitattributes filter cannot alter snapshot identity.
 	SOURCE="$OUT/source"
 	snapshot_git init --quiet --object-format="$FORMAT" --template="$OUT/template" || die "could not initialise independent snapshot Git"
+	# This short-lived inspection repository must not repack itself after its
+	# physical Git controls have been pinned. Never change the host repository.
+	snapshot_git config gc.auto 0 || die "could not disable snapshot auto-gc"
+	snapshot_git config maintenance.auto false || die "could not disable snapshot auto-maintenance"
 	while IFS="$TAB" read -r _mode _oid _path; do
 		[ -n "$_path" ] || continue
 		_new_oid=$(snapshot_git hash-object -w --stdin <"$OUT/source/$_path") || die "could not import snapshot blob $_path"
