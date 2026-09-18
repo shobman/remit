@@ -551,6 +551,9 @@ prepare() {
 		cp -P "$_in_source" "$OUT/inputs/$_in_path" || die "could not copy input $_in_path"
 	done <"$OUT/inputs.tsv"
 
+	# Even a no-remote fetch creates this empty bookkeeping file. Pin it now,
+	# while continuing to detect changed contents, removal or replacement.
+	: >"$SOURCE/.git/FETCH_HEAD" || die "could not initialise snapshot FETCH_HEAD"
 	write_baseline
 	jq -n --arg out "$OUT" --arg source "$OUT/source" --arg inputs "$OUT/inputs" \
 		--arg scratch "$OUT/scratch" --arg results "$OUT/results" --arg candidate "$FULL" \
