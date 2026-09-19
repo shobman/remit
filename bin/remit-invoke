@@ -395,16 +395,13 @@
 #     leading assignment; so this holds against the raise's own
 #     `--allowedTools` and against the practitioner's global settings,
 #     `defaultMode: auto` included, and needs no file anywhere. THE SECOND
-#     LAYER: `claude_write_containment` below writes `.claude/settings.local.
-#     json` (the same deny rules and a `PreToolUse` registration) and
-#     `.claude/remit-no-agent-tool.sh` beside it into the worktree before the
-#     raise and removes them after; Claude Code applies an untracked local
-#     settings file in `-p` with no trust step, and `PreToolUse` hooks fire in
-#     `-p` before any permission-mode check. IT NEVER OVERWRITES a
-#     `.claude/settings.local.json` already in the tree; then the flag is the
-#     agent-tool guard. The mandatory command hook is supplied separately by
-#     --settings even when that local file exists. Both agent-tool layers match
-#     NAMES: a build that renames its agent tool walks past both.
+#     LAYER: --settings carries the same deny rules and the agent-tool and
+#     command hooks for this invocation only. Hook scripts live in RUNDIR,
+#     beside the transcript, never in the worktree's .claude directory. Project
+#     settings belong to every session using that checkout: even a temporary
+#     file there leaks worker restrictions into the practitioner's session and
+#     races with other workers. Both agent-tool layers match NAMES: a build
+#     that renames its agent tool walks past both.
 #
 # WHETHER A RUN CAN SAY WHAT IT CONSULTED — the `consulted:` provenance key —
 # is a per-harness fact:
@@ -2561,16 +2558,15 @@ run_model=''
 model_channel=''
 
 # ==============================================================================
-# claude's containment, written per raise
+# claude's containment, scoped to the invocation
 # ==============================================================================
 #
 # WHY it is written per raise is THE ENVIRONMENT's `claude` entry above. THE
 # FLAG IS THE MECHANISM and it is unconditional — `CLAUDE_DENY_TOOLS` goes into
-# every claude raise's argv. This function adds the hook arm, BEST EFFORT: a
-# tree it cannot write into refuses nothing. What applied is on the
-# `containment:` provenance line.
+# every claude raise's argv. The same denies and the hook registrations are
+# supplied through --settings. Neither layer writes project configuration.
 # The docker verbs that drop data, denied in both shells. One list, comma
-# separated, read into the flag below and into the per-raise settings file, so
+# separated, read into the flag below and into the invocation settings, so
 # the two layers cannot come apart.
 CLAUDE_DENY_DOCKER='docker compose down,docker-compose down,docker compose rm,docker-compose rm,docker rm,docker volume rm,docker volume prune,docker container prune,docker system prune'
 CLAUDE_DENY_TOOLS='Agent,Task,AgentTool'
@@ -2583,37 +2579,14 @@ for _cdv in $CLAUDE_DENY_DOCKER; do
 	CLAUDE_DENY_TOOLS="$CLAUDE_DENY_TOOLS,Bash($_cdv *),PowerShell($_cdv *)"
 done
 IFS=$_cdifs
-# The list as a JSON array, for the settings file.
+# The list as a JSON array, for the invocation settings.
 CLAUDE_DENY_JSON=$(printf '%s\n' "$CLAUDE_DENY_TOOLS" | tr ',' '\n' | awk 'NF { if (n++) printf ", "; printf "\"%s\"", $0 }')
-CLAUDE_SETTINGS_MADE=no
-CLAUDE_DIR_MADE=no
-CLAUDE_HOOK_MADE=no
 CLAUDE_CONTAINMENT=''
 
-claude_write_containment() { # $1 the context's tree — best effort, always 0
-	_ccdir="$1/.claude"
-	_ccset="$_ccdir/settings.local.json"
-	_cchook="$_ccdir/remit-no-agent-tool.sh"
-	if [ -e "$_ccset" ]; then
-		CLAUDE_CONTAINMENT="--disallowedTools $CLAUDE_DENY_TOOLS; the worktree already carried .claude/settings.local.json and this raise did not touch it"
-		return 0
-	fi
-	if [ ! -d "$_ccdir" ]; then
-		mkdir -p "$_ccdir" 2>/dev/null || {
-			CLAUDE_CONTAINMENT="--disallowedTools $CLAUDE_DENY_TOOLS; the per-raise settings file could not be written (no .claude/ could be made in the worktree)"
-			return 0
-		}
-		CLAUDE_DIR_MADE=yes
-	fi
-	# The guard, written beside its registration so that neither depends on a file
-	# an installer put somewhere this raise cannot see. The rule it enforces is the
-	# shipped hook's rule and is stated there; this is a second COPY of an
-	# enforcement, never a second statement of the law.
-	if ! cat >"$_cchook" <<'EOF'
+claude_write_agent_guard() { # $1 private run file, never a project settings path
+	cat >"$1" <<'EOF'
 #!/bin/sh
-# remit's agent-tool guard, written into this worktree by `bin/remit-invoke` for
-# the duration of ONE raise and removed after it. Why it is written here rather
-# than installed is in that script's header, at THE ENVIRONMENT's `claude` entry.
+# Remit's agent-tool guard, registered for one invocation through --settings.
 payload=$(cat)
 if [ -z "$payload" ]; then
 	printf 'remit: this hook could not read the tool call to check it, and it does not pass what it cannot read.\n' >&2
@@ -2626,54 +2599,7 @@ if printf '%s\n' "$payload" |
 fi
 exit 0
 EOF
-	then
-		CLAUDE_HOOK_MADE=yes
-		claude_remove_containment "$1"
-		CLAUDE_CONTAINMENT="--disallowedTools $CLAUDE_DENY_TOOLS; the per-raise guard script could not be written into the worktree"
-		return 0
-	fi
-	CLAUDE_HOOK_MADE=yes
-	# `permissions.deny` says the same thing as the flag, in the file, so the two
-	# layers cannot come apart; the hook is the arm that fires on a tool this
-	# script has not heard of yet under one of these names.
-	if ! cat >"$_ccset" <<EOF
-{
-  "permissions": {
-    "deny": [$CLAUDE_DENY_JSON]
-  },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Task|Agent|AgentTool",
-        "hooks": [
-          { "type": "command", "command": "sh .claude/remit-no-agent-tool.sh" }
-        ]
-      }
-    ]
-  }
-}
-EOF
-	then
-		CLAUDE_SETTINGS_MADE=yes
-		claude_remove_containment "$1"
-		CLAUDE_CONTAINMENT="--disallowedTools $CLAUDE_DENY_TOOLS; the per-raise settings file could not be written into the worktree"
-		return 0
-	fi
-	CLAUDE_SETTINGS_MADE=yes
-	CLAUDE_CONTAINMENT="--disallowedTools $CLAUDE_DENY_TOOLS, and .claude/settings.local.json with .claude/remit-no-agent-tool.sh written into the worktree for this raise and removed after it"
-	return 0
-} # end claude_write_containment
-
-# Removes only what was created — never a `.claude/` the repository already had.
-claude_remove_containment() { # $1 the context's tree
-	[ "$CLAUDE_SETTINGS_MADE" = yes ] && rm -f "$1/.claude/settings.local.json"
-	[ "$CLAUDE_HOOK_MADE" = yes ] && rm -f "$1/.claude/remit-no-agent-tool.sh"
-	[ "$CLAUDE_DIR_MADE" = yes ] && rmdir "$1/.claude" 2>/dev/null
-	CLAUDE_SETTINGS_MADE=no
-	CLAUDE_HOOK_MADE=no
-	CLAUDE_DIR_MADE=no
-	return 0
-} # end claude_remove_containment
+} # end claude_write_agent_guard
 
 # Reading one field out of a JSON envelope, with whichever reader exists.
 #
@@ -2834,20 +2760,20 @@ COMMAND_GUARD_COMMAND="sh -c 'exec sh \"\$(printf %s $_guard_path | jq -Rr @base
 
 case "$HARNESS" in
 claude)
-	# THE CONTAINMENT IS WRITTEN HERE, PER RAISE — THE ENVIRONMENT's `claude` entry —
-	# before the flag, so the `containment:` line records both layers together.
-	claude_write_containment "$WT"
-	for _ccf in settings.local.json remit-no-agent-tool.sh; do
-		[ -f "$WT/.claude/$_ccf" ] || continue
-		cp "$WT/.claude/$_ccf" "$RUNDIR/claude-$_ccf" 2>/dev/null || :
-	done
+	CLAUDE_AGENT_GUARD="$RUNDIR/claude-no-agent-tool.sh"
+	claude_write_agent_guard "$CLAUDE_AGENT_GUARD" || die "cannot write Claude agent-tool guard"
+	_agent_path=$(printf '%s' "$CLAUDE_AGENT_GUARD" | jq -Rrs @base64) || die "cannot encode Claude agent-tool guard path"
+	CLAUDE_AGENT_COMMAND="sh -c 'exec sh \"\$(printf %s $_agent_path | jq -Rr @base64d)\"'"
 	set -- "$@" claude -p --output-format json
-	CLAUDE_COMMAND_SETTINGS=$(jq -cn --arg command "$COMMAND_GUARD_COMMAND" '
+	CLAUDE_COMMAND_SETTINGS=$(jq -cn --arg command "$COMMAND_GUARD_COMMAND" \
+		--arg agent "$CLAUDE_AGENT_COMMAND" --argjson denied "[$CLAUDE_DENY_JSON]" '
   {autoMemoryEnabled:false,disableAllHooks:false,env:{CLAUDE_CODE_DISABLE_AUTO_MEMORY:"1"},
-   hooks:{PreToolUse:[{matcher:"Bash|PowerShell",hooks:[{type:"command",command:$command}]}]}}') || die "cannot encode Claude command guard"
+   permissions:{deny:$denied},
+   hooks:{PreToolUse:[{matcher:"Bash|PowerShell",hooks:[{type:"command",command:$command}]},
+     {matcher:"Task|Agent|AgentTool",hooks:[{type:"command",command:$agent}]}]}}') || die "cannot encode Claude guards"
 	set -- "$@" --settings "$CLAUDE_COMMAND_SETTINGS"
 	printf '%s\n' "$CLAUDE_COMMAND_SETTINGS" >"$RUNDIR/claude-command-settings.json"
-	CLAUDE_CONTAINMENT="$CLAUDE_CONTAINMENT; command guard supplied by --settings on every raise"
+	CLAUDE_CONTAINMENT="--disallowedTools $CLAUDE_DENY_TOOLS; deny rules and command/agent hooks supplied by --settings for this invocation; project settings untouched"
 	[ -n "$MODEL" ] && set -- "$@" --model "$MODEL"
 	# --allowedTools pre-approves matching tools; it is not an exclusive allowlist.
 	[ -n "$ALLOWED" ] && set -- "$@" --allowedTools "$ALLOWED"
@@ -2863,11 +2789,6 @@ claude)
 	say "invoking: claude -p --output-format json${MODEL:+ --model $MODEL}${ALLOWED:+ --allowedTools $ALLOWED} --disallowedTools $CLAUDE_DENY_TOOLS < $(basename "$BRIEF")"
 	say "containment: $CLAUDE_CONTAINMENT"
 	run_harness "$BRIEF" "$@"
-	# The apparatus goes the moment the CLI is done with it — before anything is
-	# read back, and on the failing and stalled paths alike, because both come
-	# back through here. A worktree is about to be staged by the seam's caller
-	# and nothing of this raise's may be in it.
-	claude_remove_containment "$WT"
 	;;
 codex)
 	# `-` takes the briefing on stdin; -o writes the final message. The sandbox
